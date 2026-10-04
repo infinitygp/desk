@@ -43,6 +43,11 @@ bin/desk image shot ubuntu-26.04-gnome # look at a graphical installer while it 
 Shared provisioning files live in `images/_shared/`. A variant (`base = "..."` in its
 `image.toml`) inherits the base image's settings and adds provisioning scripts.
 
+## Watching
+
+- `desk view`: every run has a VNC display on 127.0.0.1 with a per-run password; the command
+  prints the SSH tunnel to use from a workstation.
+
 ## Evidence
 
 `desk down` writes `reports/<run>/report.md` (failed units, SELinux denials, coredumps, journal

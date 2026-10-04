@@ -250,6 +250,21 @@ def cmd_reboot(args) -> None:
         _emit_shot(run, png, None, "reboot")
 
 
+def cmd_view(args) -> None:
+    from .virt import vnc_port
+
+    run = runs.resolve(args.run)
+    port = vnc_port(run.dom())
+    if port is None or not run.vnc_password:
+        raise DeskError(f"run {run.id} has no VNC display (started before desk view existed?)")
+    host = os.uname().nodename
+    print(f"VNC for run {run.id}: 127.0.0.1:{port} on {host}, password {run.vnc_password}")
+    print("On your workstation (fish), keep this running:")
+    print(f"  ssh -N -L {port}:127.0.0.1:{port} {host}")
+    print(f"then open a VNC viewer on localhost:{port}, ideally in view-only mode so you do not")
+    print(f"move the pointer under the agent (e.g. `vncviewer -ViewOnly localhost:{port}`).")
+
+
 def cmd_selftest(args) -> None:
     from .selftest import run_selftest
 
@@ -419,6 +434,8 @@ def build_parser() -> argparse.ArgumentParser:
         p.set_defaults(func=fn)
 
     sub.add_parser("ssh", help="interactive shell in the guest").set_defaults(func=cmd_ssh)
+
+    sub.add_parser("view", help="how to watch a run live over VNC through an SSH tunnel").set_defaults(func=cmd_view)
 
     p = sub.add_parser("reboot", help="reboot the guest and wait for the new session")
     p.add_argument("--shot", action="store_true")

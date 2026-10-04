@@ -74,7 +74,7 @@ def reflink_copy(src: Path, dst: Path) -> None:
 
 def prepare_domain_xml(
     template: str, *, name: str, disk: Path, nvram: Path, ssh_port: int, console_log: Path,
-    keep_uuid: bool = False,
+    keep_uuid: bool = False, vnc_password: str | None = None,
 ) -> str:
     """Turn the golden image's domain XML into a per-run transient domain.
 
@@ -124,6 +124,11 @@ def prepare_domain_xml(
             devices.remove(el)
     if not any(i.get("type") == "tablet" for i in devices.findall("input")):
         ET.SubElement(devices, "input", type="tablet", bus="usb")
+    if vnc_password:
+        # For a person to watch (desk view). Loopback only, through an SSH tunnel; the password
+        # keeps other local accounts out, since the VMs run under this user.
+        g = ET.SubElement(devices, "graphics", type="vnc", port="-1", autoport="yes", passwd=vnc_password)
+        ET.SubElement(g, "listen", type="address", address="127.0.0.1")
 
     # Runtime-only details carried over from a live or saved domain.
     for el in root.findall("seclabel"):
@@ -147,3 +152,9 @@ def uuid_active(u: str) -> bool:
         return conn().lookupByUUIDString(u).isActive()
     except libvirt.libvirtError:
         return False
+
+
+def vnc_port(dom: libvirt.virDomain) -> int | None:
+    g = ET.fromstring(dom.XMLDesc(0)).find("devices/graphics[@type='vnc']")
+    port = int(g.get("port", "-1")) if g is not None else -1
+    return port if port > 0 else None

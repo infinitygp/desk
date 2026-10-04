@@ -52,6 +52,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk diff [--all]` | Files changed in the guest since the image it started from: added, changed, removed (~30 s) |
 | `desk report [--diff]` | Write the evidence report now (see below) |
 | `desk ls`, `desk down [ID] [--all] [--keep] [--diff] [--no-report]`, `desk gc` | List, destroy (writing the report first), clean up idle runs |
+| `desk view` | Tell the user how to watch the run live (VNC through an SSH tunnel) |
 
 Action commands (`click`, `type`, `key`, `scroll`, `action`, ...) accept `--shot` to screenshot
 once the screen settles. With one argument, `desk exec -- 'a && b | grep x'` goes through the
@@ -72,6 +73,10 @@ guest shell; `--root` and `--gui` apply to the whole snippet.
 - Browsers build their accessibility tree lazily: if a page's content is missing from the first
   `desk a11y`, run it again.
 - `desk type` only knows ASCII and Polish letters; for anything else use `desk set-text`.
+- In a GTK file chooser, `ctrl+l`, type the path, then click "Open": Enter may only accept the
+  path completion.
+- `pkill -f PATTERN` inside `desk exec -- '...'` also matches the shell running that snippet and
+  kills it; write the pattern as `[g]st-launch` so it does not match itself.
 - `dnf` prints its progress on stderr even with `-q`; add `>/dev/null 2>&1` and check the result with
   `rpm -q` / `rpm -V` instead of reading the transaction log.
 - Web UIs on `https://localhost` with a self-signed certificate (Cockpit) show Firefox's warning on

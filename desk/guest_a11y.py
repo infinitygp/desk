@@ -77,13 +77,22 @@ def app_children(desktop):
             yield i, app
 
 
+def toolkit_major(app) -> tuple[str, int]:
+    try:
+        name = (app.get_toolkit_name() or "").lower()
+        major = int((app.get_toolkit_version() or "0").split(".")[0])
+    except (GLib.Error, ValueError):
+        return ("", 0)
+    return (name, major)
+
+
 class Mapper:
     """Maps a top-level window's AT-SPI coordinates to screen pixels."""
 
     def __init__(self, windows: list[dict]):
         self.windows = windows
 
-    def for_toplevel(self, app_name: str, pid: int, top) -> tuple[str, int, int] | None:
+    def for_toplevel(self, app_name: str, pid: int, top, app=None) -> tuple[str, int, int] | None:
         if app_name == "gnome-shell":
             return ("screen", 0, 0)
         name = top.get_name() or ""
@@ -97,8 +106,10 @@ class Mapper:
             return None
         if win["x11"]:
             return ("screen", 0, 0)
-        # Window coordinates are relative to the visible frame (xdg window geometry), not to
-        # the buffer that also holds client-side shadows.
+        # GTK 3 reports window coordinates from the surface, client-side shadow included; GTK 4
+        # and others from the visible frame (the xdg window geometry). Measured on GNOME 50.
+        if app is not None and toolkit_major(app) == ("gtk", 3):
+            return ("window", win["buffer"][0], win["buffer"][1])
         return ("window", win["frame"][0], win["frame"][1])
 
     @staticmethod
@@ -109,6 +120,24 @@ class Mapper:
         if e is None:
             return None
         return [e[0] + ox, e[1] + oy, e[2], e[3]]
+
+
+def process_of(acc) -> int:
+    try:
+        return acc.get_process_id()
+    except GLib.Error:
+        return -1
+
+
+def embedded_base(parent, parent_base, child):
+    """`child` roots another process's tree (WebKit's web process under a Tauri or Epiphany
+    window). Its window coordinates start at its own origin, which sits where `parent`, the
+    embedding element, is on screen."""
+    pbox = Mapper.place(parent, parent_base)
+    cext = extents(child, Atspi.CoordType.WINDOW)
+    if pbox is None or cext is None:
+        return parent_base
+    return ("window", pbox[0] - cext[0], pbox[1] - cext[1])
 
 
 def describe(acc, base, pid, path, depth):
@@ -156,7 +185,7 @@ def snapshot(opts: dict) -> dict:
     nodes, tops, visited, offscreen = [], [], 0, 0
     truncated = False
 
-    def walk(acc, base, pid, path, depth, parent_name):
+    def walk(acc, base, pid, path, depth, parent_name, proc):
         nonlocal visited, truncated, offscreen
         if visited >= MAX_VISIT or len(nodes) - offscreen >= limit:
             truncated = True
@@ -191,8 +220,11 @@ def snapshot(opts: dict) -> dict:
                 ch = acc.get_child_at_index(i)
             except GLib.Error:
                 continue
-            if ch is not None:
-                walk(ch, base, pid, path + [i], child_depth, pname)
+            if ch is None:
+                continue
+            ch_proc = process_of(ch)
+            ch_base = embedded_base(acc, base, ch) if ch_proc != proc else base
+            walk(ch, ch_base, pid, path + [i], child_depth, pname, ch_proc)
 
     for _, app in app_children(desktop):
         # An application that is exiting or not answering must not break the whole listing.
@@ -214,7 +246,7 @@ def snapshot(opts: dict) -> dict:
                 continue
             if "showing" not in st and app_name != "gnome-shell":
                 continue
-            base = mapper.for_toplevel(app_name, pid, top)
+            base = mapper.for_toplevel(app_name, pid, top, app)
             if base is None:
                 continue
             is_focus = focus is not None and focus["pid"] == pid and (
@@ -226,7 +258,7 @@ def snapshot(opts: dict) -> dict:
                     continue
             tops.append({"app": app_name, "pid": pid, "title": top.get_name() or "",
                          "focus": bool(is_focus), "start": len(nodes)})
-            walk(top, base, pid, [ti], 0, "")
+            walk(top, base, pid, [ti], 0, "", process_of(top))
     return {"windows": windows, "tops": tops, "nodes": nodes, "truncated": truncated}
 
 
@@ -248,9 +280,9 @@ def find_node(spec: dict):
     for i in path:
         acc = acc.get_child_at_index(i) if acc is not None and i < acc.get_child_count() else None
     if acc is not None and acc.get_role_name() == spec["role"] and (acc.get_name() or "").strip() == spec["name"]:
-        return app, path[0], acc
+        return app, path, acc
 
-    def search(a, depth=0):
+    def search(a, at, depth=0):
         if depth > 60:
             return None
         for i in range(a.get_child_count()):
@@ -258,23 +290,38 @@ def find_node(spec: dict):
             if ch is None:
                 continue
             if ch.get_role_name() == spec["role"] and (ch.get_name() or "").strip() == spec["name"]:
-                return ch
-            hit = search(ch, depth + 1)
+                return at + [i], ch
+            hit = search(ch, at + [i], depth + 1)
             if hit is not None:
                 return hit
         return None
 
     top = app.get_child_at_index(path[0]) if path[0] < app.get_child_count() else None
-    hit = search(top) if top is not None else None
+    hit = search(top, [path[0]]) if top is not None else None
     if hit is None:
         raise LookupError(f"{spec['role']} {spec['name']!r} no longer exists")
-    return app, path[0], hit
+    return app, hit[0], hit[1]
+
+
+def base_along(app, path):
+    """Coordinate base for the node at `path`, following embedded processes on the way down."""
+    acc = app.get_child_at_index(path[0])
+    base = Mapper(shell_windows()).for_toplevel(app.get_name() or "", app.get_process_id(), acc, app)
+    if base is None:
+        return None
+    proc = process_of(acc)
+    for i in path[1:]:
+        ch = acc.get_child_at_index(i)
+        ch_proc = process_of(ch)
+        if ch_proc != proc:
+            base, proc = embedded_base(acc, base, ch), ch_proc
+        acc = ch
+    return base
 
 
 def resolve(spec: dict) -> dict:
-    app, ti, acc = find_node(spec)
-    top = app.get_child_at_index(ti)
-    base = Mapper(shell_windows()).for_toplevel(app.get_name() or "", app.get_process_id(), top)
+    app, path, acc = find_node(spec)
+    base = base_along(app, path)
     if base is None:
         raise LookupError("window position unknown")
     bbox = Mapper.place(acc, base)

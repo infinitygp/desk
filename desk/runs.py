@@ -60,6 +60,7 @@ class Run:
     created: float
     shots: int = 0
     last_used: float = 0.0
+    vnc_password: str = ""
 
     @property
     def dir(self) -> Path:
@@ -259,7 +260,7 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool) -> Run:
     domain = f"desk-{run_id}" if cold else ET.fromstring(saved_xml).findtext("name")
     now = time.time()
     run = Run(id=run_id, image=spec.name, domain=domain, ssh_port=free_port(),
-              user=spec.user, created=now, last_used=now)
+              user=spec.user, created=now, last_used=now, vnc_password=secrets.token_urlsafe(6)[:8])
     run.save()
 
     disk, nvram = rd / "disk.qcow2", rd / "VARS.qcow2"
@@ -275,7 +276,7 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool) -> Run:
         nvram.chmod(0o644)
         xml = prepare_domain_xml(template, name=run.domain, disk=disk, nvram=nvram,
                                  ssh_port=run.ssh_port, console_log=rd / "console.log",
-                                 keep_uuid=not cold)
+                                 keep_uuid=not cold, vnc_password=run.vnc_password)
         if cold:
             dom = conn().createXML(xml, 0)
         else:
