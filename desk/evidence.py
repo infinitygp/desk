@@ -77,7 +77,10 @@ fi
 # Windows: the same sections from the event log. Passed as one PowerShell command line.
 WINDOWS_SCRIPT = r"""
 $S = [DateTimeOffset]::FromUnixTimeSeconds(@S@).LocalDateTime
-function Ev($filter) { Get-WinEvent -FilterHashtable $filter -ErrorAction SilentlyContinue }
+# Up to now as well: the image's log holds entries from Windows Setup stamped hours ahead (the
+# hardware clock read in Setup's default time zone), which would otherwise show in every report.
+$E = Get-Date
+function Ev($filter) { $filter.EndTime = $E; Get-WinEvent -FilterHashtable $filter -ErrorAction SilentlyContinue }
 function Line($e) {
     '{0:s} {1} [{2}] {3}' -f $e.TimeCreated, $e.ProviderName, $e.Id, (($e.Message -split "`n")[0]).Trim()
 }

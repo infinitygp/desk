@@ -68,8 +68,9 @@ guest shell; `--root` and `--gui` apply to the whole snippet.
 - `desk a11y` lists what is visible and ends with "N more outside the visible area" when a page or
   list is scrolled; `desk find` searches those too. Long forms and dialogs at 1280x800 often hide
   their last fields and buttons that way.
-- Toolkits report positions themselves; GTK4 is sometimes off by a few pixels inside padded
-  containers. If a click by ref misses, check with a screenshot and click by pixels.
+- Toolkits report positions themselves. GTK4 places header bar buttons about 6 px up and left
+  of where they are drawn (the click still lands inside them); if a click by ref misses a small
+  element, check with a screenshot and click by pixels.
 - Browsers build their accessibility tree lazily: if a page's content is missing from the first
   `desk a11y`, run it again.
 - `desk type` only knows ASCII and Polish letters; for anything else use `desk set-text`.

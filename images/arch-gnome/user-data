@@ -20,14 +20,19 @@ runcmd:
   - [sh, -c, "echo LANG=en_US.UTF-8 > /etc/locale.conf && sed -i 's/^#en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen && locale-gen"]
   # The gnome group has no gnome-initial-setup, so the session starts on the desktop.
   # python-gobject: the a11y helper (AT-SPI through GObject introspection).
-  - [pacman, -Syu, --noconfirm, --needed, gnome, python-gobject, qemu-guest-agent, sudo]
+  # NetworkManager instead of the cloud image's systemd-networkd, as on a desktop (GNOME's
+  # network settings and indicator need it); systemd-resolved stays.
+  - [pacman, -Syu, --noconfirm, --needed, gnome, networkmanager, python-gobject, qemu-guest-agent, sudo]
+  # The cloud image also holds the boot until NTP has synced (30 s with NetworkManager); a
+  # desktop does not, and the VM's clock comes from the host anyway.
+  - [systemctl, disable, systemd-networkd, systemd-networkd-wait-online, systemd-time-wait-sync]
   - [sh, -c, "echo '%wheel ALL=(ALL:ALL) ALL' > /etc/sudoers.d/10-wheel && chmod 0440 /etc/sudoers.d/10-wheel"]
   # Log straight into the graphical session: the harness drives a real GNOME session.
   - [sh, -c, "printf '[daemon]\\nAutomaticLoginEnable=True\\nAutomaticLogin=tester\\n' > /etc/gdm/custom.conf"]
-  - [systemctl, enable, gdm, qemu-guest-agent]
+  - [systemctl, enable, gdm, qemu-guest-agent, NetworkManager]
   - [pacman, -Scc, --noconfirm]
 # Only a complete setup powers off; otherwise the build times out and is discarded, instead of
 # saving a system without a desktop.
 power_state:
   mode: poweroff
-  condition: "test -x /usr/bin/gnome-shell && systemctl is-enabled -q gdm && id tester"
+  condition: "test -x /usr/bin/gnome-shell && systemctl is-enabled -q gdm NetworkManager && id tester"

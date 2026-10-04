@@ -140,6 +140,20 @@ def embedded_base(parent, parent_base, child):
     return ("window", pbox[0] - cext[0], pbox[1] - cext[1])
 
 
+def stacked_base(parent_box, child_box, base):
+    """GTK 4 reports a widget's bounds relative to its parent widget, and a GtkStack page (an
+    accessible that is no widget) reports its child's bounds, so the child's offset counts twice
+    (12 px off in gnome-calculator's keypad, GTK 4.22). A child as large as its parent cannot
+    sit at an offset inside it: take that offset back for the child and everything below."""
+    if parent_box is None or child_box is None or parent_box[2:] != child_box[2:]:
+        return base
+    dx, dy = child_box[0] - parent_box[0], child_box[1] - parent_box[1]
+    if dx == 0 and dy == 0:
+        return base
+    kind, ox, oy = base
+    return (kind, ox - dx, oy - dy)
+
+
 def describe(acc, base, pid, path, depth):
     role = acc.get_role_name()
     st = states(acc)
@@ -185,7 +199,7 @@ def snapshot(opts: dict) -> dict:
     nodes, tops, visited, offscreen = [], [], 0, 0
     truncated = False
 
-    def walk(acc, base, pid, path, depth, parent_name, proc):
+    def walk(acc, base, pid, path, depth, parent_name, proc, gtk4, parent_box):
         nonlocal visited, truncated, offscreen
         if visited >= MAX_VISIT or len(nodes) - offscreen >= limit:
             truncated = True
@@ -195,6 +209,10 @@ def snapshot(opts: dict) -> dict:
             node, st = describe(acc, base, pid, path, depth)
         except GLib.Error:
             return
+        if gtk4:
+            fixed = stacked_base(parent_box, node["bbox"], base)
+            if fixed != base:
+                base, node["bbox"] = fixed, list(parent_box)
         # Not "showing" covers content scrolled out of view or clipped by a scrolling list,
         # which the agent can bring into view, but also background tabs and hidden windows,
         # which are pruned. Structural containers can lack "showing" while their children are
@@ -224,7 +242,7 @@ def snapshot(opts: dict) -> dict:
                 continue
             ch_proc = process_of(ch)
             ch_base = embedded_base(acc, base, ch) if ch_proc != proc else base
-            walk(ch, ch_base, pid, path + [i], child_depth, pname, ch_proc)
+            walk(ch, ch_base, pid, path + [i], child_depth, pname, ch_proc, gtk4, node["bbox"])
 
     for _, app in app_children(desktop):
         # An application that is exiting or not answering must not break the whole listing.
@@ -258,7 +276,7 @@ def snapshot(opts: dict) -> dict:
                     continue
             tops.append({"app": app_name, "pid": pid, "title": top.get_name() or "",
                          "focus": bool(is_focus), "start": len(nodes)})
-            walk(top, base, pid, [ti], 0, "", process_of(top))
+            walk(top, base, pid, [ti], 0, "", process_of(top), toolkit_major(app) == ("gtk", 4), None)
     return {"windows": windows, "tops": tops, "nodes": nodes, "truncated": truncated}
 
 
@@ -310,11 +328,19 @@ def base_along(app, path):
     if base is None:
         return None
     proc = process_of(acc)
+    gtk4 = toolkit_major(app) == ("gtk", 4)
+    box = Mapper.place(acc, base) if gtk4 else None
     for i in path[1:]:
         ch = acc.get_child_at_index(i)
         ch_proc = process_of(ch)
         if ch_proc != proc:
             base, proc = embedded_base(acc, base, ch), ch_proc
+        if gtk4:
+            ch_box = Mapper.place(ch, base)
+            fixed = stacked_base(box, ch_box, base)
+            if fixed != base:
+                base, ch_box = fixed, box
+            box = ch_box
         acc = ch
     return base
 
@@ -389,4 +415,5 @@ def main() -> None:
     json.dump(out, sys.stdout)
 
 
-main()
+if __name__ == "__main__":
+    main()
