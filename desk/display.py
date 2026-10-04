@@ -33,6 +33,10 @@ _SHIFTED = {
 }
 
 
+# Polish (programmer's) layout: AltGr (right Alt) plus the base letter.
+_ALTGR = {"ą": "a", "ć": "c", "ę": "e", "ł": "l", "ń": "n", "ó": "o", "ś": "s", "ź": "x", "ż": "z"}
+
+
 def screenshot(dom: libvirt.virDomain) -> bytes:
     stream = conn().newStream(0)
     mime = dom.screenshot(stream, 0, 0)
@@ -138,14 +142,32 @@ def _qcode(name: str) -> str:
     return KEY_ALIASES.get(n, n)
 
 
-def key(dom, combo: str, hold_ms: int = 60) -> None:
+def _key_event(code: str, down: bool) -> dict:
+    return {"type": "key", "data": {"down": down, "key": {"type": "qcode", "data": code}}}
+
+
+def chord(dom, codes: list[str], hold_ms: int = 30, gap_ms: int = 20) -> None:
+    """Press keys in order, release in reverse.
+
+    input-send-event is applied before the command returns, unlike send-key, which only
+    queues timed events; so once this returns the guest has every key and the next action
+    (a click moving focus, say) cannot overtake the typing.
+    """
+    qmp(dom, "input-send-event", events=[_key_event(c, True) for c in codes])
+    time.sleep(hold_ms / 1000)
+    qmp(dom, "input-send-event", events=[_key_event(c, False) for c in reversed(codes)])
+    time.sleep(gap_ms / 1000)
+
+
+def key(dom, combo: str) -> None:
     """Press a combo like `ctrl+alt+t`, `super`, `shift+tab` (QEMU qcode names or aliases)."""
     parts = combo.split("+") if combo != "+" else ["+"]
-    keys = [{"type": "qcode", "data": _qcode(p)} for p in parts]
-    qmp(dom, "send-key", keys=keys, **{"hold-time": hold_ms})
+    chord(dom, [_qcode(p) for p in parts], hold_ms=60, gap_ms=40)
 
 
-def type_text(dom, text: str, hold_ms: int = 25) -> None:
+def key_plan(text: str, layout: str = "us") -> list[list[str]]:
+    """qcode chords that produce `text` on the guest layout."""
+    plan = []
     for ch in text:
         if ch.isascii() and ch.isalnum():
             codes = ["shift", ch.lower()] if ch.isupper() else [ch]
@@ -153,7 +175,14 @@ def type_text(dom, text: str, hold_ms: int = 25) -> None:
             codes = [_UNSHIFTED[ch]]
         elif ch in _SHIFTED:
             codes = ["shift", _SHIFTED[ch]]
+        elif layout == "pl" and ch.lower() in _ALTGR:
+            codes = ["alt_r", *(["shift"] if ch.isupper() else []), _ALTGR[ch.lower()]]
         else:
-            raise DeskError(f"cannot type {ch!r} on the US layout; put it on the clipboard in the guest instead")
-        qmp(dom, "send-key", keys=[{"type": "qcode", "data": c} for c in codes], **{"hold-time": hold_ms})
-        time.sleep(0.01)
+            raise DeskError(f"cannot type {ch!r} on the {layout} layout; use `desk set-text` on the field instead")
+        plan.append(codes)
+    return plan
+
+
+def type_text(dom, text: str, layout: str = "us") -> None:
+    for codes in key_plan(text, layout):
+        chord(dom, codes)

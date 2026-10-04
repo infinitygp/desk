@@ -11,3 +11,7 @@ provision = "provision.sh"
 ready = "systemctl --user is-active --quiet graphical-session.target"
 # Prefix for `desk exec --agent`; see the wrapper in ks.cfg.
 agent_wrapper = ["/usr/local/libexec/desk-ga-run"]
+# Run after provision.sh so the session picks up the shell extension (Wayland cannot restart the shell in place).
+relogin = "sudo -n systemctl restart gdm"
+# Guest keyboard layout set by provision.sh; `desk type` maps characters to keys for it.
+layout = "pl"

@@ -1,6 +1,7 @@
 """In-band access to the guest: SSH for everyday work, qemu-guest-agent when there is no network."""
 
 import base64
+import json
 import shlex
 import subprocess
 import time
@@ -83,3 +84,59 @@ def agent_exec(dom, argv: list[str], timeout: float = 120) -> tuple[int, bytes, 
 def agent_sync_time(dom) -> None:
     """After restoring a saved state the guest clock lags by however long the image sat on disk."""
     agent(dom, "guest-set-time", time=time.time_ns())
+
+
+def boot_id(port: int, user: str) -> str:
+    r = ssh_run(port, user, "cat /proc/sys/kernel/random/boot_id", capture=True, timeout=15)
+    if r.returncode != 0:
+        raise DeskError("cannot read the guest boot id")
+    return r.stdout.decode().strip()
+
+
+def shutdown_inhibitors(port: int, user: str) -> list[str]:
+    r = ssh_run(port, user, "busctl --json=short call org.freedesktop.login1 /org/freedesktop/login1 "
+                "org.freedesktop.login1.Manager ListInhibitors", capture=True, timeout=15)
+    if r.returncode != 0:
+        return []
+    # a(ssssuu): what, who, why, mode, uid, pid
+    return [f"{who}: {why}" for what, who, why, mode, _uid, _pid in json.loads(r.stdout)["data"][0]
+            if mode == "block" and "shutdown" in what.split(":")]
+
+
+def reboot(port: int, user: str, ready: str, timeout: float = 300) -> tuple[float, list[str]]:
+    """Reboot and return once a new boot is ready, plus whatever was blocking shutdown.
+
+    Apps with unsaved work make gnome-session block shutdown; a user would see a dialog.
+    The harness reboots anyway and reports the inhibitors instead.
+    """
+    inhibitors = shutdown_inhibitors(port, user)
+    before = boot_id(port, user)
+    t0 = time.monotonic()
+    try:
+        r = ssh_run(port, user, "sudo -n systemctl reboot --check-inhibitors=no", capture=True, timeout=30)
+        if r.returncode not in (0, 255):  # 255: the connection dropped as the guest went down
+            raise DeskError(f"reboot refused: {r.stderr.decode(errors='replace').strip()}")
+    except subprocess.TimeoutExpired:
+        pass  # the session hung while the guest went down; the boot id check below decides
+    deadline = t0 + timeout
+    while time.monotonic() < deadline:
+        time.sleep(2)
+        try:
+            if boot_id(port, user) != before:
+                break
+        except (DeskError, subprocess.TimeoutExpired):
+            continue
+    else:
+        raise DeskError(f"guest did not come back within {timeout:.0f}s")
+    wait_ready(port, user, ready, timeout=max(deadline - time.monotonic(), 30))
+    return time.monotonic() - t0, inhibitors
+
+
+def wait_session_gone(port: int, user: str, ready: str, timeout: float = 60) -> None:
+    """After restarting the display manager, wait until the old session has actually ended."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if ssh_run(port, user, ready, capture=True, timeout=30).returncode != 0:
+            return
+        time.sleep(1)
+    raise DeskError(f"old session still running {timeout:.0f}s after relogin")

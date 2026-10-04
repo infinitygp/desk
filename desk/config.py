@@ -35,6 +35,8 @@ class ImageSpec:
     ready: str
     provision: str | None = None
     agent_wrapper: list[str] | None = None
+    relogin: str | None = None
+    layout: str = "us"
 
     @property
     def base_disk(self) -> Path:

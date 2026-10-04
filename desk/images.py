@@ -93,10 +93,19 @@ def _finalize(spec: ImageSpec, name: str) -> None:
 def provision(spec: ImageSpec, port: int) -> None:
     if not spec.provision:
         return
+    files = spec.dir / "files"
+    if files.is_dir():
+        guest.ssh_run(port, spec.user, "rm -rf /tmp/desk-provision && mkdir -p /tmp/desk-provision", capture=True)
+        if guest.scp(port, str(files), f"{spec.user}@127.0.0.1:/tmp/desk-provision/") != 0:
+            raise DeskError("copying provision files failed")
     script = (spec.dir / spec.provision).read_bytes()
     r = guest.ssh_run(port, spec.user, "sudo -n bash -s", input=script, capture=True)
     if r.returncode != 0:
         raise DeskError(f"provision script failed ({r.returncode}): {r.stderr.decode(errors='replace')}")
+    if spec.relogin:
+        guest.ssh_run(port, spec.user, spec.relogin, capture=True)
+        guest.wait_session_gone(port, spec.user, spec.ready)
+        guest.wait_ready(port, spec.user, spec.ready)
 
 
 def warm(spec: ImageSpec, force: bool = False) -> None:
@@ -141,5 +150,6 @@ def warm(spec: ImageSpec, force: bool = False) -> None:
             dom.destroy()
         raise
     disk.chmod(0o444)
-    (wd / "meta.json").write_text(json.dumps({"image": spec.name, "created": time.time()}, indent=2))
+    meta = {"image": spec.name, "created": time.time(), "base_mtime_ns": spec.base_disk.stat().st_mtime_ns}
+    (wd / "meta.json").write_text(json.dumps(meta, indent=2))
     _log(f"warm state ready: {wd}")
