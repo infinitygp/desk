@@ -110,6 +110,9 @@ Windows 11 Enterprise (evaluation) for Windows builds and installers.
   `desk exec -- 'Start-Process msiexec -ArgumentList "/i C:\Users\tester\Downloads\setup.msi /qn" -Wait'`,
   or run the installer UI with `exec --gui` and click through it. UAC prompts do not appear for
   `tester` over SSH, but do for programs started on the desktop: handle them like any dialog.
+- Background helpers started with `exec --gui` (a test tone, a mock server) get a console window
+  that covers the desktop, since Windows Terminal ignores `-WindowStyle Hidden`: start them as
+  `desk exec --gui -- conhost.exe --headless powershell.exe -NoProfile -Command "..."`.
 - Windows PowerShell 5.1 writes files in the ANSI code page by default: use
   `Set-Content -Encoding UTF8` / `Get-Content -Encoding UTF8` for text with Polish letters.
 - If `desk a11y` says a window's contents are "not available through UI Automation", a popup of

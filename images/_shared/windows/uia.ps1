@@ -29,7 +29,7 @@ function Get-Role($el) {
         # Classic Win32 dialogs (NSIS installers) come through MSAA with their controls as panes;
         # the window class still tells what they are.
         $class = [string](Cached $el $AE::ClassNameProperty)
-        if ($class -eq 'Button' -or (Cached $el $AE::IsInvokePatternAvailableProperty)) { return 'button' }
+        if ($class -eq 'Button' -or $class -eq 'CCPushButton' -or (Cached $el $AE::IsInvokePatternAvailableProperty)) { return 'button' }
         if ($class -eq 'Edit') { return 'entry' }
         if ($class -eq 'Static') { return 'label' }
     }
