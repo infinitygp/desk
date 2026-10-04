@@ -466,8 +466,8 @@ def warm(spec: ImageSpec, force: bool = False, promote_it: bool = True) -> str:
     dom = conn().createXML(xml, 0)
     try:
         if not _boot_and_wait_ssh(dom, port, spec, wd):
-            # Windows' first boot after setup has twice taken its domain down before SSH came
-            # up (cause not caught yet; see last-boot.png). The next attempt worked each time.
+            # QEMU itself may die under the guest (it segfaulted in its AHCI emulation while
+            # Windows was on a SATA disk); one more attempt is cheap.
             _log("the guest went away while booting, starting it once more")
             dom = conn().createXML(xml, 0)
             if not _boot_and_wait_ssh(dom, port, spec, wd):
