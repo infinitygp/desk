@@ -35,7 +35,8 @@ images/<name>/       image.toml, kickstart, provision.sh
 | `arch-gnome` | official cloud image, GNOME installed by cloud-init (NoCloud seed) | rolling; no Secure Boot |
 | `windows-11` | evaluation ISO + autounattend.xml on a second CD | 90-day evaluation, reinstalled by `desk maintain` |
 
-Windows specifics: no TPM (LabConfig bypass), SATA disk and e1000e NIC (inbox drivers),
+Windows specifics: no TPM (LabConfig bypass), virtio disk with the viostor driver loaded by Setup
+(QEMU 10.2's AHCI emulation crashes under Windows), e1000e NIC (inbox driver),
 OpenSSH from the Win32-OpenSSH MSI with PowerShell as the shell, virtio-win guest tools for the
 display driver and qemu-guest-agent, and an agent in the logged-in session
 (`images/_shared/windows/agent.ps1`, port forwarded like SSH) for UI Automation and starting

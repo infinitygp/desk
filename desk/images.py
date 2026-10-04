@@ -275,6 +275,9 @@ def _unattend_iso(spec: ImageSpec, work: Path) -> Path:
     shutil.copy(CACHE / spec.openssh_msi, root / "openssh.msi")
     subprocess.run(["7z", "e", "-y", f"-o{root}", str(CACHE / spec.virtio_win_iso), "virtio-win-guest-tools.exe"],
                    check=True, capture_output=True)
+    # The virtio disk driver for Setup (DriverPaths in autounattend.xml).
+    subprocess.run(["7z", "e", "-y", f"-o{root / 'drivers' / 'viostor'}", str(CACHE / spec.virtio_win_iso),
+                    "viostor/w11/amd64/*"], check=True, capture_output=True)
     iso = work / "unattend.iso"
     subprocess.run(["xorriso", "-as", "mkisofs", "-quiet", "-J", "-r", "-V", "DESKUNATTEND", "-o", str(iso),
                     str(root)], check=True)
@@ -284,10 +287,12 @@ def _unattend_iso(spec: ImageSpec, work: Path) -> Path:
 def _windows_install(spec: ImageSpec, name: str, common: list[str], work: Path, deadline: float) -> None:
     iso = _fetch_iso(spec)
     unattend = _unattend_iso(spec, work)
-    # SATA disk and e1000e use inbox drivers, so Setup needs nothing loaded. No TPM: Windows
-    # would otherwise turn on device encryption, and runs (which drop the TPM, see virt.py)
-    # would then stop at the BitLocker recovery screen.
-    args = [a.replace("bus=virtio,", "bus=sata,").replace("model=virtio", "model=e1000e") for a in common]
+    # virtio disk with the driver from the answer-file CD: QEMU 10.2's AHCI (SATA) emulation
+    # crashes when Windows restarts a port's command engine during a read (ahci_commit_buf,
+    # fixed upstream in 11.1). e1000e has an inbox driver. No TPM: Windows would otherwise turn
+    # on device encryption, and runs (which drop the TPM, see virt.py) would then stop at the
+    # BitLocker recovery screen.
+    args = [a.replace("model=virtio", "model=e1000e") for a in common]
     # Setup reboots several times, which virt-install's wait would take for the end.
     wait = args.index("--wait")
     args = [a for a in args[:wait] + args[wait + 2:] if a != "--noreboot"]
