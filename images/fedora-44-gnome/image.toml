@@ -16,3 +16,5 @@ agent_wrapper = ["/usr/local/libexec/desk-ga-run"]
 relogin = "systemctl restart gdm"
 # Guest keyboard layout set by provision.sh; `desk type` maps characters to keys for it.
 layout = "pl"
+# `desk maintain` reinstalls it this often, so tests run against current updates.
+rebuild_days = 14

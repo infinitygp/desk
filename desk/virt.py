@@ -68,6 +68,15 @@ def qemu_img_overlay(backing: Path, overlay: Path) -> None:
     )
 
 
+def backing_files(disk: Path) -> list[Path]:
+    """`disk` and every image below it; [] when it cannot be read (e.g. half deleted)."""
+    r = subprocess.run(["qemu-img", "info", "-U", "--backing-chain", "--output=json", str(disk)],
+                       capture_output=True)
+    if r.returncode != 0:
+        return []
+    return [Path(i["filename"]).resolve() for i in json.loads(r.stdout)]
+
+
 def reflink_copy(src: Path, dst: Path) -> None:
     subprocess.run(["cp", "--reflink=auto", str(src), str(dst)], check=True)
 

@@ -23,7 +23,7 @@ skill/SKILL.md       agent skill
 desk/                harness code (guest_a11y.py runs inside the guest)
 tests/               unit tests
 images/<name>/       image.toml, kickstart, provision.sh
-/var/lib/vmlab/      base/, warm/, runs/, reports/, cache/, logs/, keys/  (DESK_HOME)
+/var/lib/vmlab/      base/, warm/, runs/, reports/, maintain/, cache/, logs/, keys/  (DESK_HOME)
 ```
 
 ## Images
@@ -32,8 +32,8 @@ images/<name>/       image.toml, kickstart, provision.sh
 |---|---|---|
 | `fedora-44-gnome` | kickstart over the network | default |
 | `fedora-44-gnome-pl` | variant of `fedora-44-gnome` | Polish locale; shares the base disk, own warm state |
-| `ubuntu-26.04-gnome` | desktop ISO autoinstall (cloud-init NoCloud seed) | apt/snap timers off |
-| `windows-11` | evaluation ISO + autounattend.xml on a second CD | 90-day evaluation, rebuild when it expires |
+| `arch-gnome` | official cloud image, GNOME installed by cloud-init (NoCloud seed) | rolling; no Secure Boot |
+| `windows-11` | evaluation ISO + autounattend.xml on a second CD | 90-day evaluation, reinstalled by `desk maintain` |
 
 Windows specifics: no TPM (LabConfig bypass), SATA disk and e1000e NIC (inbox drivers),
 OpenSSH from the Win32-OpenSSH MSI with PowerShell as the shell, virtio-win guest tools for the
@@ -45,11 +45,39 @@ programs on the desktop, which SSH sessions cannot see. Commands are sent as
 ```bash
 bin/desk image build fedora-44-gnome   # unattended install, ~10 min, needs network
 bin/desk image warm fedora-44-gnome    # boot, provision, save the running desktop
-bin/desk image shot ubuntu-26.04-gnome # look at a graphical installer while it runs
+bin/desk image shot windows-11         # look at a graphical installer while it runs
+bin/desk image list                    # state, build date, last selftest, licence, problems
 ```
 
 Shared provisioning files live in `images/_shared/`. A variant (`base = "..."` in its
 `image.toml`) inherits the base image's settings and adds provisioning scripts.
+
+## Builds and maintenance
+
+Every install and every warm state is a build of its own: `base/<image>.<version>/` and
+`warm/<image>.<version>/`, with `base/<image>` and `warm/<image>` symlinks to the current ones.
+Runs pin the builds they start from, so a new build never disturbs a running or kept run;
+`desk gc` deletes builds nothing uses any more.
+
+`desk maintain` reinstalls an image family (a base image and its variants) when the base is
+`rebuild_days` old (Fedora and Arch: 14), when its install definition changed or when its licence
+(`expiry`, Windows evaluation) has less than 14 days left, and re-warms images whose definition
+changed. New builds are selftested next to the current ones and become current only when every
+member of the family passes; otherwise the current builds stay, and `desk up` and
+`desk image list` show the failure. Reports and screenshots of failures go to
+`/var/lib/vmlab/maintain/<date>/` (an install that hangs: `logs/build-<image>-stuck.png`).
+An install may take 3 hours before it counts as stuck; the whole run 12 hours.
+
+Builds of images removed from `images/` are not deleted automatically.
+
+```bash
+bin/desk maintain --dry-run         # what is due
+bin/desk maintain --install-timer   # weekly, Monday 03:00 (systemd user timer, needs lingering)
+systemctl --user list-timers desk-maintain.timer
+journalctl --user -u desk-maintain  # output of the last runs
+```
+
+`desk up` warns three weeks before a licence runs out and refuses an expired image.
 
 ## Watching
 

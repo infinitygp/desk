@@ -33,7 +33,8 @@ class ImageSpec:
     user: str
     ready: str
     # "kickstart": network install from `location` with `kickstart`;
-    # "autoinstall": boot `kernel`/`initrd` from `iso`, cloud-init NoCloud seed from `user_data`.
+    # "cloudimg": import the cloud image at `cloud_image_url`, whose first boot (cloud-init
+    # NoCloud seed from `user_data`) sets the system up and powers off.
     installer: str = "kickstart"
     location: str | None = None
     kickstart: str | None = None
@@ -44,6 +45,10 @@ class ImageSpec:
     initrd: str | None = None
     extra_args: str = ""
     user_data: str | None = None
+    # Always the latest build; checked against the .SHA256 file published next to it.
+    cloud_image_url: str | None = None
+    # Off for systems whose boot loader is not signed for UEFI Secure Boot (Arch).
+    secure_boot: bool = True
     # One script or several, run in order as root.
     provision: str | list[str] | None = None
     # Directories (relative to the image) copied to /tmp/desk-provision/files before provisioning.
@@ -74,22 +79,37 @@ class ImageSpec:
     idle: str | None = None
     reboot: str = "systemctl reboot --check-inhibitors=no"
     boot_id: str = "cat /proc/sys/kernel/random/boot_id"
+    # `desk maintain` reinstalls the image once its base is this many days old (none: only when
+    # its definition changes).
+    rebuild_days: int | None = None
+    # Prints the minutes left until the guest's licence runs out (Windows evaluation); read at
+    # every warm-up, so `desk maintain` reinstalls in time and `desk up` warns.
+    expiry: str | None = None
+    # Not from image.toml: a specific build instead of the current one (`desk maintain` tests a
+    # new build before making it current).
+    base_version: str | None = None
+    warm_version: str | None = None
 
     @property
     def base_name(self) -> str:
         return self.base or self.name
 
     @property
+    def base_dir(self) -> Path:
+        """One installed build; BASE/<name> itself is a symlink to the current one."""
+        return BASE / (f"{self.base_name}.{self.base_version}" if self.base_version else self.base_name)
+
+    @property
     def base_disk(self) -> Path:
-        return BASE / f"{self.base_name}.qcow2"
+        return self.base_dir / "disk.qcow2"
 
     @property
     def base_nvram(self) -> Path:
-        return BASE / f"{self.base_name}.VARS.qcow2"
+        return self.base_dir / "VARS.qcow2"
 
     @property
     def base_xml(self) -> Path:
-        return BASE / f"{self.base_name}.xml"
+        return self.base_dir / "domain.xml"
 
     def cmd(self, command: str) -> str:
         """`command` as it must be sent over SSH."""
@@ -123,7 +143,8 @@ class ImageSpec:
 
     @property
     def warm_dir(self) -> Path:
-        return WARM / self.name
+        """One saved desktop; WARM/<name> itself is a symlink to the current one."""
+        return WARM / (f"{self.name}.{self.warm_version}" if self.warm_version else self.name)
 
 
 def load_image(name: str) -> ImageSpec:
@@ -151,6 +172,8 @@ def load_image(name: str) -> ImageSpec:
             pv = parent["provision"]
             parent["provision"] = [str(rel / x) for x in ([pv] if isinstance(pv, str) else pv)]
         data = {**parent, **data}
+    for key in ("base_version", "warm_version"):
+        data.pop(key, None)
     return ImageSpec(name=name, dir=d, **data)
 
 

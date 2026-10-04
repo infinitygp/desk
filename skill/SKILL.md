@@ -1,6 +1,6 @@
 ---
 name: desk
-description: Test desktop applications and system packages (rpm, deb, Flatpak, AppImage, installers) end to end in a disposable VM with a real desktop session, judging the result from screenshots and the accessibility tree. Use when a change must be verified the way a user would see it on a real OS - installing a package, launching a GUI app, clicking through it, checking autostart, tray, dialogs, polkit prompts, reboots - rather than with unit tests or a browser alone.
+description: Test desktop applications and system packages (rpm, Arch packages, Flatpak, AppImage, installers) end to end in a disposable VM with a real desktop session, judging the result from screenshots and the accessibility tree. Use when a change must be verified the way a user would see it on a real OS - installing a package, launching a GUI app, clicking through it, checking autostart, tray, dialogs, polkit prompts, reboots - rather than with unit tests or a browser alone.
 ---
 
 # desk: disposable desktop VMs
@@ -93,9 +93,11 @@ adds the files the run changed. Point the user to the report and summarise what 
 ## Images
 
 `desk image list` shows them. `fedora-44-gnome` is the default; `fedora-44-gnome-pl` is the same
-system in Polish (UI, Firefox, formats) for testing Polish interfaces; `ubuntu-26.04-gnome` is for
-`.deb` packages and Ubuntu specifics (apt, snap, AppArmor instead of SELinux); `windows-11` is
-Windows 11 Enterprise (evaluation) for Windows builds and installers.
+system in Polish (UI, Firefox, formats) for testing Polish interfaces; `arch-gnome` is Arch Linux
+(rolling, pacman, no SELinux) with the newest GNOME and libraries; `windows-11` is Windows 11
+Enterprise (evaluation) for Windows builds and installers. Images are reinstalled automatically
+(`desk maintain`, weekly); if `desk up` prints a warning about a failed maintenance or a licence
+running out, pass it on to the user.
 
 ### Windows guests
 
@@ -137,7 +139,7 @@ Windows 11 Enterprise (evaluation) for Windows builds and installers.
    `enter`) or `desk exec --gui -- foo` - and walk through the feature with `desk a11y`, clicks and
    screenshots.
 5. Verify side effects in the guest with `desk exec`, not only on screen.
-6. When relevant: upgrade from the previous version, remove (`dnf remove` / `apt-get remove`),
+6. When relevant: upgrade from the previous version, remove (`dnf remove` / `pacman -R`),
    `desk reboot` and check what remains or comes back (autostart, enabled units, timers);
    `desk diff` shows exactly which files the package left behind.
 7. `desk down --diff` and hand over the report.
@@ -168,6 +170,8 @@ Windows 11 Enterprise (evaluation) for Windows builds and installers.
 - The image is a clean Workstation install: anything the product needs beyond its declared
   dependencies is missing there, exactly as on a user's machine. Report that rather than
   silently installing it; install it afterwards only to continue the test.
-- `desk selftest <image>` checks the image and the harness end to end. Images are built with
-  `desk image build <name>` and `desk image warm <name>`; only rebuild when the image
-  definition in `images/<name>/` of the source repository changes.
+- `desk selftest <image>` checks the image and the harness end to end. `desk maintain` keeps
+  the images current (rebuilds, selftests, switches builds) and runs weekly from a timer. After
+  changing an image definition in `images/<name>/` of the source repository, run
+  `desk maintain --only <name>`: it rebuilds what changed and switches only after the selftest
+  passes (`desk image build --force` / `desk image warm --force` switch without testing).

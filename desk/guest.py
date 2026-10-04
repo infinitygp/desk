@@ -15,6 +15,9 @@ _SSH_OPTS = [
     "-o", "UserKnownHostsFile=/dev/null",
     "-o", "LogLevel=ERROR",
     "-o", "ConnectTimeout=5",
+    # passt keeps the TCP connection up even when the guest hangs; this notices within 2 min.
+    "-o", "ServerAliveInterval=30",
+    "-o", "ServerAliveCountMax=4",
     "-o", "BatchMode=yes",
 ]
 

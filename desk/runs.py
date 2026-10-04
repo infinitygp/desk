@@ -47,6 +47,19 @@ def image_lock(image: str):
     return _flock(HOME / f".lock-{image}", f"waiting for another build/warm of {image}...")
 
 
+@contextmanager
+def image_lock_if_free(image: str):
+    """Yields whether the image lock was free; it stays held for the block if so."""
+    HOME.mkdir(parents=True, exist_ok=True)
+    with open(HOME / f".lock-{image}", "w") as f:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield False
+            return
+        yield True
+
+
 _held: list[int] = []
 
 
@@ -182,11 +195,14 @@ def check_memory(spec: ImageSpec) -> None:
                         f"{need} MiB needed{hint} (desk down <id>, or --force)")
 
 
-def warm_is_current(spec: ImageSpec) -> bool:
+def warm_meta(spec: ImageSpec) -> dict:
     meta = spec.warm_dir / "meta.json"
-    if not meta.exists() or not spec.base_disk.exists():
-        return False
-    return json.loads(meta.read_text()).get("base_mtime_ns") == spec.base_disk.stat().st_mtime_ns
+    return json.loads(meta.read_text()) if meta.exists() else {}
+
+
+def warm_is_current(spec: ImageSpec) -> bool:
+    """The warm state was made from the base build that is current now."""
+    return spec.base_dir.exists() and warm_meta(spec).get("base") == str(spec.base_dir.resolve())
 
 
 def active_runs_of(image: str) -> list[Run]:
@@ -228,7 +244,51 @@ def gc(verbose: bool = True) -> list[str]:
     return removed
 
 
+def prune_versions(verbose: bool = True) -> list[str]:
+    """Delete base and warm builds that are neither current nor used by a run (running or kept),
+    by a warm state that stays or by a libvirt domain (including an unfinished build). Images
+    being built or warmed right now are left alone. Call with the state lock held, so that a
+    `desk up` cannot pin a build between the checks and the deletion."""
+    from .config import BASE, WARM, list_images
+    from .virt import backing_files
+
+    used: set[Path] = set()
+    for disk in RUNS.glob("*/disk.qcow2"):
+        used.update(f.parent for f in backing_files(disk))
+    names = list_images()
+    keep_warm = {p for n in names for p in images.versions(WARM, n) if p in used or p == images.current(WARM / n)}
+    for w in keep_warm:
+        used.update(f.parent for f in backing_files(w / "disk.qcow2"))
+    for dom in conn().listAllDomains(0):
+        try:
+            used.update(Path(s.get("file")).resolve().parent for s in ET.fromstring(dom.XMLDesc(0)).iter("source")
+                        if s.get("file"))
+        except libvirt.libvirtError:
+            continue
+    removed = []
+    for n in names:
+        with image_lock_if_free(n) as free:
+            if not free:
+                continue
+            for root in (WARM, BASE):
+                for p in images.versions(root, n):
+                    if p in used or p == images.current(root / n) or p in keep_warm:
+                        continue
+                    for f in p.iterdir():
+                        f.chmod(0o644)
+                    shutil.rmtree(p)
+                    removed.append(str(p))
+    if verbose:
+        for r in removed:
+            print(f"[desk] gc: removed old build {r}")
+    return removed
+
+
 def up(spec: ImageSpec, run_id: str | None = None, cold: bool = False, force: bool = False) -> Run:
+    from .maintain import check_usable
+
+    for warning in check_usable(spec):
+        print(f"[desk] warning: {warning}", file=sys.stderr)
     with state_lock():
         gc()
         if not force:
@@ -241,9 +301,11 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool) -> Run:
     rd = RUNS / run_id
     if rd.exists():
         raise DeskError(f"run {run_id} already exists")
-    warm = spec.warm_dir / "memory.save"
     if not spec.base_xml.exists():
         raise DeskError(f"base image {spec.name} not built yet (desk image build {spec.name})")
+    # Pin the builds now: `desk maintain` may switch the current ones while this run starts.
+    base_dir, warm_dir = spec.base_dir.resolve(), spec.warm_dir.resolve()
+    warm = warm_dir / "memory.save"
     saved_xml = None
     if not cold:
         if not warm.exists():
@@ -271,12 +333,12 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool) -> Run:
     disk, nvram = rd / "disk.qcow2", rd / "VARS.qcow2"
     try:
         if cold:
-            qemu_img_overlay(spec.base_disk, disk)
-            reflink_copy(spec.base_nvram, nvram)
-            template = spec.base_xml.read_text()
+            qemu_img_overlay(base_dir / "disk.qcow2", disk)
+            reflink_copy(base_dir / "VARS.qcow2", nvram)
+            template = (base_dir / "domain.xml").read_text()
         else:
-            qemu_img_overlay(spec.warm_dir / "disk.qcow2", disk)
-            reflink_copy(spec.warm_dir / "VARS.qcow2", nvram)
+            qemu_img_overlay(warm_dir / "disk.qcow2", disk)
+            reflink_copy(warm_dir / "VARS.qcow2", nvram)
             template = saved_xml
         nvram.chmod(0o644)
         xml = prepare_domain_xml(template, name=run.domain, disk=disk, nvram=nvram,

@@ -22,9 +22,21 @@ class Variants(unittest.TestCase):
 
     def test_installers(self):
         self.assertEqual(load_image("fedora-44-gnome").installer, "kickstart")
-        ub = load_image("ubuntu-26.04-gnome")
-        self.assertEqual(ub.installer, "autoinstall")
-        self.assertTrue((ub.dir / ub.user_data).is_file())
+        arch = load_image("arch-gnome")
+        self.assertEqual(arch.installer, "cloudimg")
+        self.assertTrue((arch.dir / arch.user_data).is_file())
+
+    def test_builds_are_versioned(self):
+        from dataclasses import replace
+
+        from desk.config import BASE, WARM
+
+        pl = load_image("fedora-44-gnome-pl")
+        self.assertEqual(pl.base_dir, BASE / "fedora-44-gnome")
+        self.assertEqual(pl.warm_dir, WARM / "fedora-44-gnome-pl")
+        built = replace(pl, base_version="20261005-030000", warm_version="20261005-040000")
+        self.assertEqual(built.base_disk, BASE / "fedora-44-gnome.20261005-030000" / "disk.qcow2")
+        self.assertEqual(built.warm_dir, WARM / "fedora-44-gnome-pl.20261005-040000")
 
 
 class WindowsCommands(unittest.TestCase):

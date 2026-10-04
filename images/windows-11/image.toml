@@ -1,4 +1,4 @@
-# Windows 11 Enterprise evaluation (26H2, 90 days; rebuild the image when it expires).
+# Windows 11 Enterprise evaluation (26H2, 90 days; `desk maintain` reinstalls it before it runs out).
 installer = "windows"
 os_variant = "win11"
 memory_mib = 6144
@@ -32,3 +32,5 @@ files = ["../_shared/windows"]
 idle = "$n = 0; for ($i = 0; $i -lt 60; $i++) { $c = (Get-CimInstance Win32_Processor | Measure-Object LoadPercentage -Average).Average; if ($c -lt 15) { $n++ } else { $n = 0 }; if ($n -ge 6) { exit 0 }; Start-Sleep 5 }; exit 0"
 # Windows has no audio device in this VM otherwise; apps need one (volume, media sessions).
 sound = "ich9"
+# Minutes left of the evaluation licence.
+expiry = "(Get-CimInstance SoftwareLicensingProduct | Where-Object { $_.PartialProductKey -and $_.Name -like 'Windows*' }).GracePeriodRemaining"

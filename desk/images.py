@@ -3,17 +3,20 @@
 import hashlib
 import io
 import json
+import os
+import re
 import shutil
 import tarfile
 import subprocess
 import time
 import xml.etree.ElementTree as ET
+from dataclasses import MISSING, fields, replace
 from pathlib import Path
 
 import libvirt
 
 from . import display, guest
-from .config import CACHE, LOGS, SSH_KEY, DeskError, ImageSpec
+from .config import BASE, CACHE, IMAGES_DIR, LOGS, SSH_KEY, WARM, DeskError, ImageSpec
 from .virt import conn, free_port, lookup, prepare_domain_xml, qemu_img_overlay, reflink_copy
 
 
@@ -25,28 +28,153 @@ def build_domain_name(spec: ImageSpec) -> str:
     return f"build-{spec.name}"
 
 
-def build(spec: ImageSpec, force: bool = False) -> None:
-    """Install the base image; re-running attaches to an install that is still in progress."""
+# Longest an install may take, Windows included, before the build counts as stuck.
+BUILD_TIMEOUT = 3 * 3600
+
+
+def new_version() -> str:
+    return time.strftime("%Y%m%d-%H%M%S")
+
+
+def versions(root: Path, name: str) -> list[Path]:
+    """Builds of `name` under BASE or WARM, oldest first."""
+    pattern = re.compile(re.escape(name) + r"\.\d{8}-\d{6}")
+    # Resolved like current() and the backing chains they are compared with.
+    return sorted(p.resolve() for p in root.glob(f"{name}.*") if pattern.fullmatch(p.name) and not p.is_symlink())
+
+
+def promote(link: Path, target: Path) -> None:
+    """Make `target` the current build: one rename, so `desk up` never sees half of a switch."""
+    if link.exists() and not link.is_symlink():
+        raise DeskError(f"{link} is left from before builds were versioned; move it to "
+                        f"{link.name}.<YYYYmmdd-HHMMSS> and rebase its overlays, or delete it")
+    tmp = link.with_name(f".{link.name}.new")
+    tmp.unlink(missing_ok=True)
+    os.symlink(target.name, tmp)
+    os.replace(tmp, link)
+
+
+def current(link: Path) -> Path | None:
+    return link.resolve() if link.is_symlink() and link.exists() else None
+
+
+# What decides how the base disk gets installed; any change means a new install.
+INSTALL_KEYS = ("installer", "location", "kickstart", "iso", "iso_url", "iso_sha256", "kernel", "initrd",
+                "extra_args", "user_data", "cloud_image_url", "secure_boot", "unattend", "unattend_files",
+                "image_index", "virtio_win_iso", "openssh_msi", "os_variant", "memory_mib", "vcpus", "disk_gb")
+
+
+# Image settings that do not change what ends up in the guest.
+NOT_IN_GUEST = ("name", "dir", "base_version", "warm_version", "rebuild_days", "expiry")
+
+
+def _settings(spec: ImageSpec, keys) -> str:
+    """The settings among `keys` that differ from their defaults, so that a new setting added to
+    ImageSpec with a default does not make every image look changed."""
+    data = {}
+    for f in fields(spec):
+        if f.name in keys and (f.default is MISSING or getattr(spec, f.name) != f.default):
+            data[f.name] = getattr(spec, f.name)
+    return json.dumps(data, sort_keys=True, default=str)
+
+
+def _hash_files(h, base: Path, rels: list[str]) -> None:
+    for rel in rels:
+        src = (base / rel).resolve()
+        for f in [src] if src.is_file() else sorted(q for q in src.rglob("*") if q.is_file()):
+            h.update(str(f.relative_to(IMAGES_DIR)).encode() + b"\0" + f.read_bytes() + b"\0")
+
+
+def install_fingerprint(spec: ImageSpec) -> str:
+    h = hashlib.sha256(_settings(spec, INSTALL_KEYS).encode())
+    # Install files that provisioning copies again at every warm-up (Windows' agent) do not
+    # need a new install when they change.
+    refreshed = {(spec.dir / f).resolve() for f in spec.files or []}
+    _hash_files(h, spec.dir, [f for f in (spec.kickstart, spec.user_data, spec.unattend) if f]
+                + [f for f in spec.unattend_files or [] if (spec.dir / f).resolve() not in refreshed])
+    return h.hexdigest()
+
+
+def warm_fingerprint(spec: ImageSpec) -> str:
+    """Everything a warm state depends on besides the base disk: the whole image definition and
+    the provisioning scripts and files."""
+    h = hashlib.sha256(_settings(spec, {f.name for f in fields(spec)} - set(NOT_IN_GUEST)).encode())
+    _hash_files(h, spec.dir, spec.provision_scripts + list(spec.files or []))
+    return h.hexdigest()
+
+
+def build(spec: ImageSpec, force: bool = False, promote_it: bool = True) -> str:
+    """Install a new build of the base image and return its version; re-running attaches to an
+    install that is still in progress. Builds sit next to each other, so runs keep using the
+    build they started from."""
     if spec.base:
         raise DeskError(f"{spec.name} is a variant of {spec.base}: "
                         f"build {spec.base}, then `desk image warm {spec.name}`")
     name = build_domain_name(spec)
     dom = lookup(name)
-    if spec.base_xml.exists() and not force:
-        raise DeskError(f"{spec.base_disk} already built (use --force to rebuild)")
+    link = BASE / spec.base_name
+    deadline = time.monotonic() + BUILD_TIMEOUT
+    vspec = None
+    if dom is not None:
+        root = ET.fromstring(dom.XMLDesc(0))
+        disk = Path(next(d for d in root.iter("disk") if d.get("device") == "disk").find("source").get("file"))
+        if dom.isActive() and disk.exists():
+            vspec = replace(spec, base_version=disk.parent.name.removeprefix(f"{spec.base_name}."))
+            _log(f"attaching to running build domain {name}")
+        else:
+            # Left by an interrupted build; whatever it installed is incomplete.
+            _log(f"discarding the unfinished build domain {name}")
+            _discard_build(name)
+    try:
+        if vspec is None:
+            if promote_it and current(link) and not force:
+                raise DeskError(f"{spec.name} already built (use --force to install a new build)")
+            vspec = replace(spec, base_version=new_version())
+            vspec.base_dir.mkdir(parents=True)
+            _virt_install(vspec, name, deadline)
+        _wait_shutoff(name, timeout=max(60.0, deadline - time.monotonic()))
+    except BaseException:
+        # A stuck or failed install (boot failure, prompt, hung download) must not block the next build.
+        _discard_build(name)
+        raise
+    _finalize(vspec, name)
+    if promote_it:
+        promote(link, vspec.base_dir)
+    return vspec.base_version
+
+
+def _discard_build(name: str) -> None:
+    dom = lookup(name)
     if dom is None:
-        if spec.base_disk.exists():
-            if not force:
-                raise DeskError(f"{spec.base_disk} exists without a finished build (use --force)")
-            spec.base_disk.chmod(0o644)
-            spec.base_disk.unlink()
-        for p in (spec.base_nvram, spec.base_xml):
-            p.unlink(missing_ok=True)
-        _virt_install(spec, name)
-    else:
-        _log(f"attaching to running build domain {name}")
-    _wait_shutoff(name)
-    _finalize(spec, name)
+        return
+    try:
+        if dom.isActive():
+            shot = LOGS / f"{name}-stuck.png"
+            try:
+                shot.write_bytes(display.screenshot(dom))
+                _log(f"screen of the unfinished install: {shot}")
+            except Exception:  # noqa: BLE001 - the screenshot is only a hint
+                pass
+            dom.destroy()
+        dom.undefineFlags(libvirt.VIR_DOMAIN_UNDEFINE_NVRAM | libvirt.VIR_DOMAIN_UNDEFINE_TPM)
+    except libvirt.libvirtError as e:
+        _log(f"warning: could not remove {name}: {e}")
+
+
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _download(url: str, target: Path) -> None:
+    _log(f"downloading {url}")
+    # Give up on a stalled transfer instead of hanging an unattended build.
+    subprocess.run(["curl", "-fL", "--progress-bar", "--retry", "3", "--speed-limit", "10000", "--speed-time", "300",
+                    "-o", f"{target}.part", url], check=True)
+    Path(f"{target}.part").rename(target)
 
 
 def _fetch_iso(spec: ImageSpec) -> Path:
@@ -54,17 +182,24 @@ def _fetch_iso(spec: ImageSpec) -> Path:
     if not iso.exists():
         if not spec.iso_url:
             raise DeskError(f"{iso} missing and no iso_url to fetch it from")
-        _log(f"downloading {spec.iso_url}")
-        subprocess.run(["curl", "-fL", "--progress-bar", "-o", f"{iso}.part", spec.iso_url], check=True)
-        Path(f"{iso}.part").rename(iso)
-    if spec.iso_sha256:
-        h = hashlib.sha256()
-        with iso.open("rb") as f:
-            for chunk in iter(lambda: f.read(1 << 20), b""):
-                h.update(chunk)
-        if h.hexdigest() != spec.iso_sha256:
-            raise DeskError(f"{iso} does not match iso_sha256; delete it to download again")
+        _download(spec.iso_url, iso)
+    if spec.iso_sha256 and _sha256(iso) != spec.iso_sha256:
+        raise DeskError(f"{iso} does not match iso_sha256; delete it to download again")
     return iso
+
+
+def _fetch_cloud_image(spec: ImageSpec) -> Path:
+    """The latest cloud image; downloaded again only when the published checksum changes."""
+    url = spec.cloud_image_url
+    target = CACHE / url.rsplit("/", 1)[-1]
+    sums = subprocess.run(["curl", "-fsSL", "--retry", "3", "--max-time", "60", f"{url}.SHA256"],
+                          capture_output=True, text=True, check=True).stdout
+    want = sums.split()[0]
+    if not target.exists() or _sha256(target) != want:
+        _download(url, target)
+        if _sha256(target) != want:
+            raise DeskError(f"{target} does not match {url}.SHA256")
+    return target
 
 
 def _render(spec: ImageSpec, template: str) -> str:
@@ -77,20 +212,23 @@ def _render(spec: ImageSpec, template: str) -> str:
     return text
 
 
-def _virt_install(spec: ImageSpec, name: str) -> None:
+def _virt_install(spec: ImageSpec, name: str, deadline: float) -> None:
     work = CACHE / spec.name
     work.mkdir(parents=True, exist_ok=True)
     log = LOGS / f"{name}.log"
     common = [
         "virt-install", "--connect", conn().getURI(), "--name", name,
         "--memory", str(spec.memory_mib), "--vcpus", str(spec.vcpus),
-        "--cpu", "host-passthrough", "--machine", "q35", "--boot", "uefi",
+        "--cpu", "host-passthrough", "--machine", "q35",
+        "--boot", "uefi" if spec.secure_boot else "uefi,firmware.feature0.name=secure-boot,firmware.feature0.enabled=no",
         "--disk", f"path={spec.base_disk},size={spec.disk_gb},format=qcow2,bus=virtio,discard=unmap",
         "--os-variant", spec.os_variant,
         "--network", "type=user,backend.type=passt,model=virtio",
         "--graphics", "none", "--video", "virtio",
         "--serial", f"file,path={log}",
-        "--noautoconsole", "--noreboot", "--wait", "-1",
+        "--noautoconsole", "--noreboot",
+        # Minutes; virt-install leaves the domain running when it runs out, build() cleans up.
+        "--wait", str(max(1, int((deadline - time.monotonic()) / 60))),
     ]
     if spec.installer == "kickstart":
         (work / "ks.cfg").write_text(_render(spec, spec.kickstart))
@@ -99,17 +237,21 @@ def _virt_install(spec: ImageSpec, name: str) -> None:
             "--initrd-inject", str(work / "ks.cfg"),
             "--extra-args", "inst.ks=file:/ks.cfg console=ttyS0 inst.text",
         ]
-    elif spec.installer == "autoinstall":
-        iso = _fetch_iso(spec)
+    elif spec.installer == "cloudimg":
+        image = _fetch_cloud_image(spec)
+        subprocess.run(["qemu-img", "convert", "-q", "-O", "qcow2", str(image), str(spec.base_disk)], check=True)
+        # Its root partition comes last, so cloud-init grows it into the space added here.
+        subprocess.run(["qemu-img", "resize", "-q", str(spec.base_disk), f"{spec.disk_gb}G"], check=True)
         (work / "user-data").write_text(_render(spec, spec.user_data))
         (work / "meta-data").write_text(f"instance-id: iid-{spec.name}\n")
+        disk = f"path={spec.base_disk},format=qcow2,bus=virtio,discard=unmap"
+        common = [disk if a.startswith(f"path={spec.base_disk},") else a for a in common]
         extra = [
-            "--location", f"{iso},kernel={spec.kernel},initrd={spec.initrd}",
-            "--extra-args", spec.extra_args,
+            "--import",
             "--cloud-init", f"user-data={work / 'user-data'},meta-data={work / 'meta-data'}",
         ]
     elif spec.installer == "windows":
-        _windows_install(spec, name, common, work)
+        _windows_install(spec, name, common, work, deadline)
         return
     else:
         raise DeskError(f"unknown installer {spec.installer!r}")
@@ -139,14 +281,16 @@ def _unattend_iso(spec: ImageSpec, work: Path) -> Path:
     return iso
 
 
-def _windows_install(spec: ImageSpec, name: str, common: list[str], work: Path) -> None:
+def _windows_install(spec: ImageSpec, name: str, common: list[str], work: Path, deadline: float) -> None:
     iso = _fetch_iso(spec)
     unattend = _unattend_iso(spec, work)
     # SATA disk and e1000e use inbox drivers, so Setup needs nothing loaded. No TPM: Windows
     # would otherwise turn on device encryption, and runs (which drop the TPM, see virt.py)
     # would then stop at the BitLocker recovery screen.
     args = [a.replace("bus=virtio,", "bus=sata,").replace("model=virtio", "model=e1000e") for a in common]
-    args = [a for a in args if a not in ("--noreboot", "--wait", "-1")]
+    # Setup reboots several times, which virt-install's wait would take for the end.
+    wait = args.index("--wait")
+    args = [a for a in args[:wait] + args[wait + 2:] if a != "--noreboot"]
     # A USB keyboard: this OVMF build ignores the PS/2 one, so the CD boot prompt never saw a key.
     args += ["--cdrom", str(iso), "--disk", f"path={unattend},device=cdrom,bus=sata", "--tpm", "none",
              "--input", "keyboard,bus=usb"]
@@ -154,8 +298,8 @@ def _windows_install(spec: ImageSpec, name: str, common: list[str], work: Path) 
     subprocess.run(args, check=True)
     # OVMF asks "Press any key to boot from CD or DVD" during the first seconds. Stop well before
     # Setup's own screens, where Enter would hit their focused "Cancel" button.
-    deadline = time.monotonic() + 15
-    while time.monotonic() < deadline:
+    prompt = time.monotonic() + 15
+    while time.monotonic() < prompt:
         dom = lookup(name)
         if dom is not None and dom.isActive():
             try:
@@ -165,7 +309,7 @@ def _windows_install(spec: ImageSpec, name: str, common: list[str], work: Path) 
         time.sleep(0.5)
     # Setup's first reboot ends the install domain (virt-install's on_reboot=destroy); start it
     # again from the disk with the final configuration for the remaining passes and first logon.
-    _wait_shutoff(name, timeout=3600)
+    _wait_shutoff(name, timeout=max(60.0, deadline - time.monotonic()))
     _log("Windows Setup copied the image, booting the installed system")
     lookup(name).create()
 
@@ -191,7 +335,13 @@ def _finalize(spec: ImageSpec, name: str) -> None:
     shutil.copyfile(nvram, spec.base_nvram)
     dom.undefineFlags(libvirt.VIR_DOMAIN_UNDEFINE_NVRAM | libvirt.VIR_DOMAIN_UNDEFINE_TPM)
     spec.base_disk.chmod(0o444)
-    _log(f"base image ready: {spec.base_disk}")
+    meta = {"image": spec.name, "created": time.time(), "fingerprint": install_fingerprint(spec)}
+    (spec.base_dir / "meta.json").write_text(json.dumps(meta, indent=2))
+    _log(f"base image ready: {spec.base_dir}")
+
+
+# A provisioning script that runs longer than this is taken to hang.
+PROVISION_TIMEOUT = 3600
 
 
 def provision(spec: ImageSpec, port: int) -> None:
@@ -229,9 +379,10 @@ def provision(spec: ImageSpec, port: int) -> None:
                     r = subprocess.CompletedProcess([], 255, b"", b"copying the script failed")
                 else:
                     r = guest.ssh_run(port, spec.root_user, "powershell.exe -NoProfile -ExecutionPolicy Bypass "
-                                      "-File C:\\desk\\provision.ps1", capture=True)
+                                      "-File C:\\desk\\provision.ps1", capture=True, timeout=PROVISION_TIMEOUT)
             else:
-                r = guest.ssh_run(port, spec.root_user, "bash -s", input=(spec.dir / script).read_bytes(), capture=True)
+                r = guest.ssh_run(port, spec.root_user, "bash -s", input=(spec.dir / script).read_bytes(), capture=True,
+                                  timeout=PROVISION_TIMEOUT)
             # 255: the connection itself broke. Windows does that now and then during its first
             # boot after setup; provisioning scripts are idempotent, so run it again.
             if r.returncode != 255 or attempt == 3:
@@ -242,13 +393,16 @@ def provision(spec: ImageSpec, port: int) -> None:
         if r.returncode != 0:
             raise DeskError(f"{script} failed ({r.returncode}): {r.stderr.decode(errors='replace')}")
     if spec.relogin:
-        # GDM on Ubuntu 26.04 now and then does not log in automatically after a restart (one
-        # warm-up in four here), so give it a second restart before failing.
+        # GDM now and then does not log in automatically after a restart (seen on Ubuntu 26.04,
+        # one warm-up in four), so give it a second restart before failing.
         # Windows relogs by rebooting, which takes minutes on a fresh install; a second reboot
         # sent while it boots does more harm than good.
         attempts = (1, 2) if spec.family == "linux" else (2,)
         for attempt in attempts:
-            guest.ssh_run(port, spec.root_user, spec.cmd(spec.relogin), capture=True)
+            try:
+                guest.ssh_run(port, spec.root_user, spec.cmd(spec.relogin), capture=True, timeout=120)
+            except subprocess.TimeoutExpired:
+                pass  # the restart took the connection down with it
             guest.wait_session_gone(port, spec.user, spec.cmd(spec.ready))
             try:
                 guest.wait_ready(port, spec.user, spec.cmd(spec.ready), timeout=90 if attempt == 1 else 420)
@@ -277,27 +431,29 @@ def _boot_and_wait_ssh(dom, port: int, spec: ImageSpec, wd: Path, timeout: float
     raise DeskError(f"SSH on port {port} not reachable after {timeout:.0f}s; last screen: {wd / 'last-boot.png'}")
 
 
-def warm(spec: ImageSpec, force: bool = False) -> None:
-    """Boot the base image, provision it and save the running, logged-in desktop."""
+def warm(spec: ImageSpec, force: bool = False, promote_it: bool = True) -> str:
+    """Boot the base image, provision it and save the running, logged-in desktop as a new warm
+    build; returns its version."""
     if not spec.base_xml.exists():
         raise DeskError(f"base image {spec.name} not built yet (desk image build {spec.name})")
-    wd = spec.warm_dir
-    if (wd / "memory.save").exists() and not force:
+    link = WARM / spec.name
+    if promote_it and current(link) and (link / "memory.save").exists() and not force:
         raise DeskError(f"warm state for {spec.name} exists (use --force to recreate)")
-    if wd.exists():
-        for p in wd.iterdir():
-            p.chmod(0o644)
-        shutil.rmtree(wd)
+    base_dir = spec.base_dir.resolve()
+    vspec = replace(spec, warm_version=new_version())
+    wd = vspec.warm_dir
     wd.mkdir(parents=True)
 
     disk, nvram = wd / "disk.qcow2", wd / "VARS.qcow2"
-    qemu_img_overlay(spec.base_disk, disk)
-    reflink_copy(spec.base_nvram, nvram)
+    qemu_img_overlay(base_dir / "disk.qcow2", disk)
+    reflink_copy(base_dir / "VARS.qcow2", nvram)
     nvram.chmod(0o644)
     port = free_port()
-    name = f"desk-warm-{spec.name}"
+    # Runs restored from this state inherit the name; the version keeps it apart from the
+    # previous build's runs while a new build is tested.
+    name = f"desk-warm-{spec.name}-{vspec.warm_version}"
     xml = prepare_domain_xml(
-        spec.base_xml.read_text(), name=name, disk=disk, nvram=nvram, ssh_port=port,
+        (base_dir / "domain.xml").read_text(), name=name, disk=disk, nvram=nvram, ssh_port=port,
         console_log=wd / "console.log",
         agent_ports=(free_port(), spec.agent_port) if spec.agent_port else None, sound=spec.sound,
     )
@@ -322,6 +478,7 @@ def warm(spec: ImageSpec, force: bool = False) -> None:
         if not stable:
             _log("warning: screen did not settle, saving anyway")
         (wd / "before-save.png").write_bytes(display.screenshot(dom))
+        expires = _read_expiry(spec, port)
         # Dirty pages would otherwise live only in the saved RAM and reach the disk inside each
         # run's overlay, where they look like changes made by the run.
         guest.ssh_run(port, spec.root_user, spec.cmd(spec.sync), capture=True, timeout=120)
@@ -342,6 +499,24 @@ def warm(spec: ImageSpec, force: bool = False) -> None:
             _log("the warm-up domain is gone (powered off or crashed)")
         raise
     disk.chmod(0o444)
-    meta = {"image": spec.name, "created": time.time(), "base_mtime_ns": spec.base_disk.stat().st_mtime_ns}
+    meta = {"image": spec.name, "created": time.time(), "base": str(base_dir),
+            "fingerprint": warm_fingerprint(spec), "expires": expires}
     (wd / "meta.json").write_text(json.dumps(meta, indent=2))
+    if promote_it:
+        promote(link, wd)
     _log(f"warm state ready: {wd}")
+    return vspec.warm_version
+
+
+def _read_expiry(spec: ImageSpec, port: int) -> float | None:
+    if not spec.expiry:
+        return None
+    r = guest.ssh_run(port, spec.root_user, spec.cmd(spec.expiry), capture=True, timeout=120)
+    try:
+        minutes = int(r.stdout.decode().strip())
+    except ValueError:
+        # Without it nothing would notice the licence running out (no warnings, no reinstall).
+        raise DeskError(f"could not read the licence expiry: {r.stdout.decode(errors='replace').strip()!r} "
+                        f"{r.stderr.decode(errors='replace').strip()}") from None
+    _log(f"licence runs out in {minutes / 1440:.0f} days")
+    return time.time() + minutes * 60

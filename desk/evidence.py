@@ -19,13 +19,12 @@ NOISE = (
     "/var/log/", "/var/cache/", "/var/tmp/", "/tmp/", "/run/", "/var/lib/systemd/",
     "/var/lib/dnf/", "/var/lib/rpm/", "/usr/lib/sysimage/rpm/", "/var/lib/PackageKit/",
     "/var/lib/NetworkManager/", "/var/lib/sss/", "/var/lib/gdm/", "/var/lib/chrony/",
-    "/var/lib/upower/", "/var/lib/fwupd/", "/var/lib/AccountsService/", "/var/lib/apt/lists/",
-    "/var/lib/dpkg/", "/var/lib/snapd/", "/var/lib/flatpak/repo/", "/var/spool/",
+    "/var/lib/upower/", "/var/lib/fwupd/", "/var/lib/AccountsService/", "/var/lib/pacman/",
+    "/var/lib/flatpak/repo/", "/var/spool/",
     "/root/.cache/", "/etc/.updated", "/var/.updated", "/etc/adjtime", "/etc/ld.so.cache",
     "/var/lib/flatpak/", "/var/lib/colord/", "/var/lib/lastlog/", "/var/lib/plymouth/", "/var/lib/abrt/",
     "/var/lib/rasdaemon/", "/var/lib/sddm/", "/usr/lib/sysimage/libdnf5/", "/boot/grub2/grubenv",
     "/boot/grub/grubenv", "/etc/cups/subscriptions.conf", "/etc/systemd/system.control/",
-    "/root/snap/", "/var/lib/update-notifier/", "/var/lib/ubuntu-advantage/", "/var/lib/command-not-found/",
     # Windows
     "/Windows/Prefetch/", "/Windows/System32/winevt/Logs/", "/Windows/Logs/", "/Windows/SoftwareDistribution/",
     "/Windows/ServiceProfiles/", "/Windows/System32/sru/", "/Windows/System32/Tasks/Microsoft/Windows/",
@@ -60,9 +59,11 @@ section packages
 if command -v rpm >/dev/null; then
     rpm -qa --qf '%{INSTALLTIME} %{NAME}-%{VERSION}-%{RELEASE}.%{ARCH}\n' </dev/null \
         | awk -v s="$S" '$1 >= s {print "installed " $2}' | sort
-elif [ -f /var/log/dpkg.log ]; then
-    since=$(date -d "@$S" '+%F %T')
-    awk -v s="$since" '($1 " " $2) >= s && $3 ~ /^(install|remove|purge|upgrade)$/' /var/log/dpkg.log </dev/null
+elif [ -f /var/log/pacman.log ]; then
+    # [2026-10-05T03:12:44+0200] [ALPM] installed foo (1.0-1), in local time like this date.
+    since=$(date -d "@$S" '+%FT%T')
+    awk -v s="$since" '$2 == "[ALPM]" && substr($1, 2, 19) >= s && $3 ~ /^(installed|removed|upgraded|downgraded|reinstalled)$/ {
+        $1 = $2 = ""; print substr($0, 3) }' /var/log/pacman.log </dev/null
 fi
 if command -v dnf >/dev/null; then
     # Removals leave no trace in rpm -qa; the transaction history has them.

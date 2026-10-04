@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import sys
 import time
@@ -35,24 +36,51 @@ def cmd_image(args) -> None:
         print(out)
         return
     if args.image_cmd == "list":
-        for name in list_images():
-            spec = load_image(name)
-            if (spec.warm_dir / "memory.save").exists():
-                state = "warm" if runs.warm_is_current(spec) else "warm (stale, re-run warm)"
-            else:
-                state = "base" if spec.base_xml.exists() else "not built"
-            print(f"{name}\t{state}" + (f"\t(variant of {spec.base})" if spec.base else ""))
+        _image_list()
         return
     spec = load_image(args.name)
+    # Builds are versioned (images.promote), so runs of the current build may go on meanwhile.
     with runs.image_lock(spec.name):
-        with runs.state_lock():
-            busy = runs.active_runs_of(spec.name)
-        if busy:
-            raise DeskError(f"runs still use {spec.name}: {', '.join(r.id for r in busy)} (desk down first)")
         if args.image_cmd == "build":
             images.build(spec, force=args.force)
         elif args.image_cmd == "warm":
             images.warm(spec, force=args.force)
+    with runs.state_lock():
+        runs.prune_versions()
+
+
+def _image_list() -> None:
+    from .maintain import days_left, load_status
+
+    status = load_status()
+    print(f"{'IMAGE':<22}{'STATE':<8}{'BUILT':<12}{'SELFTEST':<20}NOTES")
+    for name in list_images():
+        spec = load_image(name)
+        notes = [f"variant of {spec.base}"] if spec.base else []
+        if (spec.warm_dir / "memory.save").exists():
+            state = "warm"
+            if not runs.warm_is_current(spec):
+                notes.append("warm state predates the base build (desk image warm --force)")
+        else:
+            state = "base" if spec.base_xml.exists() else "-"
+        meta = spec.base_dir / "meta.json"
+        built = time.strftime("%Y-%m-%d", time.localtime(json.loads(meta.read_text())["created"])) \
+            if meta.exists() else "-"
+        st = status.get(name, {})
+        test = "-"
+        if "selftest" in st:
+            s = st["selftest"]
+            test = f"{s['passed']}/{s['total']} {time.strftime('%m-%d %H:%M', time.localtime(s['t']))}"
+            if spec.warm_dir.exists() and s.get("warm") != str(spec.warm_dir.resolve()):
+                notes.append("last selftest was of another build")
+        left = days_left(spec)
+        if left is not None:
+            notes.append(f"licence ends in {left:.0f} days")
+        m = st.get("maintain")
+        if m and not m["ok"]:
+            what = "skipped" if m["ok"] is None else "failed"
+            notes.append(f"maintenance {what} {time.strftime('%m-%d', time.localtime(m['t']))}: {m['note']}")
+        print(f"{name:<22}{state:<8}{built:<12}{test:<20}{'; '.join(notes)}")
 
 
 def cmd_up(args) -> None:
@@ -94,7 +122,7 @@ def cmd_ls(args) -> None:
 def cmd_gc(args) -> None:
     with runs.state_lock():
         evidence.prune_reports()
-        if not runs.gc():
+        if not runs.gc() + runs.prune_versions():
             print(f"nothing to clean (idle limit {runs.IDLE_TTL / 3600:g} h, DESK_TTL to change)")
 
 
@@ -288,6 +316,15 @@ def cmd_view(args) -> None:
     print(f"move the pointer under the agent (e.g. `vncviewer -ViewOnly localhost:{port}`).")
 
 
+def cmd_maintain(args) -> None:
+    from . import maintain
+
+    if args.install_timer:
+        maintain.install_timer()
+        return
+    sys.exit(0 if maintain.maintain(only=args.only, dry_run=args.dry_run) else 1)
+
+
 def cmd_selftest(args) -> None:
     from .selftest import run_selftest
 
@@ -469,6 +506,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reboot", action="store_true", help="also reboot the guest and check it comes back")
     p.add_argument("--keep", action="store_true", help="keep the run afterwards")
     p.set_defaults(func=cmd_selftest)
+
+    p = sub.add_parser("maintain", help="rebuild images that are due, selftest them, switch to the new builds")
+    p.add_argument("--only", metavar="IMAGE", help="only the family of this image")
+    p.add_argument("--dry-run", action="store_true", help="only say what is due")
+    p.add_argument("--install-timer", action="store_true",
+                   help="run it weekly (Monday 03:00) from a systemd user timer")
+    p.set_defaults(func=cmd_maintain)
     return ap
 
 

@@ -3,9 +3,10 @@
 import hashlib
 import secrets
 import time
+from pathlib import Path
 
 from . import a11y, display, guest, runs
-from .config import DeskError, load_image
+from .config import DeskError, ImageSpec, load_image
 
 
 class Failed(Exception):
@@ -42,8 +43,9 @@ def _ssh(run, command: str) -> str:
 
 
 def _ensure(run, binary: str, package: str) -> None:
-    """Minimal installs (Ubuntu's desktop-minimal) may lack the apps the selftest drives."""
-    install = f"apt-get install -y -q {package} || dnf install -y -q {package}"
+    """Some installs may lack the apps the selftest drives."""
+    install = (f"if command -v dnf; then dnf install -y -q {package}; "
+               f"else pacman -S --noconfirm --needed {package}; fi")
     cmd = f"command -v {binary} >/dev/null || ({install}) >/dev/null 2>&1; command -v {binary}"
     r = guest.ssh_run(run.ssh_port, runs.spec_for(run).root_user, cmd, capture=True, timeout=600)
     _check(r.returncode == 0, f"{binary} is not available and could not be installed")
@@ -78,8 +80,11 @@ def _node(run, role: str) -> dict:
     return hits[0]
 
 
-def run_selftest(image: str, reboot: bool = False, keep: bool = False) -> bool:
-    spec = load_image(image)
+def run_selftest(image: str, reboot: bool = False, keep: bool = False, spec: ImageSpec | None = None,
+                 shots_dir: Path | None = None) -> bool:
+    """`spec` picks specific builds (desk maintain tests new ones); `shots_dir` gets a screenshot
+    of every failed step."""
+    spec = spec or load_image(image)
     sc = SCENARIOS[spec.family]
     run = None
     results: list[tuple[str, bool, str]] = []
@@ -91,6 +96,11 @@ def run_selftest(image: str, reboot: bool = False, keep: bool = False) -> bool:
             ok = True
         except (Failed, DeskError) as e:
             detail, ok = str(e), False
+            if shots_dir and run is not None and run.live_domain() is not None:
+                shots_dir.mkdir(parents=True, exist_ok=True)
+                shot = shots_dir / f"{len(results) + 1:02d}-{name.split(' ')[0]}.png"
+                shot.write_bytes(display.screenshot(run.live_domain()))
+                detail += f" (screen: {shot})"
         results.append((name, ok, detail))
         print(f"{'PASS' if ok else 'FAIL'}  {name:<34} {time.monotonic() - t0:5.1f}s  {detail}", flush=True)
         return ok
@@ -98,6 +108,8 @@ def run_selftest(image: str, reboot: bool = False, keep: bool = False) -> bool:
     def start():
         nonlocal run
         run = runs.up(spec, run_id=f"selftest-{secrets.token_hex(3)}")
+        # A new build under test must really restore its warm state, not fall back to a cold boot.
+        _check(not spec.warm_version or run.domain != f"desk-{run.id}", "booted cold instead of restoring")
         return f"run {run.id}"
 
     def screen():
@@ -163,4 +175,8 @@ def run_selftest(image: str, reboot: bool = False, keep: bool = False) -> bool:
             runs.down(run)
     failed = [r for r in results if not r[1]]
     print(f"{len(results) - len(failed)}/{len(results)} passed" + (f"; run kept: {run.id}" if keep and run else ""))
+    from .maintain import record
+
+    record(image, "selftest", ok=not failed, passed=len(results) - len(failed), total=len(results),
+           reboot=reboot, warm=str(spec.warm_dir.resolve()), failed=[f"{n}: {d}" for n, _, d in failed])
     return not failed

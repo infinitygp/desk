@@ -1,0 +1,20 @@
+# Arch Linux (rolling) with GNOME on Wayland: the official cloud image, set up by cloud-init.
+installer = "cloudimg"
+os_variant = "archlinux"
+memory_mib = 4096
+vcpus = 4
+disk_gb = 40
+# Rebuilt fortnightly upstream; `desk image build` takes the latest and checks its .SHA256.
+cloud_image_url = "https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2"
+# Its GRUB is not signed, so the firmware would refuse to start it.
+secure_boot = false
+user_data = "user-data"
+user = "tester"
+provision = "provision.sh"
+files = ["../_shared/gnome"]
+ready = "systemctl --user is-active --quiet graphical-session.target"
+# Run as root after provision.sh so the session picks up the shell extension.
+relogin = "systemctl restart gdm"
+layout = "pl"
+# A rolling release drifts quickly; a fresh install keeps tests close to what users have.
+rebuild_days = 14
