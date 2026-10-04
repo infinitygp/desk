@@ -41,6 +41,13 @@ chown -R tester:tester /home/tester/.config/environment.d
 systemctl disable --now mcelog.service
 systemctl reset-failed
 
+# GNOME Software's update notifications pop up at random moments over the app under test.
+install -d -o tester -g tester /home/tester/.config/autostart
+printf '[Desktop Entry]\nType=Application\nName=GNOME Software\nHidden=true\n' \
+    > /home/tester/.config/autostart/org.gnome.Software.desktop
+chown tester:tester /home/tester/.config/autostart/org.gnome.Software.desktop
+pkill -u tester -f '[g]nome-software --gapplication-service' || true
+
 # `desk reboot` reboots even when apps with unsaved work block shutdown (and reports them);
 # logind only lets root override that with this rule, shipped by systemd as an example.
 install -m 0644 /usr/share/polkit-1/rules.d/10-systemd-logind-root-ignore-inhibitors.rules.example \

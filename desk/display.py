@@ -113,17 +113,29 @@ def click(dom, x: int, y: int, button: str = "left", count: int = 1) -> None:
         time.sleep(0.08)
 
 
-def drag(dom, x1: int, y1: int, x2: int, y2: int, steps: int = 12) -> None:
+def drag(dom, x1: int, y1: int, x2: int, y2: int, steps: int = 30) -> None:
+    """Press, move like a hand would and release over the target.
+
+    Toolkit drag-and-drop (GTK, WebKit, Qt on Wayland) only starts after the pointer has moved a
+    few pixels with the button held, and only accepts the drop once the target has seen motion
+    over it; jumping there and letting go at once leaves the drag hanging."""
     size = png_size(screenshot(dom))
     qmp(dom, "input-send-event", events=_move_events(x1, y1, size))
-    time.sleep(0.05)
+    time.sleep(0.1)
     qmp(dom, "input-send-event", events=[_btn("left", True)])
+    time.sleep(0.15)
     for i in range(1, steps + 1):
         x = x1 + (x2 - x1) * i // steps
         y = y1 + (y2 - y1) * i // steps
         qmp(dom, "input-send-event", events=_move_events(x, y, size))
         time.sleep(0.02)
+    # A last wiggle over the target, then let go.
+    for dx in (2, -2, 0):
+        qmp(dom, "input-send-event", events=_move_events(min(max(x2 + dx, 0), size[0] - 1), y2, size))
+        time.sleep(0.06)
+    time.sleep(0.2)
     qmp(dom, "input-send-event", events=[_btn("left", False)])
+    time.sleep(0.1)
 
 
 def scroll(dom, x: int, y: int, dy: int) -> None:
