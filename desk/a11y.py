@@ -35,17 +35,12 @@ def snapshot(run, app: str | None = None, all_windows: bool = False, limit: int 
              save: bool = True) -> dict:
     snap = _helper(run, "snapshot", json.dumps({"app": app, "all": all_windows, "max": limit}))
     size = display.png_size(display.screenshot(run.dom()))
-    # Scrolled-away content keeps its extents; only what can be clicked is useful.
-    kept, starts = [], []
-    for top_i, top in enumerate(snap["tops"]):
-        end = snap["tops"][top_i + 1]["start"] if top_i + 1 < len(snap["tops"]) else len(snap["nodes"])
-        starts.append(len(kept))
-        kept.extend(n for n in snap["nodes"][top["start"]:end] if _on_screen(n["bbox"], size))
-    for top, start in zip(snap["tops"], starts, strict=True):
-        top["start"] = start
-    snap["nodes"] = kept
+    # Scrolled-away content keeps its extents; mark it so it is listed apart from what can be
+    # clicked right now.
     for i, node in enumerate(snap["nodes"], 1):
         node["ref"] = f"e{i}"
+        if not _on_screen(node["bbox"], size):
+            node["offscreen"] = True
     if save:
         # Refs printed to the agent must keep pointing at this snapshot.
         (run.dir / "a11y.json").write_text(json.dumps(snap))
@@ -66,22 +61,32 @@ def format_node(node: dict, indent: bool = True) -> str:
         parts.append(f"value={json.dumps(node['value'], ensure_ascii=False)}")
     if node.get("text"):
         parts.append(f"text={json.dumps(node['text'], ensure_ascii=False)}")
-    if node["states"]:
-        parts.append("[" + ",".join(node["states"]) + "]")
-    cx, cy = center(node["bbox"])
-    parts.append(f"({cx},{cy})")
+    states = node["states"] + (["offscreen"] if node.get("offscreen") else [])
+    if states:
+        parts.append("[" + ",".join(states) + "]")
+    if not node.get("offscreen"):
+        cx, cy = center(node["bbox"])
+        parts.append(f"({cx},{cy})")
     return " ".join(parts)
 
 
-def format_snapshot(snap: dict) -> str:
+def format_snapshot(snap: dict, offscreen: bool = False) -> str:
     lines = []
+    hidden = 0
     tops = snap["tops"] + [{"start": len(snap["nodes"])}]
     for top, nxt in zip(tops, tops[1:], strict=False):
         mark = " [focused]" if top["focus"] else ""
         lines.append(f"window {json.dumps(top['title'], ensure_ascii=False)} ({top['app']}){mark}")
-        lines.extend("  " + format_node(n) for n in snap["nodes"][top["start"]:nxt["start"]])
+        for n in snap["nodes"][top["start"]:nxt["start"]]:
+            if n.get("offscreen") and not offscreen:
+                hidden += 1
+            else:
+                lines.append("  " + format_node(n))
     if not snap["tops"]:
         lines.append("(no accessible windows in scope; try --all)")
+    if hidden:
+        lines.append(f"... {hidden} more outside the visible area (desk a11y --offscreen); "
+                     "clicking their @ref scrolls them into view")
     if snap["truncated"]:
         lines.append("... truncated; narrow with --app or raise --max")
     return "\n".join(lines)
@@ -98,9 +103,23 @@ def _spec(run, ref: str) -> dict:
     return {k: node[k] for k in ("pid", "path", "role", "name")}
 
 
+def _visible_point(run, spec: dict) -> tuple[int, int]:
+    """Fresh screen position (layouts move); scrolls the element into view first if needed."""
+    size = display.png_size(display.screenshot(run.dom()))
+    res = _helper(run, "resolve", json.dumps(spec))
+    if res["showing"] and _on_screen(res["bbox"], size):
+        return center(res["bbox"])
+    _helper(run, "scroll", json.dumps(spec))
+    display.wait_stable(run.dom(), timeout=3)
+    res = _helper(run, "resolve", json.dumps(spec))
+    if not (res["showing"] and _on_screen(res["bbox"], size)):
+        raise DeskError(f"{spec['role']} {spec['name']!r} is outside the visible area and could not be "
+                        "scrolled into view; scroll with `desk scroll` and look again")
+    return center(res["bbox"])
+
+
 def locate_ref(run, ref: str) -> tuple[int, int]:
-    """Fresh screen position of a ref from the last snapshot (layouts move)."""
-    return center(_helper(run, "resolve", json.dumps(_spec(run, ref)))["bbox"])
+    return _visible_point(run, _spec(run, ref))
 
 
 def find(run, query: str, role: str | None = None, exact: bool = False,
@@ -123,9 +142,12 @@ def locate_name(run, query: str, role: str | None = None, exact: bool = False) -
         hits = find(run, query, role, exact, all_windows=True, save=False)
     if not hits:
         raise DeskError(f"nothing named {query!r} on screen")
-    interactive = [n for n in hits if n["role"] not in ("label", "heading", "paragraph", "static")]
-    best = (interactive or hits)[0]
-    return center(best["bbox"])
+    def rank(n: dict) -> tuple[bool, bool]:
+        # Prefer what is visible, then controls over the text describing them.
+        return bool(n.get("offscreen")), n["role"] in ("label", "heading", "paragraph", "static", "section")
+
+    best = min(hits, key=rank)
+    return _visible_point(run, {k: best[k] for k in ("pid", "path", "role", "name")})
 
 
 def action(run, ref: str, name: str | None = None) -> dict:

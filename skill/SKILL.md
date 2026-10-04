@@ -34,9 +34,9 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 
 | Command | Purpose |
 |---|---|
-| `desk a11y [--app NAME] [--all] [--max N]` | Accessibility tree of the focused window (`--all`: every window and the shell) |
-| `desk find TEXT [--role R] [--exact] [--all]` | Elements whose name, value or text matches; prints refs usable right away |
-| `desk click (X Y \| @eN \| --name TEXT [--role R] [--exact]) [--button right] [--double]` | Click |
+| `desk a11y [--app NAME] [--all] [--offscreen] [--max N]` | Accessibility tree of the focused window (`--all`: every window and the shell; `--offscreen`: also what is scrolled out of view) |
+| `desk find TEXT [--role R] [--exact] [--all]` | Elements whose name, value or text matches, off-screen ones included; refs usable right away |
+| `desk click (X Y \| @eN \| --name TEXT [--role R] [--exact]) [--button right] [--double]` | Click; an off-screen @ref or name is scrolled into view first |
 | `desk action @eN [NAME]` | Invoke an AT-SPI action instead of clicking (element covered or off-screen) |
 | `desk set-text @eN TEXT` | Replace an editable field's text through AT-SPI (characters `type` cannot produce) |
 | `desk shot [--label L] [-o FILE] [--settle S]` | Screenshot once the screen is still (up to 3 s; `--settle 0` = now) |
@@ -45,7 +45,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk key COMBO...` | `super`, `enter`, `esc`, `tab`, `ctrl+alt+t`, `shift+f10`, `alt+f4`, `f5`, letters |
 | `desk wait [--change] [--timeout S]` | Until the screen is still; `--change` first waits for it to change at all |
 | `desk reboot [--shot]` | Reboot and return when the new session is ready; reports apps that blocked shutdown |
-| `desk exec [--root] -- CMD` | Run in the guest over SSH as the desktop user (`--root`: sudo) |
+| `desk exec [--root] -- CMD` | Run in the guest over SSH as the desktop user (`--root`: as root) |
 | `desk exec --gui -- APP ARGS` | Start a program detached inside the graphical session |
 | `desk exec --agent -- CMD` | Run as root through qemu-guest-agent; works without guest networking |
 | `desk push LOCAL REMOTE`, `desk pull REMOTE LOCAL` | Copy files (scp) |
@@ -62,11 +62,18 @@ guest shell; `--root` and `--gui` apply to the whole snippet.
   check `pgrep` in the guest before concluding it failed.
 - Refs (`@e7`) come from the latest `desk a11y` or `desk find`; take a new one after the UI changes.
   `desk click @eN` re-reads the element's position, so moved elements are still hit.
+- `desk a11y` lists what is visible and ends with "N more outside the visible area" when a page or
+  list is scrolled; `desk find` searches those too. Long forms and dialogs at 1280x800 often hide
+  their last fields and buttons that way.
 - Toolkits report positions themselves; GTK4 is sometimes off by a few pixels inside padded
   containers. If a click by ref misses, check with a screenshot and click by pixels.
 - Browsers build their accessibility tree lazily: if a page's content is missing from the first
   `desk a11y`, run it again.
 - `desk type` only knows ASCII and Polish letters; for anything else use `desk set-text`.
+- `dnf` prints its progress on stderr even with `-q`; add `>/dev/null 2>&1` and check the result with
+  `rpm -q` / `rpm -V` instead of reading the transaction log.
+- Web UIs on `https://localhost` with a self-signed certificate (Cockpit) show Firefox's warning on
+  every new run: `desk click --name Advanced`, then `desk click --name Proceed` (it scrolls itself).
 
 ## Testing a package end to end
 
@@ -93,8 +100,10 @@ guest shell; `--root` and `--gui` apply to the whole snippet.
 
 ## Notes
 
-- The guest is Fedora 44 Workstation, GNOME on Wayland, user `tester` (password `tester`),
-  passwordless sudo, 1280x800, Polish (programmer's) keyboard layout = US plus AltGr letters,
+- The guest is Fedora 44 Workstation, GNOME on Wayland, user `tester` (password `tester`) with
+  ordinary sudo, so sudo, polkit and Cockpit's administrative access ask for that password as on a
+  real machine (`desk exec --root` does not need it), 1280x800, en_US locale, Polish (programmer's)
+  keyboard layout = US plus AltGr letters,
   animations and screen lock off, session starts on the desktop rather than the overview.
 - Guest clocks are synced on restore; network goes through user-mode networking (outbound
   works, inbound only SSH).

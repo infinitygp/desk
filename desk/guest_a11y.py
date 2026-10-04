@@ -23,7 +23,11 @@ QUIET = {"filler", "panel", "section", "scroll pane", "viewport", "layered pane"
          "redundant object", "unknown", "grouping"}
 TEXT_ROLES = {"label", "heading", "paragraph", "static", "caption", "document web",
               "alert", "notification", "status bar", "block quote", "list item"}
+# Hidden roots: a background tab's document or an unmapped window is not "off-screen
+# content", it is simply not there for the user.
+HIDDEN_ROOTS = {"document web", "frame", "window", "dialog", "internal frame", "alert", "file chooser"}
 MAX_VISIT = 8000
+MAX_OFFSCREEN = 300
 OBJ = "￼"
 
 
@@ -121,7 +125,9 @@ def describe(acc, base, pid, path, depth):
         value = text_of(acc)[:120]
         if "editable" in st or (value and value != name):
             node["value"] = value
-    elif role in TEXT_ROLES and not name:
+    elif (role in TEXT_ROLES or role in QUIET) and not name:
+        # For containers this is only their own text: children appear as embedded objects,
+        # which text_of drops, and are listed separately.
         node["text"] = text_of(acc)[:160]
     return node, st
 
@@ -133,7 +139,7 @@ def wanted(node, st, parent_name) -> bool:
     if role in INTERACTIVE:
         return True
     if role in QUIET:
-        return False
+        return bool(node.get("text")) and node["text"] != parent_name
     if role == "label" and name and name == parent_name:
         return False
     return bool(name or node.get("text"))
@@ -147,12 +153,12 @@ def snapshot(opts: dict) -> dict:
     want_all = opts.get("all", False)
     limit = opts.get("max", 300)
     desktop = Atspi.get_desktop(0)
-    nodes, tops, visited = [], [], 0
+    nodes, tops, visited, offscreen = [], [], 0, 0
     truncated = False
 
     def walk(acc, base, pid, path, depth, parent_name):
-        nonlocal visited, truncated
-        if visited >= MAX_VISIT or len(nodes) >= limit:
+        nonlocal visited, truncated, offscreen
+        if visited >= MAX_VISIT or len(nodes) - offscreen >= limit:
             truncated = True
             return
         visited += 1
@@ -160,10 +166,18 @@ def snapshot(opts: dict) -> dict:
             node, st = describe(acc, base, pid, path, depth)
         except GLib.Error:
             return
-        # Background tabs and hidden pages stay "visible" but are not "showing".
+        # Not "showing" covers content scrolled out of view or clipped by a scrolling list,
+        # which the agent can bring into view, but also background tabs and hidden windows,
+        # which are pruned. Structural containers can lack "showing" while their children are
+        # on screen (Gecko marks a PatternFly tbody that way), so the state is judged per node.
         if "showing" not in st:
-            return
+            if node["role"] in HIDDEN_ROOTS:
+                return
+            node["offscreen"] = True
         emit = wanted(node, st, parent_name)
+        if emit and node.get("offscreen"):
+            emit = offscreen < MAX_OFFSCREEN
+            offscreen += emit
         if emit:
             nodes.append(node)
         child_depth = depth + 1 if emit else depth
@@ -266,7 +280,24 @@ def resolve(spec: dict) -> dict:
     bbox = Mapper.place(acc, base)
     if bbox is None:
         raise LookupError("element has no on-screen extents")
-    return {"bbox": bbox}
+    return {"bbox": bbox, "showing": "showing" in states(acc)}
+
+
+def scroll(spec: dict) -> dict:
+    """Bring an element into view the way the toolkit itself would (scrollIntoView and kin)."""
+    _, _, acc = find_node(spec)
+    done = False
+    if "Component" in acc.get_interfaces():
+        try:
+            done = Atspi.Component.scroll_to(acc, Atspi.ScrollType.ANYWHERE)
+        except (GLib.Error, AttributeError, TypeError):
+            done = False
+    if not done:
+        try:
+            done = Atspi.Component.grab_focus(acc)
+        except (GLib.Error, AttributeError, TypeError):
+            done = False
+    return {"done": bool(done)}
 
 
 def action(spec: dict, name: str | None) -> dict:
@@ -298,6 +329,8 @@ def main() -> None:
             out = snapshot(arg)
         elif cmd == "resolve":
             out = resolve(arg)
+        elif cmd == "scroll":
+            out = scroll(arg)
         elif cmd == "action":
             out = action(arg, sys.argv[3] if len(sys.argv) > 3 else None)
         elif cmd == "set-text":

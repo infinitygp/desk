@@ -99,11 +99,11 @@ def provision(spec: ImageSpec, port: int) -> None:
         if guest.scp(port, str(files), f"{spec.user}@127.0.0.1:/tmp/desk-provision/") != 0:
             raise DeskError("copying provision files failed")
     script = (spec.dir / spec.provision).read_bytes()
-    r = guest.ssh_run(port, spec.user, "sudo -n bash -s", input=script, capture=True)
+    r = guest.ssh_run(port, guest.ROOT, "bash -s", input=script, capture=True)
     if r.returncode != 0:
         raise DeskError(f"provision script failed ({r.returncode}): {r.stderr.decode(errors='replace')}")
     if spec.relogin:
-        guest.ssh_run(port, spec.user, spec.relogin, capture=True)
+        guest.ssh_run(port, guest.ROOT, spec.relogin, capture=True)
         guest.wait_session_gone(port, spec.user, spec.ready)
         guest.wait_ready(port, spec.user, spec.ready)
 

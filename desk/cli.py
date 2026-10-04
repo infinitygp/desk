@@ -116,7 +116,8 @@ def cmd_click(args) -> None:
 def cmd_a11y(args) -> None:
     run = runs.resolve(args.run)
     run.dom()
-    print(a11y.format_snapshot(a11y.snapshot(run, app=args.app, all_windows=args.all, limit=args.max)))
+    snap = a11y.snapshot(run, app=args.app, all_windows=args.all, limit=args.max)
+    print(a11y.format_snapshot(snap, offscreen=args.offscreen))
 
 
 def cmd_find(args) -> None:
@@ -197,8 +198,10 @@ def cmd_exec(args) -> None:
         sys.stdout.buffer.write(out)
         sys.stderr.buffer.write(err)
         sys.exit(code)
-    command = guest.remote_command(argv, root=args.root, gui=args.gui)
-    r = guest.ssh_run(run.ssh_port, run.user, command, timeout=args.timeout)
+    if args.root and args.gui:
+        raise DeskError("--gui starts programs in the desktop user's session; drop --root")
+    command = guest.remote_command(argv, gui=args.gui)
+    r = guest.ssh_run(run.ssh_port, guest.ROOT if args.root else run.user, command, timeout=args.timeout)
     sys.exit(r.returncode)
 
 
@@ -299,6 +302,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--app", help="only this application (substring of its name)")
     p.add_argument("--all", action="store_true", help="every visible window, the shell included")
     p.add_argument("--max", type=int, default=300, help="max elements to list")
+    p.add_argument("--offscreen", action="store_true",
+                   help="also list elements scrolled out of view or clipped by a scrolling list")
     p.set_defaults(func=cmd_a11y)
 
     p = sub.add_parser("find", help="find elements by name, value or text; refs are usable right away")
@@ -350,7 +355,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_key)
 
     p = sub.add_parser("exec", help="run a command in the guest (desk exec [opts] -- cmd ...)")
-    p.add_argument("--root", action="store_true", help="via sudo")
+    p.add_argument("--root", action="store_true", help="as root (the harness has its own root key)")
     p.add_argument("--gui", action="store_true", help="start detached inside the graphical session")
     p.add_argument("--agent", action="store_true", help="via qemu-guest-agent as root, no network needed")
     p.add_argument("--timeout", type=float, default=None)

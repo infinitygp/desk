@@ -26,6 +26,17 @@ class Format(unittest.TestCase):
         self.assertEqual(out[2], 'window "B" (b)')
         self.assertIn("@e2", out[3])
 
+    def test_offscreen_is_summarised(self):
+        snap = {"tops": [{"title": "A", "app": "a", "focus": True, "start": 0}],
+                "nodes": [node("e1", 0, "button", "OK"), node("e2", 0, "button", "Proceed", offscreen=True)],
+                "truncated": False}
+        short = format_snapshot(snap)
+        self.assertNotIn("@e2", short)
+        self.assertIn("1 more outside the visible area", short)
+        full = format_snapshot(snap, offscreen=True)
+        self.assertIn('@e2 button "Proceed" [offscreen]', full)
+        self.assertNotIn("(60,40)", full.splitlines()[-1])
+
     def test_geometry(self):
         self.assertEqual(center([10, 20, 100, 40]), (60, 40))
         self.assertTrue(_on_screen([0, 0, 10, 10], (1280, 800)))
@@ -33,8 +44,10 @@ class Format(unittest.TestCase):
 
 
 class RemoteCommand(unittest.TestCase):
-    def test_snippet_is_wrapped_whole(self):
-        self.assertEqual(remote_command(["a && b"], root=True), "sudo -n bash -c 'a && b'")
+    def test_snippet_is_passed_whole(self):
+        self.assertEqual(remote_command(["a && b"]), "a && b")
+        self.assertEqual(remote_command(["a && b"], gui=True),
+                         "systemd-run --user --collect --quiet -- bash -c 'a && b'")
 
     def test_argv_is_quoted(self):
         self.assertEqual(remote_command(["echo", "a b"]), "echo 'a b'")

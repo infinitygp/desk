@@ -23,15 +23,16 @@ def ssh_argv(port: int, user: str, tty: bool = False) -> list[str]:
     return ["ssh", *_SSH_OPTS, *(["-t"] if tty else []), "-p", str(port), f"{user}@127.0.0.1"]
 
 
-def remote_command(argv: list[str], root: bool = False, gui: bool = False) -> str:
-    # A single argument is a shell snippet (`a && b | c`); wrap it whole so that
-    # sudo or the session scope applies to all of it, not just the first command.
+ROOT = "root"
+
+
+def remote_command(argv: list[str], gui: bool = False) -> str:
+    # A single argument is a shell snippet (`a && b | c`); wrap it whole so that the
+    # session scope applies to all of it, not just the first command.
     cmd = shlex.join(argv) if len(argv) > 1 else argv[0]
     if gui:
         # Starts the program inside the logged-in graphical session and returns at once.
         cmd = f"systemd-run --user --collect --quiet -- bash -c {shlex.quote(cmd)}"
-    if root:
-        cmd = f"sudo -n bash -c {shlex.quote(cmd)}"
     return cmd
 
 
@@ -113,7 +114,7 @@ def reboot(port: int, user: str, ready: str, timeout: float = 300) -> tuple[floa
     before = boot_id(port, user)
     t0 = time.monotonic()
     try:
-        r = ssh_run(port, user, "sudo -n systemctl reboot --check-inhibitors=no", capture=True, timeout=30)
+        r = ssh_run(port, ROOT, "systemctl reboot --check-inhibitors=no", capture=True, timeout=30)
         if r.returncode not in (0, 255):  # 255: the connection dropped as the guest went down
             raise DeskError(f"reboot refused: {r.stderr.decode(errors='replace').strip()}")
     except subprocess.TimeoutExpired:
