@@ -27,5 +27,20 @@ class Variants(unittest.TestCase):
         self.assertTrue((ub.dir / ub.user_data).is_file())
 
 
+class WindowsCommands(unittest.TestCase):
+    def test_linux_commands_untouched(self):
+        spec = load_image("fedora-44-gnome")
+        self.assertEqual(spec.cmd("ls -l"), "ls -l")
+
+    def test_windows_commands(self):
+        import base64
+
+        spec = load_image("windows-11")
+        command = spec.cmd('Write-Output "Zażółć"')
+        self.assertTrue(command.endswith("; exit $LASTEXITCODE"))
+        encoded = command.split("-EncodedCommand ")[1].split(";")[0]
+        self.assertIn('Write-Output "Zażółć"', base64.b64decode(encoded).decode("utf-16-le"))
+
+
 if __name__ == "__main__":
     unittest.main()

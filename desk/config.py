@@ -92,13 +92,15 @@ class ImageSpec:
         return BASE / f"{self.base_name}.xml"
 
     def cmd(self, command: str) -> str:
-        """`command` as it must be sent over SSH. Windows OpenSSH hands it to powershell.exe
-        through the Windows command line, which mangles quotes; an encoded command arrives
-        intact."""
+        """`command` as it must be sent over SSH."""
         if self.family != "windows":
             return command
-        # Errors and progress would otherwise reach stderr as CLIXML: print errors as plain text,
-        # keep a failing status, and use UTF-8 so Polish letters survive the console code page.
+        # Windows OpenSSH hands the command to powershell.exe through the Windows command line,
+        # which mangles quotes; an encoded command arrives intact. Errors become plain text rather
+        # than CLIXML, output UTF-8 so Polish letters survive the console code page, and the
+        # login shell (PowerShell, whose -c would exit 1 for any failure) passes the code on.
+        # An SSH subsystem would not save the outer PowerShell: Windows OpenSSH starts
+        # subsystems through the default shell too, and loses their exit codes and output.
         script = (
             "$ProgressPreference = 'SilentlyContinue'; [Console]::OutputEncoding = [Text.Encoding]::UTF8\n"
             "$global:LASTEXITCODE = 0; $script:deskFailed = $false\n"
@@ -110,7 +112,8 @@ class ImageSpec:
             "if ($LASTEXITCODE) { exit $LASTEXITCODE }; if ($script:deskFailed) { exit 1 }\n"
         )
         encoded = base64.b64encode(script.encode("utf-16-le")).decode()
-        return f"powershell.exe -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand {encoded}"
+        return (f"powershell.exe -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand {encoded}; "
+                "exit $LASTEXITCODE")
 
     @property
     def provision_scripts(self) -> list[str]:

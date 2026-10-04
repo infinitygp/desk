@@ -220,12 +220,18 @@ def provision(spec: ImageSpec, port: int) -> None:
                           "tar -C /tmp/desk-provision/files -xf -", input=buf.getvalue(), capture=True)
         if r.returncode != 0:
             raise DeskError(f"copying provision files failed: {r.stderr.decode(errors='replace')}")
-    # PowerShell runs a script piped to `-Command -` line by line, like `bash -s`.
-    runner = ("powershell.exe -NoProfile -ExecutionPolicy Bypass -Command -" if spec.family == "windows"
-              else "bash -s")
     for script in spec.provision_scripts:
         for attempt in (1, 2, 3):
-            r = guest.ssh_run(port, spec.root_user, runner, input=(spec.dir / script).read_bytes(), capture=True)
+            if spec.family == "windows":
+                # Not piped to `-Command -`: PowerShell reads that like an interactive prompt and
+                # silently skips a multi-line block at the end of the script.
+                if guest.scp(port, str(spec.dir / script), f"{spec.root_user}@127.0.0.1:C:/desk/provision.ps1") != 0:
+                    r = subprocess.CompletedProcess([], 255, b"", b"copying the script failed")
+                else:
+                    r = guest.ssh_run(port, spec.root_user, "powershell.exe -NoProfile -ExecutionPolicy Bypass "
+                                      "-File C:\\desk\\provision.ps1", capture=True)
+            else:
+                r = guest.ssh_run(port, spec.root_user, "bash -s", input=(spec.dir / script).read_bytes(), capture=True)
             # 255: the connection itself broke. Windows does that now and then during its first
             # boot after setup; provisioning scripts are idempotent, so run it again.
             if r.returncode != 255 or attempt == 3:
