@@ -282,7 +282,8 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool) -> Run:
         xml = prepare_domain_xml(template, name=run.domain, disk=disk, nvram=nvram,
                                  ssh_port=run.ssh_port, console_log=rd / "console.log",
                                  keep_uuid=not cold, vnc_password=run.vnc_password,
-                                 agent_ports=(run.agent_port, spec.agent_port) if spec.agent_port else None)
+                                 agent_ports=(run.agent_port, spec.agent_port) if spec.agent_port else None,
+                                 sound=spec.sound)
         if cold:
             dom = conn().createXML(xml, 0)
         else:

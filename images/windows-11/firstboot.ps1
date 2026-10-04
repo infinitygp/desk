@@ -29,8 +29,10 @@ Copy-Item "$cd\agent.ps1", "$cd\uia.ps1" C:\desk -Force
 # Files from a CD keep the read-only attribute; provisioning replaces them later.
 Get-ChildItem C:\desk -File | ForEach-Object { $_.IsReadOnly = $false }
 # conhost --headless: Windows Terminal, the default console host, ignores -WindowStyle Hidden.
+# -MTA: UI Automation clients belong in the multithreaded apartment; in PowerShell's default
+# STA the MSAA proxies of classic Win32 windows (installers) return no children.
 Reg 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' desk-agent `
-    'conhost.exe --headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\desk\agent.ps1' String
+    'conhost.exe --headless powershell.exe -MTA -NoProfile -ExecutionPolicy Bypass -File C:\desk\agent.ps1' String
 
 # A stable screen for screenshots: no sleep, lock, screen saver, blinking cursor or animations.
 powercfg /change monitor-timeout-ac 0

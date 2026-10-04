@@ -293,7 +293,7 @@ def warm(spec: ImageSpec, force: bool = False) -> None:
     xml = prepare_domain_xml(
         spec.base_xml.read_text(), name=name, disk=disk, nvram=nvram, ssh_port=port,
         console_log=wd / "console.log",
-        agent_ports=(free_port(), spec.agent_port) if spec.agent_port else None,
+        agent_ports=(free_port(), spec.agent_port) if spec.agent_port else None, sound=spec.sound,
     )
     _log(f"booting {name}")
     dom = conn().createXML(xml, 0)

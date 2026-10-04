@@ -2,7 +2,9 @@
 # (relogin in image.toml) starts the in-session agent again. Keep it idempotent.
 $run = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 # conhost --headless: Windows Terminal, the default console host, ignores -WindowStyle Hidden.
-Set-ItemProperty $run -Name desk-agent -Value 'conhost.exe --headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\desk\agent.ps1'
+# -MTA: UI Automation clients belong in the multithreaded apartment; in PowerShell's default
+# STA the MSAA proxies of classic Win32 windows (installers) return no children.
+Set-ItemProperty $run -Name desk-agent -Value 'conhost.exe --headless powershell.exe -MTA -NoProfile -ExecutionPolicy Bypass -File C:\desk\agent.ps1'
 
 # English (US) with the Polish (Programmers) layout. An earlier image listed Polish as a language
 # of its own, which made Store apps (Notepad) show Polish while Windows itself is English.

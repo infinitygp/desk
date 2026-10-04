@@ -75,6 +75,7 @@ def reflink_copy(src: Path, dst: Path) -> None:
 def prepare_domain_xml(
     template: str, *, name: str, disk: Path, nvram: Path, ssh_port: int, console_log: Path,
     keep_uuid: bool = False, vnc_password: str | None = None, agent_ports: tuple[int, int] | None = None,
+    sound: str | None = None,
 ) -> str:
     """Turn the golden image's domain XML into a per-run transient domain.
 
@@ -133,6 +134,13 @@ def prepare_domain_xml(
         ch = ET.SubElement(devices, "channel", type="unix")
         ET.SubElement(ch, "source", mode="bind")
         ET.SubElement(ch, "target", type="virtio", name="org.qemu.guest_agent.0")
+    if sound and devices.find("sound") is None:
+        # An emulated sound card with no host output: apps get a real audio endpoint to play to
+        # (per-app volume, media keys) and nothing is heard.
+        snd = ET.SubElement(devices, "sound", model=sound)
+        ET.SubElement(snd, "audio", id="1")
+        if not any(a.get("id") == "1" for a in devices.findall("audio")):
+            ET.SubElement(devices, "audio", id="1", type="none")
     if vnc_password:
         # For a person to watch (desk view). Loopback only, through an SSH tunnel; the password
         # keeps other local accounts out, since the VMs run under this user.

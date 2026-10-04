@@ -62,6 +62,8 @@ class ImageSpec:
     openssh_msi: str | None = None
     # Guest port of an in-session agent, forwarded from the host like SSH (Windows).
     agent_port: int | None = None
+    # Emulated sound card model (e.g. "ich9") for guests that have none.
+    sound: str | None = None
     # How the harness talks to this kind of guest.
     family: str = "linux"
     # Account for `exec --root` and system work: Linux has its own root key, a Windows
@@ -95,10 +97,19 @@ class ImageSpec:
         intact."""
         if self.family != "windows":
             return command
-        # Progress records would otherwise reach stderr as CLIXML.
-        # UTF-8 output, or Polish letters arrive in the console code page.
-        prelude = "$ProgressPreference = 'SilentlyContinue'; [Console]::OutputEncoding = [Text.Encoding]::UTF8\n"
-        encoded = base64.b64encode(f"{prelude}{command}".encode("utf-16-le")).decode()
+        # Errors and progress would otherwise reach stderr as CLIXML: print errors as plain text,
+        # keep a failing status, and use UTF-8 so Polish letters survive the console code page.
+        script = (
+            "$ProgressPreference = 'SilentlyContinue'; [Console]::OutputEncoding = [Text.Encoding]::UTF8\n"
+            "$global:LASTEXITCODE = 0; $script:deskFailed = $false\n"
+            f"& {{\n{command}\n}} 2>&1 | ForEach-Object {{\n"
+            "  if ($_ -is [System.Management.Automation.ErrorRecord]) {\n"
+            "    [Console]::Error.WriteLine($_.ToString()); $script:deskFailed = $true\n"
+            "  } else { $_ }\n"
+            "} | Out-String -Stream\n"
+            "if ($LASTEXITCODE) { exit $LASTEXITCODE }; if ($script:deskFailed) { exit 1 }\n"
+        )
+        encoded = base64.b64encode(script.encode("utf-16-le")).decode()
         return f"powershell.exe -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand {encoded}"
 
     @property

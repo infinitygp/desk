@@ -4,6 +4,7 @@
 $AE = [Windows.Automation.AutomationElement]
 $ControlView = [Windows.Automation.Automation]::ControlViewCondition
 $Walker = [Windows.Automation.TreeWalker]::ControlViewWalker
+$RawWalker = [Windows.Automation.TreeWalker]::RawViewWalker
 
 $Roles = @{
     'Button' = 'button'; 'SplitButton' = 'button'; 'CheckBox' = 'check box'; 'RadioButton' = 'radio button'
@@ -24,6 +25,14 @@ $MaxVisit = 6000
 
 function Get-Role($el) {
     $name = $el.Cached.ControlType.ProgrammaticName -replace '^ControlType\.', ''
+    if ($name -eq 'Pane') {
+        # Classic Win32 dialogs (NSIS installers) come through MSAA with their controls as panes;
+        # the window class still tells what they are.
+        $class = [string](Cached $el $AE::ClassNameProperty)
+        if ($class -eq 'Button' -or (Cached $el $AE::IsInvokePatternAvailableProperty)) { return 'button' }
+        if ($class -eq 'Edit') { return 'entry' }
+        if ($class -eq 'Static') { return 'label' }
+    }
     if ($Roles.ContainsKey($name)) { $Roles[$name] } else { $name.ToLower() }
 }
 
@@ -33,6 +42,7 @@ function New-Cache {
     $cr.TreeFilter = $ControlView
     foreach ($p in 'NameProperty', 'ControlTypeProperty', 'BoundingRectangleProperty', 'IsOffscreenProperty',
                    'IsEnabledProperty', 'HasKeyboardFocusProperty', 'ProcessIdProperty', 'NativeWindowHandleProperty',
+                   'IsInvokePatternAvailableProperty', 'ClassNameProperty',
                    'IsValuePatternAvailableProperty', 'IsTogglePatternAvailableProperty',
                    'IsSelectionItemPatternAvailableProperty', 'IsExpandCollapsePatternAvailableProperty') {
         $cr.Add($AE::$p)
@@ -43,6 +53,34 @@ function New-Cache {
     $cr.Add([Windows.Automation.SelectionItemPattern]::IsSelectedProperty)
     $cr.Add([Windows.Automation.ExpandCollapsePattern]::ExpandCollapseStateProperty)
     $cr
+}
+
+function New-ElementCache {
+    $cr = New-Cache
+    $cr.TreeScope = [Windows.Automation.TreeScope]::Element
+    $cr
+}
+
+# Classic Win32 dialogs (NSIS and other installers) come through the MSAA proxy, which hands
+# back no descendants for a cached subtree. Walk those live, caching one element at a time.
+function Walk-Live($live, $path, $depth, $parentName, $hwnd, $nodes, $limit, $crEl) {
+    if ($script:visited -ge $MaxVisit -or ($nodes.Count - $script:offscreen) -ge $limit) { $script:truncated = $true; return }
+    try { $el = $live.GetUpdatedCache($crEl) } catch { return }
+    $script:visited++
+    $node = Describe $el $path $depth $hwnd
+    $node.live = $true
+    $emit = Wanted $node $parentName
+    if ($emit -and $node.offscreen) { $emit = $script:offscreen -lt 300; if ($emit) { $script:offscreen++ } }
+    if ($emit) { [void]$nodes.Add($node) }
+    $childDepth = if ($emit) { $depth + 1 } else { $depth }
+    $pname = if ($emit) { $node.name } else { $parentName }
+    $i = 0
+    $ch = $RawWalker.GetFirstChild($live)
+    while ($null -ne $ch) {
+        Walk-Live $ch ($path + $i) $childDepth $pname $hwnd $nodes $limit $crEl
+        $i++
+        $ch = $RawWalker.GetNextSibling($ch)
+    }
 }
 
 function Cached($el, $prop) {
@@ -88,9 +126,11 @@ function Describe($el, $path, $depth, $hwnd) {
     $node
 }
 
-function Wanted($node, $parentName) {
+function Wanted($node, $parentName, $leaf = $false) {
     if ($null -eq $node.bbox) { return $false }
     if ($Interactive -contains $node.role) { return $true }
+    # A named pane without children is static text in an MSAA-proxied dialog.
+    if ($node.role -eq 'panel' -and $leaf -and $node.name) { return $true }
     if ($Quiet -contains $node.role) { return $false }
     if ($node.role -eq 'label' -and $node.name -eq $parentName) { return $false }
     [bool]$node.name
@@ -144,7 +184,11 @@ function Snapshot($opts) {
         }
         [void]$tops.Add([ordered]@{ app = $procName; pid = $hwnd; title = $title; focus = $isFocus
                                     start = $nodes.Count })
-        Walk $cached @(0) 0 '' $hwnd $nodes $limit
+        if ($cached.CachedChildren.Count -eq 0 -and $null -ne $RawWalker.GetFirstChild($top)) {
+            Walk-Live $top @(0) 0 '' $hwnd $nodes $limit (New-ElementCache)
+        } else {
+            Walk $cached @(0) 0 '' $hwnd $nodes $limit
+        }
     }
     @{ windows = @(); tops = $tops; nodes = $nodes; truncated = $script:truncated }
 }
@@ -153,7 +197,7 @@ function Walk($el, $path, $depth, $parentName, $hwnd, $nodes, $limit) {
     if ($script:visited -ge $MaxVisit -or ($nodes.Count - $script:offscreen) -ge $limit) { $script:truncated = $true; return }
     $script:visited++
     $node = Describe $el $path $depth $hwnd
-    $emit = Wanted $node $parentName
+    $emit = Wanted $node $parentName ($el.CachedChildren.Count -eq 0)
     if ($emit -and $node.offscreen) { $emit = $script:offscreen -lt 300; if ($emit) { $script:offscreen++ } }
     if ($emit) { [void]$nodes.Add($node) }
     $childDepth = if ($emit) { $depth + 1 } else { $depth }
@@ -170,6 +214,23 @@ function Find-Node($spec) {
     $cr = New-Cache
     $cr.AutomationElementMode = [Windows.Automation.AutomationElementMode]::Full
     $cached = $top.GetUpdatedCache($cr)
+    if ($cached.CachedChildren.Count -eq 0) {
+        # Live walk for MSAA-proxied windows (see Walk-Live).
+        $crEl = New-ElementCache
+        $crEl.AutomationElementMode = [Windows.Automation.AutomationElementMode]::Full
+        $el = $top
+        foreach ($i in ($spec.path | Select-Object -Skip 1)) {
+            $ch = $RawWalker.GetFirstChild($el)
+            for ($k = 0; $k -lt $i -and $null -ne $ch; $k++) { $ch = $RawWalker.GetNextSibling($ch) }
+            $el = $ch
+            if ($null -eq $el) { break }
+        }
+        if ($el) {
+            $c = $el.GetUpdatedCache($crEl)
+            if ((Get-Role $c) -eq $spec.role -and ([string]$c.Cached.Name).Trim() -eq $spec.name) { return $c }
+        }
+        throw "$($spec.role) '$($spec.name)' no longer exists"
+    }
     $el = $cached
     foreach ($i in ($spec.path | Select-Object -Skip 1)) {
         $kids = $el.CachedChildren
@@ -191,6 +252,22 @@ function Invoke-Uia($op, $arg, $text) {
     $spec = if ($arg -is [string]) { $arg | ConvertFrom-Json } else { $arg }
     switch ($op) {
         'snapshot' { return Snapshot $spec }
+        # Diagnostics for windows whose contents do not show up.
+        'probe' {
+            $out = [ordered]@{ apartment = [Threading.Thread]::CurrentThread.GetApartmentState().ToString() }
+            foreach ($top in (Get-TopWindows)) {
+                $name = try { $top.Current.Name } catch { "?" }
+                if ($spec.title -and $name -notlike "*$($spec.title)*") { continue }
+                $row = [ordered]@{ hwnd = $top.Current.NativeWindowHandle; framework = $top.Current.FrameworkId
+                                   class = $top.Current.ClassName }
+                try { $row.cached = $top.GetUpdatedCache((New-Cache)).CachedChildren.Count } catch { $row.cached = "error: $($_.Exception.Message)" }
+                try { $row.control = $top.FindAll([Windows.Automation.TreeScope]::Children, $ControlView).Count } catch { $row.control = "error: $($_.Exception.Message)" }
+                try { $row.raw = $top.FindAll([Windows.Automation.TreeScope]::Children, [Windows.Automation.Condition]::TrueCondition).Count } catch { $row.raw = "error: $($_.Exception.Message)" }
+                try { $f = $RawWalker.GetFirstChild($top); $row.rawfirst = if ($f) { "$($f.Current.ControlType.ProgrammaticName) '$($f.Current.Name)'" } else { $null } } catch { $row.rawfirst = "error: $($_.Exception.Message)" }
+                $out[$name] = $row
+            }
+            return $out
+        }
         'resolve' {
             $el = Find-Node $spec
             $r = $el.Current.BoundingRectangle

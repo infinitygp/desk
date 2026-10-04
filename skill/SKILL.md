@@ -114,6 +114,12 @@ Windows 11 Enterprise (evaluation) for Windows builds and installers.
   `Set-Content -Encoding UTF8` / `Get-Content -Encoding UTF8` for text with Polish letters.
 - If `desk a11y` says a window's contents are "not available through UI Automation", a popup of
   that app is in the way (Notepad's first-run tip does this): look at a screenshot, close it.
+- Dialogs owned by elevated processes (UAC, the Windows Firewall "allow access" prompt) are not in
+  the tree at all; they are on screen, so click them by pixels from a screenshot. Classic Win32
+  installers (NSIS, Inno) are readable: buttons, fields and texts show up as usual.
+- A clean Windows has no Visual C++ runtime. A program that needs `VCRUNTIME140.dll` dies before
+  showing anything (exit code 0xC0000135, or a "System Error" dialog); check with
+  `Start-Process <exe> -PassThru -Wait` and the exit code when something silently does not start.
 - The report reads the event log (service failures, application errors and crashes, MSI
   installs); a "Network List Service terminated" entry comes from restoring the saved state, not
   from the app under test. `desk diff` works on NTFS too.
