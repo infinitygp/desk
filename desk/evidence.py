@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import guest
-from .config import HOME, DeskError
+from .config import HOME, DeskError, load_image
 
 REPORTS = HOME / "reports"
 REPORT_RETENTION_DAYS = 14
@@ -26,7 +26,16 @@ NOISE = (
     "/var/lib/rasdaemon/", "/var/lib/sddm/", "/usr/lib/sysimage/libdnf5/", "/boot/grub2/grubenv",
     "/boot/grub/grubenv", "/etc/cups/subscriptions.conf", "/etc/systemd/system.control/",
     "/root/snap/", "/var/lib/update-notifier/", "/var/lib/ubuntu-advantage/", "/var/lib/command-not-found/",
+    # Windows
+    "/Windows/Prefetch/", "/Windows/System32/winevt/Logs/", "/Windows/Logs/", "/Windows/SoftwareDistribution/",
+    "/Windows/ServiceProfiles/", "/Windows/System32/sru/", "/Windows/System32/Tasks/Microsoft/Windows/",
+    "/ProgramData/Microsoft/Windows Defender/", "/ProgramData/Microsoft/EdgeUpdate/", "/ProgramData/USOPrivate/",
+    "/ProgramData/USOShared/", "/ProgramData/Microsoft/Windows/WER/", "/$Extend/",
 )
+# Registry hive transaction logs change constantly; the hives themselves stay listed.
+NOISE_RE = re.compile(r"^/Windows/System32/config/.*\.LOG\d*$|^/Users/[^/]+/(NTUSER\.DAT\.LOG\d*|ntuser\.dat\.LOG\d*)$|"
+                      r"^/Users/[^/]+/AppData/Local/(Microsoft/(OneDrive|Windows/PowerShell|Windows/WebCache|Edge)|"
+                      r"Packages/[^/]+/(AC|LocalCache|TempState))/")
 NOISE_HOME = re.compile(r"^/home/[^/]+/\.(cache|local/state|local/share/(gnome-shell|recently-used\.xbel|tracker3|"
                         r"gvfs-metadata|keyrings|evolution|ibus-typing-booster)|mozilla|"
                         r"config/(pulse|dconf|ibus|evolution|user-dirs\.[a-z]+))(/|$)")
@@ -64,6 +73,25 @@ fi
 """
 
 
+# Windows: the same sections from the event log. Passed as one PowerShell command line.
+WINDOWS_SCRIPT = r"""
+$S = [DateTimeOffset]::FromUnixTimeSeconds(@S@).LocalDateTime
+function Ev($filter) { Get-WinEvent -FilterHashtable $filter -ErrorAction SilentlyContinue }
+function Line($e) {
+    '{0:s} {1} [{2}] {3}' -f $e.TimeCreated, $e.ProviderName, $e.Id, (($e.Message -split "`n")[0]).Trim()
+}
+'=== failed'
+$scm = 7000, 7001, 7009, 7011, 7022, 7023, 7024, 7031, 7034
+Ev @{LogName='System'; ProviderName='Service Control Manager'; Id=$scm; StartTime=$S} | % { Line $_ }
+'=== journal'
+Ev @{LogName='System','Application'; Level=1,2,3; StartTime=$S} | Select-Object -First 400 | % { Line $_ }
+'=== coredumps'
+Ev @{LogName='Application'; Id=1000,1002; StartTime=$S} | % { Line $_ }
+'=== packages'
+Ev @{LogName='Application'; ProviderName='MsiInstaller'; Id=1033,1034,11707,11724; StartTime=$S} | % { Line $_ }
+"""
+
+
 @dataclass
 class FileChanges:
     added: list[str] = field(default_factory=list)
@@ -74,7 +102,8 @@ class FileChanges:
 
 def _noise(path: str) -> bool:
     # Directories are listed without a trailing slash; match them against prefixes too.
-    return path.startswith(NOISE) or (path + "/").startswith(NOISE) or bool(NOISE_HOME.match(path))
+    return (path.startswith(NOISE) or (path + "/").startswith(NOISE) or bool(NOISE_HOME.match(path))
+            or bool(NOISE_RE.match(path)))
 
 
 def parse_virt_diff(text: str, all_paths: bool = False) -> FileChanges:
@@ -118,7 +147,8 @@ def file_changes(run, all_paths: bool = False, raw_out: Path | None = None) -> F
     if dom is not None:
         # QEMU holds a write lock on the overlay. Flush the guest, pause it for the instant a
         # reflink copy takes, and compare the copy.
-        guest.ssh_run(run.ssh_port, guest.ROOT, "sync", capture=True, timeout=60)
+        spec = load_image(run.image)
+        guest.ssh_run(run.ssh_port, spec.root_user, spec.cmd(spec.sync), capture=True, timeout=60)
         dom.suspend()
         try:
             subprocess.run(["cp", "--reflink=always", str(disk), str(copy)], check=True)
@@ -149,8 +179,13 @@ def format_changes(ch: FileChanges, limit: int = 200) -> str:
 
 
 def guest_problems(run) -> dict[str, str]:
-    r = guest.ssh_run(run.ssh_port, guest.ROOT, f"bash -s -- {int(run.created)}",
-                      input=GUEST_SCRIPT.encode(), capture=True, timeout=120)
+    spec = load_image(run.image)
+    if spec.family == "windows":
+        r = guest.ssh_run(run.ssh_port, spec.root_user, spec.cmd(WINDOWS_SCRIPT.replace("@S@", str(int(run.created)))),
+                          capture=True, timeout=180)
+    else:
+        r = guest.ssh_run(run.ssh_port, spec.root_user, f"bash -s -- {int(run.created)}",
+                          input=GUEST_SCRIPT.encode(), capture=True, timeout=120)
     sections, current = {}, None
     for line in r.stdout.decode(errors="replace").splitlines():
         if line.startswith("=== "):
@@ -216,11 +251,12 @@ def collect(run, diff: bool = False) -> Path:
     else:
         failed = problems.get("failed", "")
         md.append(f"- failed units: {_count(failed)}" + (f"\n\n```\n{failed}\n```\n" if failed else ""))
-        denials = _count(problems.get("avc", ""), r"type=(AVC|USER_AVC|SELINUX_ERR)")
-        md.append(f"- SELinux denials since start: {denials}" + (" (see avc.txt)" if problems.get("avc") else ""))
+        if load_image(run.image).family != "windows":
+            denials = _count(problems.get("avc", ""), r"type=(AVC|USER_AVC|SELINUX_ERR)")
+            md.append(f"- SELinux denials since start: {denials}" + (" (see avc.txt)" if problems.get("avc") else ""))
         cores = problems.get("coredumps", "")
         md.append(f"- crashes (coredumps): {_count(cores)}" + (f"\n\n```\n{cores}\n```\n" if cores else ""))
-        md.append(f"- warnings and errors in the journal: {_count(problems.get('journal', ''), r'^[0-9]{4}-')}"
+        md.append(f"- warnings and errors in the system log: {_count(problems.get('journal', ''), r'^[0-9]{4}-')}"
                   + (" (see journal.txt)" if problems.get("journal") else ""))
         pkgs = problems.get("packages", "")
         md.append("- package changes:" + (f"\n\n```\n{pkgs}\n```\n" if pkgs else " none"))

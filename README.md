@@ -33,6 +33,14 @@ images/<name>/       image.toml, kickstart, provision.sh
 | `fedora-44-gnome` | kickstart over the network | default |
 | `fedora-44-gnome-pl` | variant of `fedora-44-gnome` | Polish locale; shares the base disk, own warm state |
 | `ubuntu-26.04-gnome` | desktop ISO autoinstall (cloud-init NoCloud seed) | apt/snap timers off |
+| `windows-11` | evaluation ISO + autounattend.xml on a second CD | 90-day evaluation, rebuild when it expires |
+
+Windows specifics: no TPM (LabConfig bypass), SATA disk and e1000e NIC (inbox drivers),
+OpenSSH from the Win32-OpenSSH MSI with PowerShell as the shell, virtio-win guest tools for the
+display driver and qemu-guest-agent, and an agent in the logged-in session
+(`images/_shared/windows/agent.ps1`, port forwarded like SSH) for UI Automation and starting
+programs on the desktop, which SSH sessions cannot see. Commands are sent as
+`powershell -EncodedCommand`, since Windows' command line mangles quotes.
 
 ```bash
 bin/desk image build fedora-44-gnome   # unattended install, ~10 min, needs network

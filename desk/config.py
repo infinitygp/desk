@@ -1,3 +1,4 @@
+import base64
 import os
 import tomllib
 from dataclasses import dataclass
@@ -53,6 +54,24 @@ class ImageSpec:
     agent_wrapper: list[str] | None = None
     relogin: str | None = None
     layout: str = "us"
+    # "windows": boot `iso` with an answer-file CD built from `unattend` and `unattend_files`.
+    unattend: str | None = None
+    unattend_files: list[str] | None = None
+    image_index: int = 1
+    virtio_win_iso: str | None = None
+    openssh_msi: str | None = None
+    # Guest port of an in-session agent, forwarded from the host like SSH (Windows).
+    agent_port: int | None = None
+    # How the harness talks to this kind of guest.
+    family: str = "linux"
+    # Account for `exec --root` and system work: Linux has its own root key, a Windows
+    # administrator gets a full token over SSH anyway.
+    root_user: str = "root"
+    sync: str = "sync"
+    # Run before saving the warm state; returns once the guest has settled down.
+    idle: str | None = None
+    reboot: str = "systemctl reboot --check-inhibitors=no"
+    boot_id: str = "cat /proc/sys/kernel/random/boot_id"
 
     @property
     def base_name(self) -> str:
@@ -69,6 +88,18 @@ class ImageSpec:
     @property
     def base_xml(self) -> Path:
         return BASE / f"{self.base_name}.xml"
+
+    def cmd(self, command: str) -> str:
+        """`command` as it must be sent over SSH. Windows OpenSSH hands it to powershell.exe
+        through the Windows command line, which mangles quotes; an encoded command arrives
+        intact."""
+        if self.family != "windows":
+            return command
+        # Progress records would otherwise reach stderr as CLIXML.
+        # UTF-8 output, or Polish letters arrive in the console code page.
+        prelude = "$ProgressPreference = 'SilentlyContinue'; [Console]::OutputEncoding = [Text.Encoding]::UTF8\n"
+        encoded = base64.b64encode(f"{prelude}{command}".encode("utf-16-le")).decode()
+        return f"powershell.exe -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand {encoded}"
 
     @property
     def provision_scripts(self) -> list[str]:

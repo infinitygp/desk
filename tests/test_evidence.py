@@ -46,5 +46,19 @@ class ParseVirtDiff(unittest.TestCase):
         self.assertTrue(out[-1].startswith("3 added, 1 changed, 1 removed; 4 routine paths hidden"))
 
 
+class WindowsNoise(unittest.TestCase):
+    def test_routine_windows_paths_hidden(self):
+        sample = "\n".join([
+            "+ - 0644         10 /DeskTest/hello.txt",
+            "+ - 0644         10 /Windows/Prefetch/SVCHOST.EXE-09F4AEA4.pf",
+            "+ - 0644         10 /Windows/System32/config/SECURITY.LOG1",
+            "+ - 0644         10 /Users/tester/AppData/Local/Microsoft/OneDrive/logs/x.aodl",
+            "+ - 0644         10 /Windows/System32/config/SOFTWARE",
+        ])
+        ch = parse_virt_diff(sample)
+        self.assertEqual(ch.added, ["/DeskTest/hello.txt", "/Windows/System32/config/SOFTWARE"])
+        self.assertEqual(ch.hidden, 3)
+
+
 if __name__ == "__main__":
     unittest.main()

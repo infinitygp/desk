@@ -74,7 +74,7 @@ def reflink_copy(src: Path, dst: Path) -> None:
 
 def prepare_domain_xml(
     template: str, *, name: str, disk: Path, nvram: Path, ssh_port: int, console_log: Path,
-    keep_uuid: bool = False, vnc_password: str | None = None,
+    keep_uuid: bool = False, vnc_password: str | None = None, agent_ports: tuple[int, int] | None = None,
 ) -> str:
     """Turn the golden image's domain XML into a per-run transient domain.
 
@@ -113,6 +113,9 @@ def prepare_domain_xml(
             iface.remove(pf)
         pf = ET.SubElement(iface, "portForward", proto="tcp", address="127.0.0.1")
         ET.SubElement(pf, "range", start=str(ssh_port), to="22")
+        if agent_ports:
+            pf = ET.SubElement(iface, "portForward", proto="tcp", address="127.0.0.1")
+            ET.SubElement(pf, "range", start=str(agent_ports[0]), to=str(agent_ports[1]))
 
     for serial in devices.findall("serial"):
         src = serial.find("source")
@@ -124,6 +127,12 @@ def prepare_domain_xml(
             devices.remove(el)
     if not any(i.get("type") == "tablet" for i in devices.findall("input")):
         ET.SubElement(devices, "input", type="tablet", bus="usb")
+    if not any(c.find("target") is not None and c.find("target").get("name") == "org.qemu.guest_agent.0"
+               for c in devices.findall("channel")):
+        # virt-install leaves it out for some OS profiles (win11); the agent needs it.
+        ch = ET.SubElement(devices, "channel", type="unix")
+        ET.SubElement(ch, "source", mode="bind")
+        ET.SubElement(ch, "target", type="virtio", name="org.qemu.guest_agent.0")
     if vnc_password:
         # For a person to watch (desk view). Loopback only, through an SSH tunnel; the password
         # keeps other local accounts out, since the VMs run under this user.

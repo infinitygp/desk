@@ -1,0 +1,32 @@
+# Windows 11 Enterprise evaluation (26H2, 90 days; rebuild the image when it expires).
+installer = "windows"
+os_variant = "win11"
+memory_mib = 6144
+vcpus = 4
+disk_gb = 64
+iso = "win11-26h2-enterprise-eval.iso"
+iso_url = "https://go.microsoft.com/fwlink/?LinkId=2382600&clcid=0x409&culture=en-us&country=us"
+iso_sha256 = "bc3f24086ebadc94489066b5ad78089e2cf5c3491e90e790bb81a2b199c10e38"
+unattend = "autounattend.xml"
+# Copied to the answer-file CD next to autounattend.xml; firstboot.ps1 runs at the first logon.
+unattend_files = ["firstboot.ps1", "../_shared/windows"]
+virtio_win_iso = "virtio-win-0.1.302.iso"
+openssh_msi = "OpenSSH-Win64-v10.0.0.0.msi"
+user = "tester"
+family = "windows"
+root_user = "tester"
+# In-session agent (images/_shared/windows/agent.ps1), forwarded from the host like SSH.
+agent_port = 47011
+ready = "try { (New-Object Net.Sockets.TcpClient).Connect('127.0.0.1', 47011); exit 0 } catch { exit 1 }"
+sync = "Write-VolumeCache -DriveLetter C"
+reboot = "shutdown.exe /r /t 0 /f"
+boot_id = "(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToFileTimeUtc()"
+layout = "pl"
+provision = "provision.ps1"
+# Windows has no way to restart just the desktop session from SSH; a reboot logs in again.
+relogin = "shutdown.exe /r /t 0 /f"
+# Refreshed in C:\desk at every warm-up, so agent fixes do not need a new install.
+files = ["../_shared/windows"]
+# Before the warm state is saved: wait (up to 5 min) for the CPU to calm down, so a restored run
+# does not inherit Windows' first-boot background work.
+idle = "$n = 0; for ($i = 0; $i -lt 60; $i++) { $c = (Get-CimInstance Win32_Processor | Measure-Object LoadPercentage -Average).Average; if ($c -lt 15) { $n++ } else { $n = 0 }; if ($n -ge 6) { exit 0 }; Start-Sleep 5 }; exit 0"

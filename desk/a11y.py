@@ -5,7 +5,7 @@ import shlex
 import subprocess
 from pathlib import Path
 
-from . import display, guest
+from . import display, guest, winagent
 from .config import DeskError
 
 HELPER = Path(__file__).with_name("guest_a11y.py")
@@ -13,6 +13,10 @@ SESSION_ENV = "env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus"
 
 
 def _helper(run, *args: str) -> dict:
+    if run.agent_port:
+        # Windows: UI Automation through the in-session agent, same protocol as guest_a11y.py.
+        op, arg, *rest = args
+        return winagent.request(run, cmd="uia", op=op, arg=json.loads(arg), text=rest[0] if rest else None)
     cmd = f"{SESSION_ENV} python3 - " + " ".join(shlex.quote(a) for a in args)
     try:
         r = guest.ssh_run(run.ssh_port, run.user, cmd, input=HELPER.read_bytes(), capture=True, timeout=60)
@@ -77,6 +81,9 @@ def format_snapshot(snap: dict, offscreen: bool = False) -> str:
     for top, nxt in zip(tops, tops[1:], strict=False):
         mark = " [focused]" if top["focus"] else ""
         lines.append(f"window {json.dumps(top['title'], ensure_ascii=False)} ({top['app']}){mark}")
+        if top.get("unavailable"):
+            lines.append("  (contents not available through UI Automation right now: "
+                         f"{top['unavailable'].strip()[:120]}; a popup may be in the way, look at a screenshot)")
         for n in snap["nodes"][top["start"]:nxt["start"]]:
             if n.get("offscreen") and not offscreen:
                 hidden += 1

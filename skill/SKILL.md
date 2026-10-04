@@ -94,7 +94,29 @@ adds the files the run changed. Point the user to the report and summarise what 
 
 `desk image list` shows them. `fedora-44-gnome` is the default; `fedora-44-gnome-pl` is the same
 system in Polish (UI, Firefox, formats) for testing Polish interfaces; `ubuntu-26.04-gnome` is for
-`.deb` packages and Ubuntu specifics (apt, snap, AppArmor instead of SELinux).
+`.deb` packages and Ubuntu specifics (apt, snap, AppArmor instead of SELinux); `windows-11` is
+Windows 11 Enterprise (evaluation) for Windows builds and installers.
+
+### Windows guests
+
+- `desk exec -- CMD` runs PowerShell as `tester`, who is an administrator with a full token, so
+  `--root` changes nothing; `desk exec --agent -- CMD` runs as SYSTEM (session 0, no desktop).
+  Quoting is safe: commands reach PowerShell encoded.
+- `desk exec --gui -- app.exe ARGS` starts the program on the desktop (through an agent in the
+  user's session) and brings its window to the front, as starting it from the Start menu would.
+- `desk a11y` / `find` / `click --name` use UI Automation; names are the ones Narrator would read
+  (Calculator: "Seven", "Multiply by", "Equals"; result "Display is 42").
+- Installers: `desk push setup.msi C:/Users/tester/Downloads/` then
+  `desk exec -- 'Start-Process msiexec -ArgumentList "/i C:\Users\tester\Downloads\setup.msi /qn" -Wait'`,
+  or run the installer UI with `exec --gui` and click through it. UAC prompts do not appear for
+  `tester` over SSH, but do for programs started on the desktop: handle them like any dialog.
+- Windows PowerShell 5.1 writes files in the ANSI code page by default: use
+  `Set-Content -Encoding UTF8` / `Get-Content -Encoding UTF8` for text with Polish letters.
+- If `desk a11y` says a window's contents are "not available through UI Automation", a popup of
+  that app is in the way (Notepad's first-run tip does this): look at a screenshot, close it.
+- The report reads the event log (service failures, application errors and crashes, MSI
+  installs); a "Network List Service terminated" entry comes from restoring the saved state, not
+  from the app under test. `desk diff` works on NTFS too.
 
 ## Testing a package end to end
 

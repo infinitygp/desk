@@ -109,7 +109,8 @@ def cmd_wait(args) -> None:
     run = runs.resolve(args.run)
     if args.ready:
         guest.wait_ssh(run.ssh_port, run.user, timeout=args.timeout)
-        guest.wait_ready(run.ssh_port, run.user, runs.spec_for(run).ready, timeout=args.timeout)
+        spec = runs.spec_for(run)
+        guest.wait_ready(run.ssh_port, run.user, spec.cmd(spec.ready), timeout=args.timeout)
     dom = run.dom()
     if args.change and not display.wait_change(dom, timeout=args.timeout):
         print("no change")
@@ -232,15 +233,37 @@ def cmd_exec(args) -> None:
         sys.exit(code)
     if args.root and args.gui:
         raise DeskError("--gui starts programs in the desktop user's session; drop --root")
-    command = guest.remote_command(argv, gui=args.gui)
-    r = guest.ssh_run(run.ssh_port, guest.ROOT if args.root else run.user, command, timeout=args.timeout)
+    if args.gui:
+        # Returns once the program has drawn something (or after the timeout), on every guest:
+        # the screen is compared with how it looked before the start, not after.
+        dom = run.dom()
+        before = display.screen_hash(dom)
+        if run.agent_port:
+            from . import winagent
+
+            reply = winagent.request(run, cmd="run", file=argv[0], args=argv[1:] or None)
+            started = f"started pid {reply.get('pid')}"
+        else:
+            r = guest.ssh_run(run.ssh_port, run.user, guest.remote_command(argv, gui=True), timeout=args.timeout)
+            if r.returncode != 0:
+                run.log_event(rc=r.returncode)
+                sys.exit(r.returncode)
+            started = "started"
+        changed = display.wait_change(dom, timeout=args.timeout or 30, base=before)
+        run.log_event(rc=0)
+        print(started + ("" if changed else "; nothing new on screen yet (slow start? check with desk shot)"))
+        return
+    spec = runs.spec_for(run)
+    command = spec.cmd(guest.remote_command(argv, gui=args.gui))
+    r = guest.ssh_run(run.ssh_port, spec.root_user if args.root else run.user, command,
+                      timeout=args.timeout)
     run.log_event(rc=r.returncode)
     sys.exit(r.returncode)
 
 
 def cmd_reboot(args) -> None:
     run = runs.resolve(args.run)
-    took, inhibitors = guest.reboot(run.ssh_port, run.user, runs.spec_for(run).ready)
+    took, inhibitors = guest.reboot(run.ssh_port, runs.spec_for(run))
     for line in inhibitors:
         print(f"note: shutdown was blocked by: {line}")
     dom = run.dom()

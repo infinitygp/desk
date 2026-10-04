@@ -23,9 +23,6 @@ def ssh_argv(port: int, user: str, tty: bool = False) -> list[str]:
     return ["ssh", *_SSH_OPTS, *(["-t"] if tty else []), "-p", str(port), f"{user}@127.0.0.1"]
 
 
-ROOT = "root"
-
-
 def remote_command(argv: list[str], gui: bool = False) -> str:
     # A single argument is a shell snippet (`a && b | c`); wrap it whole so that the
     # session scope applies to all of it, not just the first command.
@@ -52,7 +49,8 @@ def wait_ssh(port: int, user: str, timeout: float = 180) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
-            if ssh_run(port, user, "true", capture=True, timeout=15).returncode == 0:
+            # `exit 0` means the same in POSIX shells and in PowerShell (Windows guests).
+            if ssh_run(port, user, "exit 0", capture=True, timeout=15).returncode == 0:
                 return
         except subprocess.TimeoutExpired:
             pass
@@ -63,10 +61,15 @@ def wait_ssh(port: int, user: str, timeout: float = 180) -> None:
 def wait_ready(port: int, user: str, ready: str, timeout: float = 300) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if ssh_run(port, user, ready, capture=True, timeout=30).returncode == 0:
-            return
+        # While a guest reboots, passt still accepts the connection and SSH then hangs waiting for
+        # the banner; a timeout there just means "not yet".
+        try:
+            if ssh_run(port, user, ready, capture=True, timeout=20).returncode == 0:
+                return
+        except subprocess.TimeoutExpired:
+            pass
         time.sleep(2)
-    raise DeskError(f"guest not ready after {timeout:.0f}s: {ready}")
+    raise DeskError(f"guest not ready after {timeout:.0f}s: {ready[:200]}")
 
 
 def scp(port: int, src: str, dst: str) -> int:
@@ -92,8 +95,8 @@ def agent_sync_time(dom) -> None:
     agent(dom, "guest-set-time", time=time.time_ns())
 
 
-def boot_id(port: int, user: str) -> str:
-    r = ssh_run(port, user, "cat /proc/sys/kernel/random/boot_id", capture=True, timeout=15)
+def boot_id(port: int, user: str, command: str = "cat /proc/sys/kernel/random/boot_id") -> str:
+    r = ssh_run(port, user, command, capture=True, timeout=15)
     if r.returncode != 0:
         raise DeskError("cannot read the guest boot id")
     return r.stdout.decode().strip()
@@ -109,17 +112,18 @@ def shutdown_inhibitors(port: int, user: str) -> list[str]:
             if mode == "block" and "shutdown" in what.split(":")]
 
 
-def reboot(port: int, user: str, ready: str, timeout: float = 300) -> tuple[float, list[str]]:
+def reboot(port: int, spec, timeout: float = 300) -> tuple[float, list[str]]:
     """Reboot and return once a new boot is ready, plus whatever was blocking shutdown.
 
     Apps with unsaved work make gnome-session block shutdown; a user would see a dialog.
     The harness reboots anyway and reports the inhibitors instead.
     """
-    inhibitors = shutdown_inhibitors(port, user)
-    before = boot_id(port, user)
+    user, ready = spec.user, spec.cmd(spec.ready)
+    inhibitors = shutdown_inhibitors(port, user) if spec.family == "linux" else []
+    before = boot_id(port, user, spec.cmd(spec.boot_id))
     t0 = time.monotonic()
     try:
-        r = ssh_run(port, ROOT, "systemctl reboot --check-inhibitors=no", capture=True, timeout=30)
+        r = ssh_run(port, spec.root_user, spec.cmd(spec.reboot), capture=True, timeout=30)
         if r.returncode not in (0, 255):  # 255: the connection dropped as the guest went down
             raise DeskError(f"reboot refused: {r.stderr.decode(errors='replace').strip()}")
     except subprocess.TimeoutExpired:
@@ -128,7 +132,7 @@ def reboot(port: int, user: str, ready: str, timeout: float = 300) -> tuple[floa
     while time.monotonic() < deadline:
         time.sleep(2)
         try:
-            if boot_id(port, user) != before:
+            if boot_id(port, user, spec.cmd(spec.boot_id)) != before:
                 break
         except (DeskError, subprocess.TimeoutExpired):
             continue
@@ -142,7 +146,10 @@ def wait_session_gone(port: int, user: str, ready: str, timeout: float = 60) -> 
     """After restarting the display manager, wait until the old session has actually ended."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if ssh_run(port, user, ready, capture=True, timeout=30).returncode != 0:
-            return
+        try:
+            if ssh_run(port, user, ready, capture=True, timeout=20).returncode != 0:
+                return
+        except subprocess.TimeoutExpired:
+            return  # SSH no longer answering: the session (and machine) is going down
         time.sleep(1)
     raise DeskError(f"old session still running {timeout:.0f}s after relogin")

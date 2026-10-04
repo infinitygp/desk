@@ -61,6 +61,7 @@ class Run:
     shots: int = 0
     last_used: float = 0.0
     vnc_password: str = ""
+    agent_port: int = 0
 
     @property
     def dir(self) -> Path:
@@ -211,13 +212,16 @@ def gc(verbose: bool = True) -> list[str]:
         else:
             known_disks.add(str(run.dir / "disk.qcow2"))
     for dom in conn().listAllDomains(libvirt.VIR_CONNECT_LIST_DOMAINS_ACTIVE):
-        name = dom.name()
-        if not name.startswith("desk-"):
-            continue
-        xml = dom.XMLDesc(0)
-        if str(RUNS) in xml and not any(d in xml for d in known_disks):
-            dom.destroy()
-            removed.append(f"orphaned domain {name}")
+        try:
+            name = dom.name()
+            if not name.startswith("desk-"):
+                continue
+            xml = dom.XMLDesc(0)
+            if str(RUNS) in xml and not any(d in xml for d in known_disks):
+                dom.destroy()
+                removed.append(f"orphaned domain {name}")
+        except libvirt.libvirtError:
+            continue  # gone between listing and looking at it
     if verbose:
         for r in removed:
             print(f"[desk] gc: removed {r}")
@@ -260,7 +264,8 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool) -> Run:
     domain = f"desk-{run_id}" if cold else ET.fromstring(saved_xml).findtext("name")
     now = time.time()
     run = Run(id=run_id, image=spec.name, domain=domain, ssh_port=free_port(),
-              user=spec.user, created=now, last_used=now, vnc_password=secrets.token_urlsafe(6)[:8])
+              user=spec.user, created=now, last_used=now, vnc_password=secrets.token_urlsafe(6)[:8],
+              agent_port=free_port() if spec.agent_port else 0)
     run.save()
 
     disk, nvram = rd / "disk.qcow2", rd / "VARS.qcow2"
@@ -276,7 +281,8 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool) -> Run:
         nvram.chmod(0o644)
         xml = prepare_domain_xml(template, name=run.domain, disk=disk, nvram=nvram,
                                  ssh_port=run.ssh_port, console_log=rd / "console.log",
-                                 keep_uuid=not cold, vnc_password=run.vnc_password)
+                                 keep_uuid=not cold, vnc_password=run.vnc_password,
+                                 agent_ports=(run.agent_port, spec.agent_port) if spec.agent_port else None)
         if cold:
             dom = conn().createXML(xml, 0)
         else:
@@ -288,7 +294,7 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool) -> Run:
                 print(f"[desk] warning: clock not synced: {e}")
         guest.wait_ssh(run.ssh_port, run.user, timeout=300 if cold else 60)
         if cold:
-            guest.wait_ready(run.ssh_port, run.user, spec.ready)
+            guest.wait_ready(run.ssh_port, run.user, spec.cmd(spec.ready))
             images.provision(spec, run.ssh_port)
     except BaseException:
         down(run, keep=True)

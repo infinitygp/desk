@@ -69,9 +69,18 @@ def wait_stable(dom: libvirt.virDomain, timeout: float = 10.0, frames: int = 3,
         time.sleep(interval)
 
 
-def wait_change(dom: libvirt.virDomain, timeout: float = 30.0, interval: float = 0.25) -> bool:
-    """Wait until the screen differs from how it looks now (e.g. an app window appears)."""
-    base = hashlib.sha256(screenshot(dom)).digest()
+def screen_hash(dom: libvirt.virDomain) -> bytes:
+    return hashlib.sha256(screenshot(dom)).digest()
+
+
+def wait_change(dom: libvirt.virDomain, timeout: float = 30.0, interval: float = 0.25,
+                base: bytes | None = None) -> bool:
+    """Wait until the screen differs from `base`, by default how it looks now (an app window
+    appearing). Pass a `base` taken before starting something that may already have drawn."""
+    if base is None:
+        base = screen_hash(dom)
+    if screen_hash(dom) != base:
+        return True
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         time.sleep(interval)
