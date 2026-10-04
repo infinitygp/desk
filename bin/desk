@@ -1,0 +1,9 @@
+#!/usr/bin/python3
+# System Python on purpose: the libvirt bindings come from the python3-libvirt RPM.
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from desk.cli import main  # noqa: E402
+
+main()

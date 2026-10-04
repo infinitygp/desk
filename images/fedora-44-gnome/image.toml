@@ -1,0 +1,13 @@
+# libosinfo on this host has no fedora44 entry yet; fedora43 gives the same device defaults.
+os_variant = "fedora43"
+memory_mib = 4096
+vcpus = 4
+disk_gb = 40
+location = "https://dl.fedoraproject.org/pub/fedora/linux/releases/44/Everything/x86_64/os/"
+kickstart = "ks.cfg"
+user = "tester"
+provision = "provision.sh"
+# Run over SSH as `user`; the desktop counts as ready once this succeeds and the screen settles.
+ready = "systemctl --user is-active --quiet graphical-session.target"
+# Prefix for `desk exec --agent`; see the wrapper in ks.cfg.
+agent_wrapper = ["/usr/local/libexec/desk-ga-run"]
