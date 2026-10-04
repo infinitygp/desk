@@ -5,7 +5,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import a11y, display, evidence, guest, images, runs
+from . import a11y, display, evidence, guest, images, record, runs
 from .config import DeskError, list_images, load_image
 
 
@@ -86,7 +86,9 @@ def _image_list() -> None:
 def cmd_up(args) -> None:
     run = runs.up(load_image(args.image), run_id=args.name, cold=args.cold, force=args.force)
     run.log_event(argv=sys.argv[1:])
-    print(f"run {run.id} up (image {run.image}, ssh port {run.ssh_port})")
+    if args.record:
+        record.start(run)
+    print(f"run {run.id} up (image {run.image}, ssh port {run.ssh_port})" + (", recording" if args.record else ""))
     print(f"export DESK_RUN={run.id}  # fish: set -x DESK_RUN {run.id}")
 
 
@@ -95,12 +97,17 @@ def cmd_down(args) -> None:
         targets = runs.all_runs() if args.all else [runs.resolve(args.id)]
         for run in targets:
             report = None
+            record.stop(run)
             if not args.no_report and run.live_domain() is not None:
                 report = evidence.collect(run, diff=args.diff)
+            # Videos outlive the run in its report directory, report or not.
+            videos = record.save_videos(run, report or evidence.REPORTS / run.id)
             runs.down(run, keep=args.keep)
             print(f"run {run.id} down" + (" (files kept)" if args.keep else ""))
             if report:
                 print(f"report: {report / 'report.md'}")
+            for v in videos:
+                print(f"video: {v}")
 
 
 def cmd_report(args) -> None:
@@ -316,6 +323,16 @@ def cmd_view(args) -> None:
     print(f"move the pointer under the agent (e.g. `vncviewer -ViewOnly localhost:{port}`).")
 
 
+def cmd_record(args) -> None:
+    run = runs.resolve(args.run)
+    if args.action == "start":
+        record.start(run, fps=args.fps, limit=args.limit * 60)
+        print(f"recording run {run.id} at {args.fps} fps (desk record stop; at most {args.limit:g} min)")
+    else:
+        video = record.stop(run)
+        print(video if video else "nothing was recorded")
+
+
 def cmd_maintain(args) -> None:
     from . import maintain
 
@@ -374,6 +391,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--name", help="run id (default: random)")
     p.add_argument("--cold", action="store_true", help="boot instead of restoring the warm state")
     p.add_argument("--force", action="store_true", help="start even if free memory looks too low")
+    p.add_argument("--record", action="store_true", help="record a video from the start (desk record)")
     p.set_defaults(func=cmd_up)
 
     p = sub.add_parser("down", help="destroy a run and delete its files")
@@ -506,6 +524,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reboot", action="store_true", help="also reboot the guest and check it comes back")
     p.add_argument("--keep", action="store_true", help="keep the run afterwards")
     p.set_defaults(func=cmd_selftest)
+
+    p = sub.add_parser("record", help="record the screen as a video (WebM), kept with the report")
+    p.add_argument("action", choices=["start", "stop"])
+    p.add_argument("--fps", type=int, default=record.DEFAULT_FPS)
+    p.add_argument("--limit", type=float, default=record.MAX_SECONDS / 60, help="minutes before it stops itself")
+    p.set_defaults(func=cmd_record)
 
     p = sub.add_parser("maintain", help="rebuild images that are due, selftest them, switch to the new builds")
     p.add_argument("--only", metavar="IMAGE", help="only the family of this image")

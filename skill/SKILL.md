@@ -53,6 +53,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk report [--diff]` | Write the evidence report now (see below) |
 | `desk ls`, `desk down [ID] [--all] [--keep] [--diff] [--no-report]`, `desk gc` | List, destroy (writing the report first), clean up idle runs |
 | `desk view` | Tell the user how to watch the run live (VNC through an SSH tunnel) |
+| `desk record start [--fps N]`, `desk record stop`, `desk up --record` | Record the screen as a WebM video, kept with the report |
 
 Action commands (`click`, `type`, `key`, `scroll`, `action`, ...) accept `--shot` to screenshot
 once the screen settles. With one argument, `desk exec -- 'a && b | grep x'` goes through the
@@ -90,6 +91,13 @@ units, SELinux denials, crashes, journal warnings and package changes since the 
 timeline of every desk command with its exit code and the screenshots taken. `desk down --diff`
 adds the files the run changed. Point the user to the report and summarise what it found; read
 `journal.txt` / `avc.txt` next to it before blaming the product for a warning.
+
+Record a video (`desk up --record`, or `desk record start` before the interesting part) when the
+user will want to see the flow itself: a walkthrough of a feature, an installer, a bug that needs
+several steps or depends on timing. `desk down` stops it and puts `video-N.webm` next to the report,
+linked from the timeline; the wall-clock time below the picture matches the report. You cannot
+watch the video yourself, so keep taking screenshots for your own judgement. Recording stops by
+itself after 30 minutes (`--limit`).
 
 ## Images
 

@@ -282,6 +282,10 @@ def collect(run, diff: bool = False) -> Path:
         elif "rc" in ev:
             if ev["rc"] != 0 and md and md[-1].startswith("- "):
                 md[-1] += f" → exit {ev['rc']}"
+        elif ev.get("record") == "start":
+            md.append(f"- {stamp} recording started ({ev.get('fps')} fps)")
+        elif ev.get("record") == "stop" and ev.get("video"):
+            md.append(f"- {stamp} recording stopped: [{ev['video']}]({ev['video']}) ({ev['seconds']} s)")
         elif "shot" in ev:
             name = Path(ev["shot"]).name
             if (out / "shots" / name).exists():

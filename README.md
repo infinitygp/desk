@@ -91,6 +91,11 @@ journalctl --user -u desk-maintain  # output of the last runs
 warnings, package changes, timeline with screenshots); `--diff` adds the files the run changed,
 from `virt-diff` against the image the run started from. Reports are pruned after 14 days.
 
+`desk record start|stop` (or `desk up --record`) takes screenshots at a steady rate (4 fps) in a
+background process; unchanged frames are hard links, so a still screen costs nothing. Stopping
+encodes them with GStreamer to WebM (VP9) with the wall-clock time in a bar below the picture,
+and `desk down` copies the videos next to the report.
+
 Provisioning (`provision.sh`, `files/`) runs before the warm state is saved and after cold
 boots; it installs the shell extension, the Polish (programmer's) layout and a11y settings.
 
@@ -104,5 +109,6 @@ bin/desk selftest fedora-44-gnome --reboot            # end to end in a real run
 ## Host requirements
 
 Fedora with `/dev/kvm`, `libvirt-daemon-driver-qemu`, `libvirt-client`, `python3-libvirt`,
-`passt`, `virt-install`, `edk2-ovmf`, `guestfs-tools`; the user in the `kvm` group.
+`passt`, `virt-install`, `edk2-ovmf`, `guestfs-tools`, `gstreamer1-plugins-good` (videos); the
+user in the `kvm` group.
 `/var/lib/vmlab` is a dedicated XFS disk labelled `svirt_home_t`.

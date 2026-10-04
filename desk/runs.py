@@ -366,6 +366,10 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool) -> Run:
 
 
 def down(run: Run, keep: bool = False) -> None:
+    from . import record
+
+    if not keep:
+        record.kill(run)
     dom = run.live_domain()
     if dom is not None:
         dom.destroy()
