@@ -15,7 +15,7 @@ from pathlib import Path
 
 import libvirt
 
-from . import display, guest
+from . import display, guest, steps
 from .config import BASE, CACHE, IMAGES_DIR, LOGS, SSH_KEY, WARM, DeskError, ImageSpec
 from .virt import conn, free_port, lookup, prepare_domain_xml, qemu_img_overlay, reflink_copy
 
@@ -99,7 +99,7 @@ def warm_fingerprint(spec: ImageSpec) -> str:
     """Everything a warm state depends on besides the base disk: the whole image definition and
     the provisioning scripts and files."""
     h = hashlib.sha256(_settings(spec, {f.name for f in fields(spec)} - set(NOT_IN_GUEST)).encode())
-    _hash_files(h, spec.dir, spec.provision_scripts + list(spec.files or []))
+    _hash_files(h, spec.dir, spec.provision_scripts + list(spec.files or []) + ([spec.prepare] if spec.prepare else []))
     return h.hexdigest()
 
 
@@ -454,13 +454,14 @@ def warm(spec: ImageSpec, force: bool = False, promote_it: bool = True) -> str:
     reflink_copy(base_dir / "VARS.qcow2", nvram)
     nvram.chmod(0o644)
     port = free_port()
+    agent_ports = (free_port(), spec.agent_port) if spec.agent_port else None
     # Runs restored from this state inherit the name; the version keeps it apart from the
     # previous build's runs while a new build is tested.
     name = f"desk-warm-{spec.name}-{vspec.warm_version}"
     xml = prepare_domain_xml(
         (base_dir / "domain.xml").read_text(), name=name, disk=disk, nvram=nvram, ssh_port=port,
         console_log=wd / "console.log",
-        agent_ports=(free_port(), spec.agent_port) if spec.agent_port else None, sound=spec.sound,
+        agent_ports=agent_ports, sound=spec.sound,
     )
     _log(f"booting {name}")
     dom = conn().createXML(xml, 0)
@@ -474,6 +475,10 @@ def warm(spec: ImageSpec, force: bool = False, promote_it: bool = True) -> str:
                 raise DeskError(f"the guest went away while booting twice; last screen: {wd / 'last-boot.png'}")
         guest.wait_ready(port, spec.user, spec.cmd(spec.ready))
         provision(spec, port)
+        if spec.prepare:
+            _log(f"preparing the session ({spec.prepare})")
+            steps.run_prepare(spec, steps.Target(id=name, dir=wd, ssh_port=port, user=spec.user,
+                                                 agent_port=agent_ports[0] if agent_ports else 0, domain=dom))
         if spec.idle:
             _log("waiting for the guest to settle")
             guest.ssh_run(port, spec.root_user, spec.cmd(spec.idle), capture=True, timeout=420)

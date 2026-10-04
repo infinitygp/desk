@@ -26,6 +26,16 @@ class Variants(unittest.TestCase):
         self.assertEqual(arch.installer, "cloudimg")
         self.assertTrue((arch.dir / arch.user_data).is_file())
 
+    def test_prepare_script_is_part_of_the_warm_state(self):
+        from desk import images
+
+        ck = load_image("fedora-44-cockpit")
+        self.assertEqual(ck.base, "fedora-44-gnome")
+        self.assertTrue((ck.dir / ck.prepare).is_file())
+        from dataclasses import replace
+
+        self.assertNotEqual(images.warm_fingerprint(ck), images.warm_fingerprint(replace(ck, prepare=None)))
+
     def test_builds_are_versioned(self):
         from dataclasses import replace
 

@@ -359,6 +359,9 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool) -> Run:
         if cold:
             guest.wait_ready(run.ssh_port, run.user, spec.cmd(spec.ready))
             images.provision(spec, run.ssh_port)
+            from . import steps
+
+            steps.run_prepare(spec, run)
     except BaseException:
         down(run, keep=True)
         raise

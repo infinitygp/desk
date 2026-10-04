@@ -32,6 +32,7 @@ images/<name>/       image.toml, kickstart, provision.sh
 |---|---|---|
 | `fedora-44-gnome` | kickstart over the network | default |
 | `fedora-44-gnome-pl` | variant of `fedora-44-gnome` | Polish locale; shares the base disk, own warm state |
+| `fedora-44-cockpit` | variant of `fedora-44-gnome` | Cockpit, Firefox logged in with administrative access |
 | `arch-gnome` | official cloud image, GNOME installed by cloud-init (NoCloud seed) | rolling; no Secure Boot |
 | `windows-11` | evaluation ISO + autounattend.xml on a second CD | 90-day evaluation, reinstalled by `desk maintain` |
 
@@ -52,6 +53,12 @@ bin/desk image list                    # state, build date, last selftest, licen
 
 Shared provisioning files live in `images/_shared/`. A variant (`base = "..."` in its
 `image.toml`) inherits the base image's settings and adds provisioning scripts.
+
+`prepare = "prepare.py"` in `image.toml` runs `prepare(steps)` on the host once the provisioned
+session is up, before the warm state is saved (and after cold boots): what a user does before the
+tests start, with real input (`desk/steps.py`: `gui`, `wait_for`, `click`, `type`, `key`).
+`fedora-44-cockpit` logs in to Cockpit that way; its Firefox trusts Cockpit's CA and the session
+has no idle timeout, since restoring the warm state moves the clock forward.
 
 ## Builds and maintenance
 

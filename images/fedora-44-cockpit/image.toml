@@ -1,0 +1,6 @@
+# Fedora 44 Workstation with Cockpit, logged in as tester with administrative access in Firefox:
+# for testing Cockpit plugins. Packaging and dependency tests belong on fedora-44-gnome, which
+# has no Cockpit, like a fresh Workstation.
+base = "fedora-44-gnome"
+provision = ["../fedora-44-gnome/provision.sh", "provision.sh"]
+prepare = "prepare.py"

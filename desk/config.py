@@ -53,6 +53,9 @@ class ImageSpec:
     provision: str | list[str] | None = None
     # Directories (relative to the image) copied to /tmp/desk-provision/files before provisioning.
     files: list[str] | None = None
+    # Python file with prepare(steps) (desk/steps.py), run on the host with real input once the
+    # provisioned session is up: what a user does before the tests start (log in somewhere).
+    prepare: str | None = None
     # A variant reuses another image's installed disk and differs only in provisioning, so it
     # has its own warm state (e.g. the same system in another language) without a second install.
     base: str | None = None
@@ -163,7 +166,7 @@ def load_image(name: str) -> ImageSpec:
             raise DeskError(f"{name}: a variant must be based on an installed image, not on another variant")
         # Inherit everything; the parent's file references stay relative to the parent.
         rel = Path("..") / data["base"]
-        for key in ("kickstart", "user_data"):
+        for key in ("kickstart", "user_data", "prepare"):
             if parent.get(key):
                 parent[key] = str(rel / parent[key])
         if parent.get("files"):

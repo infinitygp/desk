@@ -102,7 +102,8 @@ itself after 30 minutes (`--limit`).
 ## Images
 
 `desk image list` shows them. `fedora-44-gnome` is the default; `fedora-44-gnome-pl` is the same
-system in Polish (UI, Firefox, formats) for testing Polish interfaces; `arch-gnome` is Arch Linux
+system in Polish (UI, Firefox, formats) for testing Polish interfaces; `fedora-44-cockpit` has
+Cockpit open in Firefox, logged in as tester with administrative access (see below); `arch-gnome` is Arch Linux
 (rolling, pacman, no SELinux) with the newest GNOME and libraries; `windows-11` is Windows 11
 Enterprise (evaluation) for Windows builds and installers. Images are reinstalled automatically
 (`desk maintain`, weekly); if `desk up` prints a warning about a failed maintenance or a licence
@@ -152,6 +153,15 @@ running out, pass it on to the user.
    `desk reboot` and check what remains or comes back (autostart, enabled units, timers);
    `desk diff` shows exactly which files the package left behind.
 7. `desk down --diff` and hand over the report.
+
+### Cockpit plugins
+
+Use `fedora-44-cockpit` to test what the plugin does: Firefox shows Cockpit at
+`https://localhost:9090`, logged in with administrative access. Install the plugin's package with
+`desk exec --root -- dnf install -y /tmp/foo.rpm`, then press F5 in Firefox: the new entry appears
+in Cockpit's menu without logging in again. Test packaging and dependencies on `fedora-44-gnome`
+instead, where Cockpit is not installed, as on a fresh Workstation: a plugin that depends only on
+`cockpit-bridge` installs there without the web console a user needs to reach it.
 
 ## Judging screenshots
 
