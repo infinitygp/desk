@@ -46,15 +46,16 @@ class Format(unittest.TestCase):
 class RemoteCommand(unittest.TestCase):
     def test_snippet_is_passed_whole(self):
         self.assertEqual(remote_command(["a && b"]), "a && b")
-        self.assertEqual(remote_command(["a && b"], gui=True),
-                         "systemd-run --user --collect --quiet -- bash -c 'a && b'")
+        self.assertTrue(remote_command(["a && b"], gui=True).endswith(
+            "systemd-run --user --collect --quiet $lang -- bash -c 'a && b'"))
 
     def test_argv_is_quoted(self):
         self.assertEqual(remote_command(["echo", "a b"]), "echo 'a b'")
 
     def test_gui(self):
-        self.assertEqual(remote_command(["firefox"], gui=True),
-                         "systemd-run --user --collect --quiet -- bash -c firefox")
+        cmd = remote_command(["firefox"], gui=True)
+        self.assertIn("/proc/$shell/environ", cmd)
+        self.assertTrue(cmd.endswith("-- bash -c firefox"))
 
 
 if __name__ == "__main__":

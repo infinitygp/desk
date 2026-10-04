@@ -1,6 +1,7 @@
 """End-to-end check of an image and the harness: run it after rebuilding images or changing desk."""
 
 import hashlib
+import secrets
 import time
 
 from . import a11y, display, guest, runs
@@ -22,17 +23,28 @@ def _ssh(run, command: str) -> str:
     return r.stdout.decode()
 
 
-def _launch(run, app: str, window: str) -> None:
+def _ensure(run, binary: str, package: str) -> None:
+    """Minimal installs (Ubuntu's desktop-minimal) may lack the apps the selftest drives."""
+    install = f"apt-get install -y -q {package} || dnf install -y -q {package}"
+    cmd = f"command -v {binary} >/dev/null || ({install}) >/dev/null 2>&1; command -v {binary}"
+    r = guest.ssh_run(run.ssh_port, guest.ROOT, cmd, capture=True, timeout=600)
+    _check(r.returncode == 0, f"{binary} is not available and could not be installed")
+
+
+def _launch(run, app: str) -> None:
+    """Start `app` and wait for its focused window (matched by application, not by the
+    window title, which is translated in localized images)."""
+    _ensure(run, app, app)
     dom = run.dom()
     _ssh(run, guest.remote_command([app], gui=True))
     _check(display.wait_change(dom, timeout=30), f"{app} never appeared on screen")
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         snap = a11y.snapshot(run)
-        if any(t["focus"] and window in t["title"] for t in snap["tops"]):
+        if any(t["focus"] and t["app"] == app for t in snap["tops"]):
             return
         time.sleep(1)
-    raise Failed(f"no focused {window!r} window in the a11y tree")
+    raise Failed(f"no focused {app} window in the a11y tree")
 
 
 def _value_of(run, role: str) -> str:
@@ -59,7 +71,7 @@ def run_selftest(image: str, reboot: bool = False, keep: bool = False) -> bool:
 
     def start():
         nonlocal run
-        run = runs.up(spec, run_id=f"selftest-{int(time.time())}")
+        run = runs.up(spec, run_id=f"selftest-{secrets.token_hex(3)}")
         return f"run {run.id}"
 
     def screen():
@@ -77,7 +89,7 @@ def run_selftest(image: str, reboot: bool = False, keep: bool = False) -> bool:
         _check(code == 0 and out.strip() == b"0", f"exit {code}, output {out!r}")
 
     def calculator():
-        _launch(run, "gnome-calculator", "Calculator")
+        _launch(run, "gnome-calculator")
         for label in ("7", "×", "6", "="):
             x, y = a11y.locate_name(run, label, role="button", exact=True)
             display.click(run.dom(), x, y)
@@ -89,7 +101,7 @@ def run_selftest(image: str, reboot: bool = False, keep: bool = False) -> bool:
 
     def typing():
         text = "Zażółć gęślą jaźń ĄĆĘŁŃÓŚŹŻ 123 !@#"
-        _launch(run, "gnome-text-editor", "Text Editor")
+        _launch(run, "gnome-text-editor")
         display.type_text(run.dom(), text, layout=spec.layout)
         display.wait_stable(run.dom())
         value = _value_of(run, "text")
@@ -98,7 +110,7 @@ def run_selftest(image: str, reboot: bool = False, keep: bool = False) -> bool:
 
     def do_reboot():
         took, inhibitors = guest.reboot(run.ssh_port, run.user, spec.ready)
-        _launch(run, "gnome-calculator", "Calculator")
+        _launch(run, "gnome-calculator")
         note = f" (overrode {len(inhibitors)} shutdown inhibitor(s))" if inhibitors else ""
         return f"new boot ready in {took:.0f}s, a11y works{note}"
 

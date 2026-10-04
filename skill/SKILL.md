@@ -49,7 +49,9 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk exec --gui -- APP ARGS` | Start a program detached inside the graphical session |
 | `desk exec --agent -- CMD` | Run as root through qemu-guest-agent; works without guest networking |
 | `desk push LOCAL REMOTE`, `desk pull REMOTE LOCAL` | Copy files (scp) |
-| `desk ls`, `desk down [ID] [--all] [--keep]`, `desk gc` | List, destroy, clean up idle runs |
+| `desk diff [--all]` | Files changed in the guest since the image it started from: added, changed, removed (~30 s) |
+| `desk report [--diff]` | Write the evidence report now (see below) |
+| `desk ls`, `desk down [ID] [--all] [--keep] [--diff] [--no-report]`, `desk gc` | List, destroy (writing the report first), clean up idle runs |
 
 Action commands (`click`, `type`, `key`, `scroll`, `action`, ...) accept `--shot` to screenshot
 once the screen settles. With one argument, `desk exec -- 'a && b | grep x'` goes through the
@@ -75,6 +77,20 @@ guest shell; `--root` and `--gui` apply to the whole snippet.
 - Web UIs on `https://localhost` with a self-signed certificate (Cockpit) show Firefox's warning on
   every new run: `desk click --name Advanced`, then `desk click --name Proceed` (it scrolls itself).
 
+## Evidence report
+
+`desk down` first writes `/var/lib/vmlab/reports/<run>/report.md` and prints its path: failed
+units, SELinux denials, crashes, journal warnings and package changes since the run started, plus a
+timeline of every desk command with its exit code and the screenshots taken. `desk down --diff`
+adds the files the run changed. Point the user to the report and summarise what it found; read
+`journal.txt` / `avc.txt` next to it before blaming the product for a warning.
+
+## Images
+
+`desk image list` shows them. `fedora-44-gnome` is the default; `fedora-44-gnome-pl` is the same
+system in Polish (UI, Firefox, formats) for testing Polish interfaces; `ubuntu-26.04-gnome` is for
+`.deb` packages and Ubuntu specifics (apt, snap, AppArmor instead of SELinux).
+
 ## Testing a package end to end
 
 1. Build the package on the host as the project normally does.
@@ -85,9 +101,10 @@ guest shell; `--root` and `--gui` apply to the whole snippet.
    `enter`) or `desk exec --gui -- foo` - and walk through the feature with `desk a11y`, clicks and
    screenshots.
 5. Verify side effects in the guest with `desk exec`, not only on screen.
-6. When relevant: upgrade from the previous version, remove (`dnf remove`), `desk reboot` and
-   check what remains or comes back (autostart, enabled units).
-7. `desk down`.
+6. When relevant: upgrade from the previous version, remove (`dnf remove` / `apt-get remove`),
+   `desk reboot` and check what remains or comes back (autostart, enabled units, timers);
+   `desk diff` shows exactly which files the package left behind.
+7. `desk down --diff` and hand over the report.
 
 ## Judging screenshots
 
@@ -100,9 +117,10 @@ guest shell; `--root` and `--gui` apply to the whole snippet.
 
 ## Notes
 
-- The guest is Fedora 44 Workstation, GNOME on Wayland, user `tester` (password `tester`) with
+- The guests run GNOME on Wayland with user `tester` (password `tester`) with
   ordinary sudo, so sudo, polkit and Cockpit's administrative access ask for that password as on a
-  real machine (`desk exec --root` does not need it), 1280x800, en_US locale, Polish (programmer's)
+  real machine (`desk exec --root` does not need it), 1280x800, en_US locale (pl_PL in the -pl
+  variant), Polish (programmer's)
   keyboard layout = US plus AltGr letters,
   animations and screen lock off, session starts on the desktop rather than the overview.
 - Guest clocks are synced on restore; network goes through user-mode networking (outbound

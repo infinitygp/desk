@@ -31,8 +31,13 @@ def remote_command(argv: list[str], gui: bool = False) -> str:
     # session scope applies to all of it, not just the first command.
     cmd = shlex.join(argv) if len(argv) > 1 else argv[0]
     if gui:
-        # Starts the program inside the logged-in graphical session and returns at once.
-        cmd = f"systemd-run --user --collect --quiet -- bash -c {shlex.quote(cmd)}"
+        # Starts the program inside the logged-in graphical session and returns at once. The
+        # language comes from the shell's own environment: the systemd user manager can outlive
+        # a relogin and still carry the locale it started with.
+        cmd = ("shell=$(pgrep -u \"$(id -u)\" -x 'gnome-shell|plasmashell' | head -n1); "
+               "lang=$( [ -n \"$shell\" ] && tr '\\0' '\\n' < /proc/$shell/environ "
+               "| grep -E '^(LANG|LANGUAGE|LC_[A-Z]+)=' | sed 's/^/-E /'); "
+               f"systemd-run --user --collect --quiet $lang -- bash -c {shlex.quote(cmd)}")
     return cmd
 
 

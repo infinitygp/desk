@@ -1,10 +1,14 @@
 """Golden images: unattended install (base) and a saved, logged-in desktop (warm)."""
 
+import hashlib
+import io
 import json
 import shutil
+import tarfile
 import subprocess
 import time
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 import libvirt
 
@@ -23,6 +27,9 @@ def build_domain_name(spec: ImageSpec) -> str:
 
 def build(spec: ImageSpec, force: bool = False) -> None:
     """Install the base image; re-running attaches to an install that is still in progress."""
+    if spec.base:
+        raise DeskError(f"{spec.name} is a variant of {spec.base}: "
+                        f"build {spec.base}, then `desk image warm {spec.name}`")
     name = build_domain_name(spec)
     dom = lookup(name)
     if spec.base_xml.exists() and not force:
@@ -42,31 +49,70 @@ def build(spec: ImageSpec, force: bool = False) -> None:
     _finalize(spec, name)
 
 
-def _virt_install(spec: ImageSpec, name: str) -> None:
-    ks_dir = CACHE / spec.name
-    ks_dir.mkdir(parents=True, exist_ok=True)
+def _fetch_iso(spec: ImageSpec) -> Path:
+    iso = CACHE / spec.iso
+    if not iso.exists():
+        if not spec.iso_url:
+            raise DeskError(f"{iso} missing and no iso_url to fetch it from")
+        _log(f"downloading {spec.iso_url}")
+        subprocess.run(["curl", "-fL", "--progress-bar", "-o", f"{iso}.part", spec.iso_url], check=True)
+        Path(f"{iso}.part").rename(iso)
+    if spec.iso_sha256:
+        h = hashlib.sha256()
+        with iso.open("rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                h.update(chunk)
+        if h.hexdigest() != spec.iso_sha256:
+            raise DeskError(f"{iso} does not match iso_sha256; delete it to download again")
+    return iso
+
+
+def _render(spec: ImageSpec, template: str) -> str:
     pubkey = SSH_KEY.with_suffix(".pub").read_text().strip()
-    ks = (spec.dir / spec.kickstart).read_text().replace("@SSH_PUBKEY@", pubkey)
-    (ks_dir / "ks.cfg").write_text(ks)
+    text = (spec.dir / template).read_text().replace("@SSH_PUBKEY@", pubkey)
+    if "@PASSWORD_HASH@" in text:
+        hashed = subprocess.run(["openssl", "passwd", "-6", spec.user], capture_output=True, text=True,
+                                check=True).stdout.strip()
+        text = text.replace("@PASSWORD_HASH@", hashed)
+    return text
+
+
+def _virt_install(spec: ImageSpec, name: str) -> None:
+    work = CACHE / spec.name
+    work.mkdir(parents=True, exist_ok=True)
     log = LOGS / f"{name}.log"
-    _log(f"installing {spec.name}; serial console in {log}")
-    subprocess.run(
-        [
-            "virt-install", "--connect", conn().getURI(), "--name", name,
-            "--memory", str(spec.memory_mib), "--vcpus", str(spec.vcpus),
-            "--cpu", "host-passthrough", "--machine", "q35", "--boot", "uefi",
-            "--disk", f"path={spec.base_disk},size={spec.disk_gb},format=qcow2,bus=virtio,discard=unmap",
+    common = [
+        "virt-install", "--connect", conn().getURI(), "--name", name,
+        "--memory", str(spec.memory_mib), "--vcpus", str(spec.vcpus),
+        "--cpu", "host-passthrough", "--machine", "q35", "--boot", "uefi",
+        "--disk", f"path={spec.base_disk},size={spec.disk_gb},format=qcow2,bus=virtio,discard=unmap",
+        "--os-variant", spec.os_variant,
+        "--network", "type=user,backend.type=passt,model=virtio",
+        "--graphics", "none", "--video", "virtio",
+        "--serial", f"file,path={log}",
+        "--noautoconsole", "--noreboot", "--wait", "-1",
+    ]
+    if spec.installer == "kickstart":
+        (work / "ks.cfg").write_text(_render(spec, spec.kickstart))
+        extra = [
             "--location", spec.location,
-            "--initrd-inject", str(ks_dir / "ks.cfg"),
+            "--initrd-inject", str(work / "ks.cfg"),
             "--extra-args", "inst.ks=file:/ks.cfg console=ttyS0 inst.text",
-            "--os-variant", spec.os_variant,
-            "--network", "type=user,backend.type=passt,model=virtio",
-            "--graphics", "none", "--video", "virtio",
-            "--serial", f"file,path={log}",
-            "--noautoconsole", "--noreboot", "--wait", "-1",
-        ],
-        check=True,
-    )
+        ]
+    elif spec.installer == "autoinstall":
+        iso = _fetch_iso(spec)
+        (work / "user-data").write_text(_render(spec, spec.user_data))
+        (work / "meta-data").write_text(f"instance-id: iid-{spec.name}\n")
+        extra = [
+            "--location", f"{iso},kernel={spec.kernel},initrd={spec.initrd}",
+            "--extra-args", spec.extra_args,
+            "--cloud-init", f"user-data={work / 'user-data'},meta-data={work / 'meta-data'}",
+        ]
+    else:
+        raise DeskError(f"unknown installer {spec.installer!r}")
+    # The desktop installers are graphical; `desk image watch` shows their screen meanwhile.
+    _log(f"installing {spec.name} ({spec.installer}); serial console in {log}")
+    subprocess.run(common + extra, check=True)
 
 
 def _wait_shutoff(name: str) -> None:
@@ -91,21 +137,36 @@ def _finalize(spec: ImageSpec, name: str) -> None:
 
 
 def provision(spec: ImageSpec, port: int) -> None:
-    if not spec.provision:
+    if not spec.provision_scripts:
         return
-    files = spec.dir / "files"
-    if files.is_dir():
-        guest.ssh_run(port, spec.user, "rm -rf /tmp/desk-provision && mkdir -p /tmp/desk-provision", capture=True)
-        if guest.scp(port, str(files), f"{spec.user}@127.0.0.1:/tmp/desk-provision/") != 0:
-            raise DeskError("copying provision files failed")
-    script = (spec.dir / spec.provision).read_bytes()
-    r = guest.ssh_run(port, guest.ROOT, "bash -s", input=script, capture=True)
-    if r.returncode != 0:
-        raise DeskError(f"provision script failed ({r.returncode}): {r.stderr.decode(errors='replace')}")
+    if spec.files:
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as tar:
+            for d in spec.files:
+                src = (spec.dir / d).resolve()
+                for item in sorted(src.iterdir()):
+                    tar.add(item, arcname=item.name)
+        r = guest.ssh_run(port, guest.ROOT, "rm -rf /tmp/desk-provision && mkdir -p /tmp/desk-provision/files && "
+                          "tar -C /tmp/desk-provision/files -xf -", input=buf.getvalue(), capture=True)
+        if r.returncode != 0:
+            raise DeskError(f"copying provision files failed: {r.stderr.decode(errors='replace')}")
+    for script in spec.provision_scripts:
+        r = guest.ssh_run(port, guest.ROOT, "bash -s", input=(spec.dir / script).read_bytes(), capture=True)
+        if r.returncode != 0:
+            raise DeskError(f"{script} failed ({r.returncode}): {r.stderr.decode(errors='replace')}")
     if spec.relogin:
-        guest.ssh_run(port, guest.ROOT, spec.relogin, capture=True)
-        guest.wait_session_gone(port, spec.user, spec.ready)
-        guest.wait_ready(port, spec.user, spec.ready)
+        # GDM on Ubuntu 26.04 now and then does not log in automatically after a restart (one
+        # warm-up in four here), so give it a second restart before failing.
+        for attempt in (1, 2):
+            guest.ssh_run(port, guest.ROOT, spec.relogin, capture=True)
+            guest.wait_session_gone(port, spec.user, spec.ready)
+            try:
+                guest.wait_ready(port, spec.user, spec.ready, timeout=90 if attempt == 1 else 300)
+                break
+            except DeskError:
+                if attempt == 2:
+                    raise
+                _log("session did not come back after relogin, restarting the display manager again")
 
 
 def warm(spec: ImageSpec, force: bool = False) -> None:
@@ -143,10 +204,19 @@ def warm(spec: ImageSpec, force: bool = False) -> None:
         if not stable:
             _log("warning: screen did not settle, saving anyway")
         (wd / "before-save.png").write_bytes(display.screenshot(dom))
+        # Dirty pages would otherwise live only in the saved RAM and reach the disk inside each
+        # run's overlay, where they look like changes made by the run.
+        guest.ssh_run(port, guest.ROOT, "sync", capture=True, timeout=120)
         _log("saving memory state")
         dom.save(str(wd / "memory.save"))
     except BaseException:
         if dom.isActive():
+            # What the screen showed is usually the quickest explanation of a failed warm-up.
+            try:
+                (wd / "failed.png").write_bytes(display.screenshot(dom))
+                _log(f"screen at failure: {wd / 'failed.png'}")
+            except Exception:  # noqa: BLE001 - best effort while already failing
+                pass
             dom.destroy()
         raise
     disk.chmod(0o444)

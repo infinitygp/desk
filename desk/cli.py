@@ -1,15 +1,17 @@
 import argparse
 import os
 import sys
+import time
 from pathlib import Path
 
-from . import a11y, display, guest, images, runs
+from . import a11y, display, evidence, guest, images, runs
 from .config import DeskError, list_images, load_image
 
 
 def _emit_shot(run: runs.Run, png: bytes, out: str | None, label: str = "") -> None:
     path = Path(out) if out else run.next_shot_path(label)
     path.write_bytes(png)
+    run.log_event(shot=str(path))
     w, h = display.png_size(png)
     print(f"{path} {w}x{h}")
 
@@ -21,6 +23,17 @@ def _after_action(run: runs.Run, dom, args) -> None:
 
 
 def cmd_image(args) -> None:
+    if args.image_cmd == "shot":
+        spec = load_image(args.name)
+        from .virt import lookup
+
+        dom = lookup(images.build_domain_name(spec))
+        if dom is None or not dom.isActive():
+            raise DeskError(f"no install of {spec.name} is running")
+        out = Path(images.LOGS) / f"{images.build_domain_name(spec)}-{int(time.time())}.png"
+        out.write_bytes(display.screenshot(dom))
+        print(out)
+        return
     if args.image_cmd == "list":
         for name in list_images():
             spec = load_image(name)
@@ -28,11 +41,12 @@ def cmd_image(args) -> None:
                 state = "warm" if runs.warm_is_current(spec) else "warm (stale, re-run warm)"
             else:
                 state = "base" if spec.base_xml.exists() else "not built"
-            print(f"{name}\t{state}")
+            print(f"{name}\t{state}" + (f"\t(variant of {spec.base})" if spec.base else ""))
         return
     spec = load_image(args.name)
-    with runs.state_lock():
-        busy = runs.active_runs_of(spec.name)
+    with runs.image_lock(spec.name):
+        with runs.state_lock():
+            busy = runs.active_runs_of(spec.name)
         if busy:
             raise DeskError(f"runs still use {spec.name}: {', '.join(r.id for r in busy)} (desk down first)")
         if args.image_cmd == "build":
@@ -43,6 +57,7 @@ def cmd_image(args) -> None:
 
 def cmd_up(args) -> None:
     run = runs.up(load_image(args.image), run_id=args.name, cold=args.cold, force=args.force)
+    run.log_event(argv=sys.argv[1:])
     print(f"run {run.id} up (image {run.image}, ssh port {run.ssh_port})")
     print(f"export DESK_RUN={run.id}  # fish: set -x DESK_RUN {run.id}")
 
@@ -51,8 +66,23 @@ def cmd_down(args) -> None:
     with runs.state_lock():
         targets = runs.all_runs() if args.all else [runs.resolve(args.id)]
         for run in targets:
+            report = None
+            if not args.no_report and run.live_domain() is not None:
+                report = evidence.collect(run, diff=args.diff)
             runs.down(run, keep=args.keep)
             print(f"run {run.id} down" + (" (files kept)" if args.keep else ""))
+            if report:
+                print(f"report: {report / 'report.md'}")
+
+
+def cmd_report(args) -> None:
+    run = runs.resolve(args.run)
+    print(evidence.collect(run, diff=args.diff) / "report.md")
+
+
+def cmd_diff(args) -> None:
+    run = runs.resolve(args.run)
+    print(evidence.format_changes(evidence.file_changes(run, all_paths=args.all), limit=args.limit))
 
 
 def cmd_ls(args) -> None:
@@ -63,6 +93,7 @@ def cmd_ls(args) -> None:
 
 def cmd_gc(args) -> None:
     with runs.state_lock():
+        evidence.prune_reports()
         if not runs.gc():
             print(f"nothing to clean (idle limit {runs.IDLE_TTL / 3600:g} h, DESK_TTL to change)")
 
@@ -197,11 +228,13 @@ def cmd_exec(args) -> None:
         code, out, err = guest.agent_exec(run.dom(), [*wrapper, *argv], timeout=args.timeout or 120)
         sys.stdout.buffer.write(out)
         sys.stderr.buffer.write(err)
+        run.log_event(rc=code)
         sys.exit(code)
     if args.root and args.gui:
         raise DeskError("--gui starts programs in the desktop user's session; drop --root")
     command = guest.remote_command(argv, gui=args.gui)
     r = guest.ssh_run(run.ssh_port, guest.ROOT if args.root else run.user, command, timeout=args.timeout)
+    run.log_event(rc=r.returncode)
     sys.exit(r.returncode)
 
 
@@ -257,6 +290,8 @@ def build_parser() -> argparse.ArgumentParser:
         ip = isub.add_parser(name, help=hlp)
         ip.add_argument("name")
         ip.add_argument("--force", action="store_true")
+    ip = isub.add_parser("shot", help="screenshot of an image install in progress")
+    ip.add_argument("name")
     p.set_defaults(func=cmd_image)
 
     p = sub.add_parser("up", help="start a disposable run")
@@ -270,7 +305,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("id", nargs="?")
     p.add_argument("--all", action="store_true")
     p.add_argument("--keep", action="store_true", help="keep the run directory (disk, shots, logs)")
+    p.add_argument("--diff", action="store_true", help="add the files the run changed to the report (~30 s)")
+    p.add_argument("--no-report", action="store_true", help="skip the evidence report")
     p.set_defaults(func=cmd_down)
+
+    p = sub.add_parser("report", help="write the evidence report now (timeline, guest problems)")
+    p.add_argument("--diff", action="store_true", help="include changed files (~30 s)")
+    p.set_defaults(func=cmd_report)
+
+    p = sub.add_parser("diff", help="files changed in the guest since the image it started from (~30 s)")
+    p.add_argument("--all", action="store_true", help="include routine paths (logs, caches, package db)")
+    p.add_argument("--limit", type=int, default=200, help="max paths per category")
+    p.set_defaults(func=cmd_diff)
 
     sub.add_parser("ls", help="list runs").set_defaults(func=cmd_ls)
     sub.add_parser("gc", help="destroy runs idle longer than $DESK_TTL s (default 2 h) and orphaned VMs"

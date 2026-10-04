@@ -26,16 +26,25 @@ HOST_RESERVE_MIB = 1024
 
 
 @contextmanager
-def state_lock():
-    """Serialises commands that create or destroy VMs (port picking, UUID checks, gc)."""
+def _flock(path: Path, waiting: str):
     HOME.mkdir(parents=True, exist_ok=True)
-    with open(HOME / ".lock", "w") as f:
+    with open(path, "w") as f:
         try:
             fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            print("[desk] waiting for another desk command (image build/warm, up, down)...", file=sys.stderr)
+            print(f"[desk] {waiting}", file=sys.stderr)
             fcntl.flock(f, fcntl.LOCK_EX)
         yield
+
+
+def state_lock():
+    """Serialises commands that create or destroy VMs (port picking, UUID checks, gc)."""
+    return _flock(HOME / ".lock", "waiting for another desk command (up, down, gc)...")
+
+
+def image_lock(image: str):
+    """Held for a whole image build or warm, which can take many minutes."""
+    return _flock(HOME / f".lock-{image}", f"waiting for another build/warm of {image}...")
 
 
 _held: list[int] = []
@@ -81,6 +90,11 @@ class Run:
             return True
         finally:
             os.close(fd)
+
+    def log_event(self, **event) -> None:
+        """Timeline for the report: commands, their exit codes and screenshots."""
+        with open(self.dir / "log.jsonl", "a") as f:
+            f.write(json.dumps({"t": time.time(), **event}, ensure_ascii=False) + "\n")
 
     def touch(self) -> None:
         self.last_used = time.time()
@@ -145,6 +159,7 @@ def resolve(run_id: str | None) -> Run:
         run = active[0]
     run.touch()
     run.hold()
+    run.log_event(argv=sys.argv[1:])
     return run
 
 

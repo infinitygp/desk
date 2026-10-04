@@ -23,15 +23,31 @@ skill/SKILL.md       agent skill
 desk/                harness code (guest_a11y.py runs inside the guest)
 tests/               unit tests
 images/<name>/       image.toml, kickstart, provision.sh
-/var/lib/vmlab/      base/, warm/, runs/, cache/, logs/, keys/  (DESK_HOME)
+/var/lib/vmlab/      base/, warm/, runs/, reports/, cache/, logs/, keys/  (DESK_HOME)
 ```
 
 ## Images
 
+| Image | Install | Notes |
+|---|---|---|
+| `fedora-44-gnome` | kickstart over the network | default |
+| `fedora-44-gnome-pl` | variant of `fedora-44-gnome` | Polish locale; shares the base disk, own warm state |
+| `ubuntu-26.04-gnome` | desktop ISO autoinstall (cloud-init NoCloud seed) | apt/snap timers off |
+
 ```bash
 bin/desk image build fedora-44-gnome   # unattended install, ~10 min, needs network
 bin/desk image warm fedora-44-gnome    # boot, provision, save the running desktop
+bin/desk image shot ubuntu-26.04-gnome # look at a graphical installer while it runs
 ```
+
+Shared provisioning files live in `images/_shared/`. A variant (`base = "..."` in its
+`image.toml`) inherits the base image's settings and adds provisioning scripts.
+
+## Evidence
+
+`desk down` writes `reports/<run>/report.md` (failed units, SELinux denials, coredumps, journal
+warnings, package changes, timeline with screenshots); `--diff` adds the files the run changed,
+from `virt-diff` against the image the run started from. Reports are pruned after 14 days.
 
 Provisioning (`provision.sh`, `files/`) runs before the warm state is saved and after cold
 boots; it installs the shell extension, the Polish (programmer's) layout and a11y settings.

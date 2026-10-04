@@ -1,0 +1,22 @@
+# Ubuntu 26.04 LTS Desktop (GNOME, Wayland) through the desktop installer's autoinstall.
+installer = "autoinstall"
+# libosinfo on this host stops at 25.10, which lists the same casper layout.
+os_variant = "ubuntu25.10"
+memory_mib = 4096
+vcpus = 4
+disk_gb = 40
+iso = "ubuntu-26.04.1-desktop-amd64.iso"
+iso_url = "https://releases.ubuntu.com/26.04.1/ubuntu-26.04.1-desktop-amd64.iso"
+iso_sha256 = "601e30fbf5d97759367c632e2c33630665039b7e2158fd068403da3ccf1bda1f"
+kernel = "casper/vmlinuz"
+initrd = "casper/initrd"
+# `autoinstall` is what skips the installer's confirmation page; the seed comes from the CIDATA disk.
+extra_args = "autoinstall ds=nocloud console=ttyS0,115200n8"
+user_data = "user-data"
+user = "tester"
+provision = "provision.sh"
+files = ["../_shared/gnome"]
+ready = "systemctl --user is-active --quiet graphical-session.target"
+# Run as root after provision.sh so the session picks up the shell extension.
+relogin = "systemctl restart display-manager"
+layout = "pl"

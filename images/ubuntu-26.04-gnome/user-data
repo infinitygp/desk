@@ -1,0 +1,33 @@
+#cloud-config
+# @SSH_PUBKEY@ and @PASSWORD_HASH@ are replaced by `desk image build`.
+autoinstall:
+  version: 1
+  refresh-installer: {update: false}
+  locale: en_US.UTF-8
+  keyboard: {layout: us}
+  timezone: Europe/Warsaw
+  source: {id: ubuntu-desktop-minimal}
+  storage: {layout: {name: direct}}
+  identity:
+    realname: Tester
+    username: tester
+    hostname: desk-ubuntu
+    password: "@PASSWORD_HASH@"
+  ssh:
+    install-server: true
+    allow-pw: true
+    authorized-keys: ["@SSH_PUBKEY@"]
+  packages: [qemu-guest-agent]
+  updates: security
+  codecs: {install: false}
+  drivers: {install: false}
+  late-commands:
+    - curtin in-target --target=/target -- systemctl enable ssh qemu-guest-agent
+    # The harness does root work over its own key; tester keeps a normal password sudo.
+    - install -d -m 700 /target/root/.ssh
+    - echo '@SSH_PUBKEY@' > /target/root/.ssh/authorized_keys
+    - chmod 600 /target/root/.ssh/authorized_keys
+    # Log straight into the graphical session (there is no autoinstall key for it).
+    - |
+      printf '[daemon]\nAutomaticLoginEnable=true\nAutomaticLogin=tester\n' > /target/etc/gdm3/custom.conf
+  shutdown: poweroff
