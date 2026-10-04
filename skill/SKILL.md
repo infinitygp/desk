@@ -5,7 +5,7 @@ description: Test desktop applications and system packages (rpm, deb, Flatpak, A
 
 # desk: disposable desktop VMs
 
-`desk` (on PATH; source and image definitions in `~/work/experiments/agent-visual-analysis`)
+`desk` (on PATH; source and image definitions in `~/work/github/infinitygp/desk`)
 starts a throwaway VM from a golden image with a logged-in desktop in about two seconds, and
 drives it like a person would: real mouse and keyboard input from outside the guest, the screen
 as PNG, and the accessibility tree as text. Nothing in the guest can hide the screen or block
