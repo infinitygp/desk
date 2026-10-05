@@ -151,13 +151,21 @@ def prepare_domain_xml(
         if not any(a.get("id") == "1" for a in devices.findall("audio")):
             ET.SubElement(devices, "audio", id="1", type="none")
     if displays != 1 or resolution:
-        # Monitors are heads of the virtio GPU; the resolution is the mode each one offers first.
-        model = devices.find("video/model")
-        model.set("heads", str(displays))
-        for r in model.findall("resolution"):
-            model.remove(r)
-        if resolution:
-            ET.SubElement(model, "resolution", x=str(resolution[0]), y=str(resolution[1]))
+        # One virtio GPU per monitor: QEMU leaves a GPU's further heads disconnected until a
+        # display UI attaches to them (desk has none), and Windows' viogpudo drives one head per
+        # GPU anyway. Needs QEMU's virtio-gpu-pci module (qemu-device-display-virtio-gpu-pci).
+        # The resolution is the mode each one offers first.
+        video = devices.find("video")
+        for extra in devices.findall("video")[1:]:
+            devices.remove(extra)
+        for i in range(displays):
+            v = video if i == 0 else ET.SubElement(devices, "video")
+            model = v.find("model") if i == 0 else ET.SubElement(v, "model", type="virtio")
+            model.set("heads", "1")
+            for r in model.findall("resolution"):
+                model.remove(r)
+            if resolution:
+                ET.SubElement(model, "resolution", x=str(resolution[0]), y=str(resolution[1]))
     if vnc_password:
         # For a person to watch (desk view). Loopback only, through an SSH tunnel; the password
         # keeps other local accounts out, since the VMs run under this user.

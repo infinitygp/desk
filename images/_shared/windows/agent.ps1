@@ -4,6 +4,12 @@
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 . (Join-Path $PSScriptRoot 'uia.ps1')
+# Per-monitor DPI aware, so UI Automation reports physical pixels, the same as the screenshots,
+# at any scaling (a DPI-unaware process gets coordinates scaled down at 125 % and up).
+Add-Type -Namespace Desk -Name Dpi -MemberDefinition @'
+[DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr value);
+'@
+[void][Desk.Dpi]::SetProcessDpiAwarenessContext([IntPtr]-4)   # PER_MONITOR_AWARE_V2
 Add-Type -Namespace Desk -Name Win -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
 [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
@@ -55,6 +61,84 @@ function Focus-Window($query) {
     @{ ok = $true; title = $hit.Current.Name; focused = (Show-Window $hit.Current.NativeWindowHandle) }
 }
 
+# Monitors: the layout desk composes its screenshots from, and changing modes and arrangement.
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace Desk {
+    public static class Display {
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        public struct DEVMODE {
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmDeviceName;
+            public short dmSpecVersion, dmDriverVersion, dmSize, dmDriverExtra;
+            public int dmFields, dmPositionX, dmPositionY, dmDisplayOrientation, dmDisplayFixedOutput;
+            public short dmColor, dmDuplex, dmYResolution, dmTTOption, dmCollate;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmFormName;
+            public short dmLogPixels;
+            public int dmBitsPerPel, dmPelsWidth, dmPelsHeight, dmDisplayFlags, dmDisplayFrequency, dmICMMethod,
+                dmICMIntent, dmMediaType, dmDitherType, dmReserved1, dmReserved2, dmPanningWidth, dmPanningHeight;
+        }
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        public struct DISPLAY_DEVICE {
+            public int cb;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string DeviceName;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceString;
+            public int StateFlags;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceID;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceKey;
+        }
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern bool EnumDisplayDevices(string dev, int i, ref DISPLAY_DEVICE dd, int flags);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern bool EnumDisplaySettings(string dev, int mode, ref DEVMODE dm);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern int ChangeDisplaySettingsEx(string dev, ref DEVMODE dm, IntPtr hwnd, int flags, IntPtr lp);
+        // Every output (one per virtio GPU) side by side, left to right, optionally in one mode.
+        // In C#: structs passed by [ref] from PowerShell do not come back.
+        public static string Arrange(int width, int height) {
+            var log = "";
+            int x = 0;
+            for (int i = 0; i < 16; i++) {
+                var dd = new DISPLAY_DEVICE();
+                dd.cb = Marshal.SizeOf(dd);
+                if (!EnumDisplayDevices(null, i, ref dd, 0)) break;
+                var dm = new DEVMODE();
+                dm.dmSize = (short)Marshal.SizeOf(dm);
+                // Current settings, or the stored ones of an output not on the desktop yet.
+                if (!EnumDisplaySettings(dd.DeviceName, -1, ref dm) || dm.dmPelsWidth == 0)
+                    if (!EnumDisplaySettings(dd.DeviceName, -2, ref dm)) continue;
+                if (width > 0) { dm.dmPelsWidth = width; dm.dmPelsHeight = height; }
+                if (dm.dmPelsWidth == 0) continue;
+                dm.dmPositionX = x;
+                dm.dmPositionY = 0;
+                dm.dmFields = 0x20 | 0x80000 | 0x100000;           // POSITION | PELSWIDTH | PELSHEIGHT
+                int flags = 0x01 | (i == 0 ? 0x10 : 0);              // UPDATEREGISTRY, SET_PRIMARY
+                int r = ChangeDisplaySettingsEx(dd.DeviceName, ref dm, IntPtr.Zero, flags, IntPtr.Zero);
+                log += dd.DeviceName + " " + dm.dmPelsWidth + "x" + dm.dmPelsHeight + "+" + x + ": " + r + "\n";
+                if (r != 0) throw new Exception(dd.DeviceName + ": mode " + dm.dmPelsWidth + "x" + dm.dmPelsHeight + " refused (" + r + ")");
+                x += dm.dmPelsWidth;
+            }
+            return log;
+        }
+    }
+}
+'@
+
+function Get-Monitors {
+    ,@([System.Windows.Forms.Screen]::AllScreens | Sort-Object { $_.DeviceName } | ForEach-Object {
+        @{ name = $_.DeviceName; primary = $_.Primary
+           bounds = @($_.Bounds.X, $_.Bounds.Y, $_.Bounds.Width, $_.Bounds.Height) } })
+}
+
+function Set-Displays($width, $height) {
+    $w = if ($width) { [int]$width } else { 0 }
+    $h = if ($height) { [int]$height } else { 0 }
+    [void][Desk.Display]::Arrange($w, $h)
+    Start-Sleep -Milliseconds 500
+    Get-Monitors
+}
+
 $port = 47011
 $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Any, $port)
 $listener.Start()
@@ -75,6 +159,8 @@ while ($true) {
             }
             'uia' { Invoke-Uia $req.op $req.arg $req.text }
             'focus' { Focus-Window $req.query }
+            'monitors' { @{ ok = $true; monitors = (Get-Monitors) } }
+            'display' { @{ ok = $true; monitors = (Set-Displays $req.width $req.height) } }
             default { @{ error = "unknown command $($req.cmd)" } }
         }
     } catch {

@@ -1,7 +1,9 @@
 """Out-of-band screen and input: what a physical monitor, mouse and keyboard would see and do."""
 
 import hashlib
+import io
 import time
+import xml.etree.ElementTree as ET
 
 import libvirt
 
@@ -37,9 +39,40 @@ _SHIFTED = {
 _ALTGR = {"ą": "a", "ć": "c", "ę": "e", "ł": "l", "ń": "n", "ó": "o", "ś": "s", "ź": "x", "ż": "z"}
 
 
+def _heads(dom: libvirt.virDomain) -> int:
+    """Monitors: one virtio GPU each (see virt.prepare_domain_xml)."""
+    return max(1, len(ET.fromstring(dom.XMLDesc(0)).findall("devices/video")))
+
+
+def screen_sizes(dom: libvirt.virDomain) -> list[tuple[int, int]]:
+    return [png_size(_head_png(dom, i)) for i in range(_heads(dom))]
+
+
 def screenshot(dom: libvirt.virDomain) -> bytes:
+    """The screen as PNG; several monitors side by side, left to right, top-aligned, which is
+    how desk arranges them in the guest (monitors.apply), so guest coordinates match."""
+    heads = _heads(dom)
+    if heads == 1:
+        return _head_png(dom, 0)
+    try:
+        from PIL import Image
+    except ImportError:
+        raise DeskError("several monitors need Pillow on the host to put the pictures together "
+                        "(dnf install python3-pillow)") from None
+    images = [Image.open(io.BytesIO(_head_png(dom, i))).convert("RGB") for i in range(heads)]
+    canvas = Image.new("RGB", (sum(i.width for i in images), max(i.height for i in images)))
+    x = 0
+    for image in images:
+        canvas.paste(image, (x, 0))
+        x += image.width
+    out = io.BytesIO()
+    canvas.save(out, "PNG", compress_level=1)
+    return out.getvalue()
+
+
+def _head_png(dom: libvirt.virDomain, head: int) -> bytes:
     stream = conn().newStream(0)
-    mime = dom.screenshot(stream, 0, 0)
+    mime = dom.screenshot(stream, head, 0)
     chunks: list[bytes] = []
     stream.recvAll(lambda _st, data, buf: buf.append(data), chunks)
     stream.finish()
@@ -95,30 +128,52 @@ def _abs(v: int, size: int) -> int:
     return round(v * ABS_MAX / max(size - 1, 1))
 
 
-def _move_events(x: int, y: int, size: tuple[int, int]) -> list[dict]:
-    return [
-        {"type": "abs", "data": {"axis": "x", "value": _abs(x, size[0])}},
-        {"type": "abs", "data": {"axis": "y", "value": _abs(y, size[1])}},
-    ]
-
-
 def _btn(button: str, down: bool) -> dict:
     return {"type": "btn", "data": {"down": down, "button": button}}
 
 
+class _Pointer:
+    """Absolute pointer events in screen coordinates. With several monitors a point belongs to
+    one of them, and QEMU takes its events for that GPU's console in the console's own pixels."""
+
+    def __init__(self, dom):
+        self.dom = dom
+        self.sizes = screen_sizes(dom)
+        self.width = sum(w for w, _ in self.sizes)
+        self.target: dict = {}
+
+    def move(self, x: int, y: int) -> None:
+        left = 0
+        for i, (w, h) in enumerate(self.sizes):
+            if left <= x < left + w:
+                if not 0 <= y < h:
+                    raise DeskError(f"({x},{y}) is below monitor {i + 1}, which is {h} pixels high")
+                self.target = {"device": f"video{i}", "head": 0} if len(self.sizes) > 1 else {}
+                self.send([{"type": "abs", "data": {"axis": "x", "value": _abs(x - left, w)}},
+                           {"type": "abs", "data": {"axis": "y", "value": _abs(y, h)}}])
+                return
+            left += w
+        raise DeskError(f"coordinate {x} outside the screen (0..{self.width - 1})")
+
+    def send(self, events: list[dict]) -> None:
+        qmp(self.dom, "input-send-event", events=events, **self.target)
+
+    def button(self, button: str, down: bool) -> None:
+        self.send([_btn(button, down)])
+
+
 def move(dom, x: int, y: int) -> None:
-    size = png_size(screenshot(dom))
-    qmp(dom, "input-send-event", events=_move_events(x, y, size))
+    _Pointer(dom).move(x, y)
 
 
 def click(dom, x: int, y: int, button: str = "left", count: int = 1) -> None:
-    size = png_size(screenshot(dom))
-    qmp(dom, "input-send-event", events=_move_events(x, y, size))
+    p = _Pointer(dom)
+    p.move(x, y)
     time.sleep(0.05)
     for _ in range(count):
-        qmp(dom, "input-send-event", events=[_btn(button, True)])
+        p.button(button, True)
         time.sleep(0.05)
-        qmp(dom, "input-send-event", events=[_btn(button, False)])
+        p.button(button, False)
         time.sleep(0.08)
 
 
@@ -128,33 +183,31 @@ def drag(dom, x1: int, y1: int, x2: int, y2: int, steps: int = 30) -> None:
     Toolkit drag-and-drop (GTK, WebKit, Qt on Wayland) only starts after the pointer has moved a
     few pixels with the button held, and only accepts the drop once the target has seen motion
     over it; jumping there and letting go at once leaves the drag hanging."""
-    size = png_size(screenshot(dom))
-    qmp(dom, "input-send-event", events=_move_events(x1, y1, size))
+    p = _Pointer(dom)
+    p.move(x1, y1)
     time.sleep(0.1)
-    qmp(dom, "input-send-event", events=[_btn("left", True)])
+    p.button("left", True)
     time.sleep(0.15)
     for i in range(1, steps + 1):
-        x = x1 + (x2 - x1) * i // steps
-        y = y1 + (y2 - y1) * i // steps
-        qmp(dom, "input-send-event", events=_move_events(x, y, size))
+        p.move(x1 + (x2 - x1) * i // steps, y1 + (y2 - y1) * i // steps)
         time.sleep(0.02)
     # A last wiggle over the target, then let go.
     for dx in (2, -2, 0):
-        qmp(dom, "input-send-event", events=_move_events(min(max(x2 + dx, 0), size[0] - 1), y2, size))
+        p.move(min(max(x2 + dx, 0), p.width - 1), y2)
         time.sleep(0.06)
     time.sleep(0.2)
-    qmp(dom, "input-send-event", events=[_btn("left", False)])
+    p.button("left", False)
     time.sleep(0.1)
 
 
 def scroll(dom, x: int, y: int, dy: int) -> None:
     """Positive dy scrolls down, negative up; one unit is one wheel notch."""
-    size = png_size(screenshot(dom))
-    qmp(dom, "input-send-event", events=_move_events(x, y, size))
+    p = _Pointer(dom)
+    p.move(x, y)
     button = "wheel-down" if dy > 0 else "wheel-up"
     for _ in range(abs(dy)):
-        qmp(dom, "input-send-event", events=[_btn(button, True)])
-        qmp(dom, "input-send-event", events=[_btn(button, False)])
+        p.button(button, True)
+        p.button(button, False)
         time.sleep(0.03)
 
 

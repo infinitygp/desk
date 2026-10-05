@@ -83,16 +83,25 @@ def _image_list() -> None:
         print(f"{name:<22}{state:<8}{built:<12}{test:<20}{'; '.join(notes)}")
 
 
+def _resolution(text: str | None) -> tuple[int, int] | None:
+    if not text:
+        return None
+    try:
+        width, height = (int(v) for v in text.lower().split("x"))
+    except ValueError:
+        raise DeskError(f"--resolution takes WIDTHxHEIGHT, e.g. 1920x1080 (got {text!r})") from None
+    return width, height
+
+
 def cmd_up(args) -> None:
-    resolution = None
-    if args.resolution:
-        try:
-            resolution = tuple(int(v) for v in args.resolution.lower().split("x"))
-            assert len(resolution) == 2
-        except (ValueError, AssertionError):
-            raise DeskError(f"--resolution takes WIDTHxHEIGHT, e.g. 1920x1080 (got {args.resolution!r})") from None
-    run = runs.up(load_image(args.image), run_id=args.name, cold=args.cold, force=args.force,
+    resolution = _resolution(args.resolution)
+    spec = load_image(args.image)
+    run = runs.up(spec, run_id=args.name, cold=args.cold, force=args.force,
                   displays=args.displays, resolution=resolution)
+    if args.displays != 1 or resolution or args.scale:
+        from . import monitors
+
+        monitors.apply(run, spec, resolution=resolution, scale=args.scale)
     run.log_event(argv=sys.argv[1:])
     if args.record:
         record.start(run)
@@ -380,6 +389,18 @@ def cmd_snapshot(args) -> None:
             print(f"restored {args.name} ({took:.1f}s)")
 
 
+def cmd_display(args) -> None:
+    from . import monitors
+
+    run = runs.resolve(args.run)
+    resolution = _resolution(args.resolution)
+    if resolution or args.scale:
+        monitors.apply(run, runs.spec_for(run), resolution=resolution, scale=args.scale)
+    sizes = display.screen_sizes(run.dom())
+    print(f"{len(sizes)} display(s): " + ", ".join(f"{w}x{h}" for w, h in sizes)
+          + f"; scale {run.scale or 100} %")
+
+
 def cmd_maintain(args) -> None:
     from . import maintain
 
@@ -441,6 +462,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--record", action="store_true", help="record a video from the start (desk record)")
     p.add_argument("--displays", type=int, default=1, help="monitors (boots cold when not 1)")
     p.add_argument("--resolution", help="mode the monitors start in, e.g. 1920x1080 (boots cold)")
+    p.add_argument("--scale", type=int, help="scaling in percent, e.g. 150 (Windows: signs in again)")
     p.set_defaults(func=cmd_up)
 
     p = sub.add_parser("down", help="destroy a run and delete its files")
@@ -587,6 +609,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--keep", action="store_true", help="keep the run's files afterwards")
     p.add_argument("--image", help="another image than the file names")
     p.set_defaults(func=cmd_scenario)
+
+    p = sub.add_parser("display", help="show or change the run's monitors: resolution, scaling")
+    p.add_argument("--resolution", help="mode for every monitor, e.g. 1920x1080 (one the monitors offer)")
+    p.add_argument("--scale", type=int, help="scaling in percent, e.g. 150 (Windows: signs in again)")
+    p.set_defaults(func=cmd_display)
 
     p = sub.add_parser("snapshot", help="save the running guest and go back to it later")
     p.add_argument("action", choices=["save", "restore", "list", "delete"])

@@ -78,6 +78,8 @@ class Run:
     # Monitors (heads of the virtio GPU) and the mode they start in; 1 and None: the image's.
     displays: int = 1
     resolution: list[int] | None = None
+    # Scaling in percent set by desk (None: the image's 100 %).
+    scale: int | None = None
 
     @property
     def dir(self) -> Path:

@@ -27,6 +27,12 @@ def _helper(run, *args: str) -> dict:
     out = json.loads(r.stdout)
     if "error" in out:
         raise DeskError(out["error"])
+    if getattr(run, "scale", None) and run.scale != 100:
+        # GNOME's logical layout: toolkits and the shell speak logical pixels; the screen has more.
+        f = run.scale / 100
+        for box in [n.get("bbox") for n in out.get("nodes", [])] + [out.get("bbox")]:
+            if box:
+                box[:] = [round(v * f) for v in box]
     return out
 
 
