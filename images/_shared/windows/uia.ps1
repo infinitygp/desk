@@ -36,6 +36,18 @@ namespace Desk {
         [DllImport("oleacc.dll")]
         static extern int AccessibleObjectFromWindow(IntPtr hwnd, uint id, ref Guid iid,
             [MarshalAs(UnmanagedType.Interface)] out object acc);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, string name);
+        [DllImport("user32.dll")]
+        static extern bool IsWindowVisible(IntPtr hwnd);
+        // Open Win32 menus (popups of class #32768), which UI Automation's managed client misses.
+        public static List<IntPtr> Menus() {
+            var menus = new List<IntPtr>();
+            IntPtr h = IntPtr.Zero;
+            while ((h = FindWindowEx(IntPtr.Zero, h, "#32768", null)) != IntPtr.Zero)
+                if (IsWindowVisible(h)) menus.Add(h);
+            return menus;
+        }
         public static List<MsaaItem> Items(IntPtr hwnd) {
             var items = new List<MsaaItem>();
             Guid iid = new Guid("618736E0-3C3D-11CF-810C-00AA00389B71");
@@ -56,13 +68,16 @@ namespace Desk {
 }
 '@
 
-function Get-MsaaNodes($hwnd, $path, $depth, $pid_) {
+function Get-MsaaNodes($hwnd, $path, $depth, $pid_, $role = 'list item') {
     foreach ($it in [Desk.Msaa]::Items([IntPtr][long]$hwnd)) {
         $states = @()
+        if ($it.State -band 0x1) { $states += 'disabled' }   # STATE_SYSTEM_UNAVAILABLE
         if ($it.State -band 0x2) { $states += 'selected' }   # STATE_SYSTEM_SELECTED
         if ($it.State -band 0x4) { $states += 'focused' }    # STATE_SYSTEM_FOCUSED
-        $node = [ordered]@{ pid = $pid_; path = ($path + (100000 + $it.Child)); role = 'list item'
-                            name = ([string]$it.Name).Trim(); depth = $depth; states = $states
+        if ($it.State -band 0x80) { $states += 'selected' }  # STATE_SYSTEM_HOTTRACKED (menus)
+        # Menu items carry their shortcut after a tab ("Close<Tab>Alt+F4").
+        $node = [ordered]@{ pid = $pid_; path = ($path + (100000 + $it.Child)); role = $role
+                            name = (([string]$it.Name) -split "`t")[0].Trim(); depth = $depth; states = $states
                             bbox = if ($it.W -gt 0 -and $it.H -gt 0) { @($it.X, $it.Y, $it.W, $it.H) } else { $null } }
         if ($it.State -band 0x10000) { $node.offscreen = $true }  # STATE_SYSTEM_OFFSCREEN
         $node
@@ -236,6 +251,14 @@ function Snapshot($opts) {
             Walk $cached @(0) 0 '' $hwnd $nodes $limit
         }
     }
+    # An open Win32 menu has the keyboard and the user's attention: list it as the focused window.
+    foreach ($menu in [Desk.Msaa]::Menus()) {
+        $items = @(Get-MsaaNodes $menu @(0) 0 ([long]$menu) 'menu item' | Where-Object { $_.name })
+        if (-not $items) { continue }
+        foreach ($t in $tops) { $t.focus = $false }
+        [void]$tops.Add([ordered]@{ app = 'menu'; pid = [long]$menu; title = 'menu'; focus = $true; start = $nodes.Count })
+        foreach ($n in $items) { [void]$nodes.Add($n) }
+    }
     @{ windows = @(); tops = $tops; nodes = $nodes; truncated = $script:truncated }
 }
 
@@ -262,6 +285,11 @@ function Walk($el, $path, $depth, $parentName, $hwnd, $nodes, $limit) {
 
 # Items of a SysListView32 read through MSAA (see Get-MsaaNodes): find them the same way.
 function Resolve-Msaa($spec) {
+    if ($spec.role -eq 'menu item' -and ([Desk.Msaa]::Menus() | Where-Object { [long]$_ -eq [long]$spec.pid })) {
+        foreach ($n in (Get-MsaaNodes $spec.pid @() 0 $spec.pid 'menu item')) {
+            if ($n.name -eq $spec.name -and $n.bbox) { return @{ bbox = $n.bbox; showing = $true } }
+        }
+    }
     if ($spec.role -ne 'list item') { return $null }
     $top = $AE::FromHandle([IntPtr][long]$spec.pid)
     $cond = New-Object Windows.Automation.PropertyCondition($AE::ClassNameProperty, 'SysListView32')

@@ -211,10 +211,12 @@ def move(dom, x: int, y: int, run=None) -> None:
 def click(dom, x: int, y: int, button: str = "left", count: int = 1, run=None) -> None:
     p = _Pointer(dom, run, [(x, y)])
     p.move(x, y)
-    time.sleep(0.05)
+    # Windows drops a right click whose press comes 50 ms after the move and lasts 50 ms (no
+    # context menu); 100 ms each work, and two clicks stay well inside the double-click time.
+    time.sleep(0.1)
     for _ in range(count):
         p.button(button, True)
-        time.sleep(0.05)
+        time.sleep(0.1)
         p.button(button, False)
         time.sleep(0.08)
 

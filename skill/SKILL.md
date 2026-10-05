@@ -121,6 +121,9 @@ running out, pass it on to the user.
 - `desk exec -- CMD` runs PowerShell as `tester`, who is an administrator with a full token, so
   `--root` changes nothing; `desk exec --agent -- CMD` runs as SYSTEM (session 0, no desktop).
   Quoting is safe: commands reach PowerShell encoded.
+- Open Win32 menus (context menus, a window's system menu) show up as a focused window "menu"
+  whose `menu item`s, disabled ones marked, `desk click --name ... --role "menu item"` clicks;
+  they come from MSAA, as UI Automation does not see them.
 - The desktop is a window too: `desk a11y --all` lists its icons as `list item`s under
   "Program Manager" with their positions (read through MSAA, since UI Automation shows the icon
   view empty), so `desk click --name "Recycle Bin" --role "list item"`, `desk drag` an icon and
