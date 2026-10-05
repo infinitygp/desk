@@ -44,6 +44,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk type TEXT` | Type with real key presses: ASCII and Polish letters |
 | `desk key COMBO...` | `super`, `enter`, `esc`, `tab`, `ctrl+alt+t`, `shift+f10`, `alt+f4`, `f5`, letters |
 | `desk snapshot save NAME`, `desk snapshot restore NAME`, `desk snapshot list`, `desk snapshot delete NAME` | Save the running guest (~3-5 s) and go back to it (~1-3 s) |
+| `desk up IMAGE --resolution WxH --scale N --displays N`, `desk display [--resolution WxH] [--scale N]` | Monitors: mode, scaling in percent, several displays (see below) |
 | `desk focus NAME` | Bring a window to the front by application or title (keys go to the focused window) |
 | `desk scenario run FILE [--keep]`, `desk scenario check FILE` | Run a repeatable test from a TOML file (see below) |
 | `desk wait [--change] [--timeout S]` | Until the screen is still; `--change` first waits for it to change at all |
@@ -147,6 +148,21 @@ running out, pass it on to the user.
 - The report reads the event log (service failures, application errors and crashes, MSI
   installs); a "Network List Service terminated" entry comes from restoring the saved state, not
   from the app under test. `desk diff` works on NTFS too.
+
+## Monitors: resolution, scaling, several displays
+
+Runs start at 1280x800, 100 %, one monitor. To test layouts and DPI handling:
+
+- `desk up IMAGE --resolution 1920x1080` (boots cold: the monitor offers that mode),
+  `desk display --resolution WxH` switches among the modes it offers.
+- `--scale 150` on `desk up` or `desk display`: Windows applies it by signing in again (a reboot,
+  ~70 s); GNOME at once, fractional scales too. Coordinates from `desk a11y` stay screen pixels.
+- `desk up windows-11 --displays 2` (Windows only; boots cold, ~5 min): monitors side by side,
+  left to right, top-aligned. Screenshots show them as one picture, and `desk a11y`, `desk click X Y`
+  and `desk drag` use the same coordinates, across monitors too. On the primary monitor input
+  comes from outside the guest as usual; on the others the in-session agent moves the pointer
+  (Windows maps QEMU's tablet onto the primary monitor only), so elevated windows there do not
+  get clicks. `desk display` prints the monitors.
 
 ## Snapshots
 

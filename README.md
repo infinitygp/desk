@@ -88,6 +88,18 @@ journalctl --user -u desk-maintain  # output of the last runs
 
 `desk up` warns three weeks before a licence runs out and refuses an expired image.
 
+## Monitors
+
+`desk up --resolution/--scale/--displays` and `desk display` (desk/monitors.py). Each monitor is
+a virtio GPU of its own (Windows' viogpudo drives one head per GPU, and QEMU leaves further heads
+of a GPU disconnected without a display UI); this needs QEMU's `virtio-gpu-pci` module. Screens
+are put side by side into one screenshot, pointer events go to the console of the monitor under
+the point, and on Windows, whose absolute tablet only reaches the primary monitor, operations on
+other monitors go through the agent. Windows scales by DPI after signing in again; GNOME scales
+through `gdctl` in the logical layout, and desk turns the logical positions toolkits report into
+screen pixels. Several monitors are refused on GNOME guests: mutter never updates a second GPU's
+monitor without 3D acceleration.
+
 ## Snapshots
 
 `desk snapshot save|restore|list|delete` works like the warm state, for a running run: the
@@ -131,6 +143,6 @@ bin/desk selftest fedora-44-gnome --reboot            # end to end in a real run
 ## Host requirements
 
 Fedora with `/dev/kvm`, `libvirt-daemon-driver-qemu`, `libvirt-client`, `python3-libvirt`,
-`passt`, `virt-install`, `edk2-ovmf`, `guestfs-tools`, `gstreamer1-plugins-good` (videos); the
-user in the `kvm` group.
+`passt`, `virt-install`, `edk2-ovmf`, `guestfs-tools`, `gstreamer1-plugins-good` (videos),
+`qemu-device-display-virtio-gpu-pci` and `python3-pillow` (several monitors); the user in the `kvm` group.
 `/var/lib/vmlab` is a dedicated XFS disk labelled `svirt_home_t`.

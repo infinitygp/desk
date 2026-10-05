@@ -32,6 +32,7 @@ TEMPLATE = """
     </channel>
     <tpm model='tpm-crb'/>
     <graphics type='vnc'/>
+    <video><model type='virtio' heads='1' primary='yes'/></video>
     <input type='mouse' bus='ps2'/>
   </devices>
 </domain>
@@ -46,6 +47,19 @@ def prepare(**kw):
 
 
 class PrepareDomainXml(unittest.TestCase):
+    def test_monitors_are_one_gpu_each(self):
+        root = prepare(displays=3, resolution=(1920, 1080))
+        models = [v.find("model") for v in root.findall("devices/video")]
+        self.assertEqual([m.get("heads") for m in models], ["1", "1", "1"])
+        self.assertEqual(models[0].get("primary"), "yes")
+        self.assertEqual([(m.find("resolution").get("x"), m.find("resolution").get("y")) for m in models],
+                         [("1920", "1080")] * 3)
+
+    def test_default_keeps_the_images_monitor(self):
+        root = prepare()
+        self.assertEqual(len(root.findall("devices/video")), 1)
+        self.assertIsNone(root.find("devices/video/model/resolution"))
+
     def test_identity(self):
         root = prepare()
         self.assertEqual(root.findtext("name"), "desk-r1")
