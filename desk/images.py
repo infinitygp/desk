@@ -61,8 +61,8 @@ def current(link: Path) -> Path | None:
 # What decides how the base disk gets installed; any change means a new install.
 INSTALL_KEYS = ("installer", "location", "kickstart", "iso", "iso_url", "iso_sha256", "kernel", "initrd",
                 "extra_args", "user_data", "cloud_image_url", "secure_boot", "release", "unattend",
-                "unattend_files",
-                "image_index", "virtio_win_iso", "openssh_msi", "os_variant", "memory_mib", "vcpus", "disk_gb")
+                "unattend_files", "image_index", "virtio_win_iso", "openssh_msi", "os_variant", "memory_mib",
+                "vcpus", "disk_gb")
 
 
 # Image settings that do not change what ends up in the guest.

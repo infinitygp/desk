@@ -129,9 +129,7 @@ def locate_ref(run, ref: str) -> tuple[int, int]:
     return _visible_point(run, _spec(run, ref))
 
 
-def find(run, query: str, role: str | None = None, exact: bool = False,
-         all_windows: bool = False, save: bool = True) -> list[dict]:
-    snap = snapshot(run, all_windows=all_windows, limit=2000, save=save)
+def _matches(snap: dict, query: str, role: str | None, exact: bool) -> list[dict]:
     q = query.casefold()
 
     def match(n: dict) -> bool:
@@ -143,17 +141,39 @@ def find(run, query: str, role: str | None = None, exact: bool = False,
     return [n for n in snap["nodes"] if match(n)]
 
 
+def find(run, query: str, role: str | None = None, exact: bool = False,
+         all_windows: bool = False, save: bool = True) -> list[dict]:
+    return _matches(snapshot(run, all_windows=all_windows, limit=2000, save=save), query, role, exact)
+
+
+# A dialog that is open has the user's attention; a modal one blocks everything behind it.
+DIALOG_ROLES = {"dialog", "alert", "file chooser"}
+
+
+def best_match(snap: dict, hits: list[dict]) -> dict:
+    dialogs = [(n["pid"], n["path"]) for n in snap["nodes"] if n["role"] in DIALOG_ROLES]
+
+    def in_dialog(n: dict) -> bool:
+        return any(n["pid"] == pid and n["path"][:len(path)] == path and n["path"] != path for pid, path in dialogs)
+
+    def rank(n: dict) -> tuple[bool, bool, bool]:
+        # Visible first, then inside an open dialog (its "Close" over the browser window's),
+        # then controls over the text describing them.
+        return (bool(n.get("offscreen")), not in_dialog(n),
+                n["role"] in ("label", "heading", "paragraph", "static", "section"))
+
+    return min(hits, key=rank)
+
+
 def locate_name(run, query: str, role: str | None = None, exact: bool = False) -> tuple[int, int]:
-    hits = find(run, query, role, exact, save=False)
+    snap = snapshot(run, limit=2000, save=False)
+    hits = _matches(snap, query, role, exact)
     if not hits:
-        hits = find(run, query, role, exact, all_windows=True, save=False)
+        snap = snapshot(run, all_windows=True, limit=2000, save=False)
+        hits = _matches(snap, query, role, exact)
     if not hits:
         raise DeskError(f"nothing named {query!r} on screen")
-    def rank(n: dict) -> tuple[bool, bool]:
-        # Prefer what is visible, then controls over the text describing them.
-        return bool(n.get("offscreen")), n["role"] in ("label", "heading", "paragraph", "static", "section")
-
-    best = min(hits, key=rank)
+    best = best_match(snap, hits)
     return _visible_point(run, {k: best[k] for k in ("pid", "path", "role", "name")})
 
 

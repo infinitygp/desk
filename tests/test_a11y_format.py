@@ -58,5 +58,25 @@ class RemoteCommand(unittest.TestCase):
         self.assertTrue(cmd.endswith("-- bash -c firefox"))
 
 
+class BestMatch(unittest.TestCase):
+    def test_open_dialog_wins_over_the_window_behind_it(self):
+        from desk.a11y import best_match
+
+        browser_close = {"pid": 1, "path": [0, 3], "role": "button", "name": "Close"}
+        dialog = {"pid": 1, "path": [0, 9, 2], "role": "dialog", "name": "Restore"}
+        dialog_close = {"pid": 1, "path": [0, 9, 2, 7], "role": "button", "name": "Close"}
+        snap = {"nodes": [browser_close, dialog, dialog_close]}
+        self.assertIs(best_match(snap, [browser_close, dialog_close]), dialog_close)
+        self.assertIs(best_match({"nodes": [browser_close, dialog_close]}, [browser_close, dialog_close]),
+                      browser_close)
+
+    def test_visible_first(self):
+        from desk.a11y import best_match
+
+        hidden = {"pid": 1, "path": [0, 1], "role": "button", "name": "Add", "offscreen": True}
+        shown = {"pid": 1, "path": [0, 2], "role": "button", "name": "Add"}
+        self.assertIs(best_match({"nodes": [hidden, shown]}, [hidden, shown]), shown)
+
+
 if __name__ == "__main__":
     unittest.main()
