@@ -81,6 +81,26 @@ def _head_png(dom: libvirt.virDomain, head: int) -> bytes:
     return b"".join(chunks)
 
 
+def crop(png: bytes, box: tuple[int, int, int, int], zoom: float = 1.0) -> bytes:
+    """Part of a screenshot (x, y, width, height), optionally enlarged so details stay legible."""
+    try:
+        from PIL import Image
+    except ImportError:
+        raise DeskError("cutting screenshots needs Pillow on the host (dnf install python3-pillow)") from None
+    image = Image.open(io.BytesIO(png))
+    x, y, w, h = box
+    x, y = max(x, 0), max(y, 0)
+    w, h = min(w, image.width - x), min(h, image.height - y)
+    if w <= 0 or h <= 0:
+        raise DeskError(f"region {box} is outside the {image.width}x{image.height} screen")
+    part = image.crop((x, y, x + w, y + h))
+    if zoom != 1:
+        part = part.resize((round(w * zoom), round(h * zoom)), Image.LANCZOS)
+    out = io.BytesIO()
+    part.save(out, "PNG")
+    return out.getvalue()
+
+
 def png_size(png: bytes) -> tuple[int, int]:
     return int.from_bytes(png[16:20], "big"), int.from_bytes(png[20:24], "big")
 

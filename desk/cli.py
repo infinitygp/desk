@@ -148,7 +148,35 @@ def cmd_shot(args) -> None:
     run = runs.resolve(args.run)
     dom = run.dom()
     png = display.wait_stable(dom, timeout=args.settle)[0] if args.settle > 0 else display.screenshot(dom)
+    box = None
+    if args.region:
+        try:
+            box = tuple(int(v) for v in args.region.split(","))
+            assert len(box) == 4
+        except (ValueError, AssertionError):
+            raise DeskError(f"--region takes X,Y,WIDTH,HEIGHT (got {args.region!r})") from None
+    elif args.window:
+        box = _window_box(run, args.window)
+    if box or args.zoom != 1:
+        png = display.crop(png, box or (0, 0, *display.png_size(png)), zoom=args.zoom)
     _emit_shot(run, png, args.output, args.label or "")
+
+
+def _window_box(run: runs.Run, query: str) -> tuple[int, int, int, int]:
+    """The frame of the topmost window whose title or application contains `query`."""
+    snap = a11y.snapshot(run, all_windows=True, limit=2000, save=False)
+    q = query.casefold()
+    # GNOME: the shell's own window list (frames in logical pixels), topmost last.
+    for w in reversed(snap.get("windows") or []):
+        if not w.get("minimized") and (q in (w.get("title") or "").casefold() or q in (w.get("wm_class") or "").casefold()):
+            f = (run.scale or 100) / 100
+            return tuple(round(v * f) for v in w["frame"])
+    for top in reversed(snap["tops"]):
+        if q in top["title"].casefold() or q in top["app"].casefold():
+            nodes = snap["nodes"][top["start"]:]
+            if nodes and nodes[0].get("bbox") and nodes[0]["role"] in ("frame", "window", "dialog"):
+                return tuple(nodes[0]["bbox"])
+    raise DeskError(f"no window with {query!r} in its title or application name")
 
 
 def cmd_wait(args) -> None:
@@ -523,6 +551,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-o", "--output")
     p.add_argument("--label")
     p.add_argument("--settle", type=float, default=3.0, help="wait up to N s for a still screen (0: now)")
+    p.add_argument("--region", metavar="X,Y,W,H", help="only this part of the screen")
+    p.add_argument("--window", metavar="NAME", help="only the window with NAME in its title or application")
+    p.add_argument("--zoom", type=float, default=1.0, help="enlarge by this factor, e.g. 2, to see details")
     p.set_defaults(func=cmd_shot)
 
     p = sub.add_parser("wait", help="wait until the screen stops changing")

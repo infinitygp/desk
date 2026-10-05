@@ -39,7 +39,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk click (X Y \| @eN \| --name TEXT [--role R] [--exact]) [--button right] [--double]` | Click; an off-screen @ref or name is scrolled into view first |
 | `desk action @eN [NAME]` | Invoke an AT-SPI action instead of clicking (element covered or off-screen) |
 | `desk set-text @eN TEXT` | Replace an editable field's text through AT-SPI (characters `type` cannot produce) |
-| `desk shot [--label L] [-o FILE] [--settle S]` | Screenshot once the screen is still (up to 3 s; `--settle 0` = now) |
+| `desk shot [--label L] [-o FILE] [--settle S] [--region X,Y,W,H \| --window NAME] [--zoom N]` | Screenshot once the screen is still (up to 3 s; `--settle 0` = now); `--region`/`--window` cut out a part, `--zoom 2` enlarges it to judge details |
 | `desk move X Y`, `desk drag X1 Y1 X2 Y2`, `desk scroll X Y DY` | Pointer; `DY>0` scrolls down |
 | `desk type TEXT` | Type with real key presses: ASCII and Polish letters |
 | `desk key COMBO...` | `super`, `enter`, `esc`, `tab`, `ctrl+alt+t`, `shift+f10`, `alt+f4`, `f5`, letters |
