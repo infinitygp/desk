@@ -9,7 +9,7 @@ import sys
 import time
 import xml.etree.ElementTree as ET
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 import libvirt
@@ -75,6 +75,9 @@ class Run:
     last_used: float = 0.0
     vnc_password: str = ""
     agent_port: int = 0
+    # Monitors (heads of the virtio GPU) and the mode they start in; 1 and None: the image's.
+    displays: int = 1
+    resolution: list[int] | None = None
 
     @property
     def dir(self) -> Path:
@@ -144,7 +147,10 @@ def load(run_id: str) -> Run:
     f = RUNS / run_id / "run.json"
     if not f.is_file():
         raise DeskError(f"no run {run_id!r}")
-    return Run(**json.loads(f.read_text()))
+    data = json.loads(f.read_text())
+    # Another desk version may have written fields this one does not know (or lack new ones).
+    known = {f.name for f in fields(Run)}
+    return Run(**{k: v for k, v in data.items() if k in known})
 
 
 def all_runs() -> list[Run]:
@@ -212,7 +218,9 @@ def active_runs_of(image: str) -> list[Run]:
 def gc(verbose: bool = True) -> list[str]:
     """Destroy idle runs, delete stopped ones past the TTL, and kill orphaned desk domains."""
     removed = []
-    known_disks = set()
+    # Only a domain whose run directory is gone is orphaned; one whose run.json this desk cannot
+    # read (another version wrote it) still belongs to someone.
+    known_disks = {str(d) for d in RUNS.glob("*/disk.qcow2")} if RUNS.exists() else set()
     for run in all_runs():
         live = run.live_domain() is not None
         if run.in_use() or not run.last_used:
@@ -220,13 +228,11 @@ def gc(verbose: bool = True) -> list[str]:
             # activity tracking; start its idle clock now.
             if not run.last_used:
                 run.touch()
-            known_disks.add(str(run.dir / "disk.qcow2"))
             continue
         if run.idle() > IDLE_TTL:
             down(run)
+            known_disks.discard(str(run.dir / "disk.qcow2"))
             removed.append(f"{run.id} ({'running' if live else 'stopped'}, idle {run.idle() / 3600:.1f} h)")
-        else:
-            known_disks.add(str(run.dir / "disk.qcow2"))
     for dom in conn().listAllDomains(libvirt.VIR_CONNECT_LIST_DOMAINS_ACTIVE):
         try:
             name = dom.name()
@@ -284,7 +290,8 @@ def prune_versions(verbose: bool = True) -> list[str]:
     return removed
 
 
-def up(spec: ImageSpec, run_id: str | None = None, cold: bool = False, force: bool = False) -> Run:
+def up(spec: ImageSpec, run_id: str | None = None, cold: bool = False, force: bool = False,
+       displays: int = 1, resolution: tuple[int, int] | None = None) -> Run:
     from .maintain import check_usable
 
     for warning in check_usable(spec):
@@ -293,10 +300,11 @@ def up(spec: ImageSpec, run_id: str | None = None, cold: bool = False, force: bo
         gc()
         if not force:
             check_memory(spec)
-        return _up(spec, run_id, cold)
+        return _up(spec, run_id, cold, displays, resolution)
 
 
-def _up(spec: ImageSpec, run_id: str | None, cold: bool) -> Run:
+def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
+        resolution: tuple[int, int] | None = None) -> Run:
     run_id = run_id or secrets.token_hex(3)
     rd = RUNS / run_id
     if rd.exists():
@@ -307,6 +315,11 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool) -> Run:
     base_dir, warm_dir = spec.base_dir.resolve(), spec.warm_dir.resolve()
     warm = warm_dir / "memory.save"
     saved_xml = None
+    if not cold and (displays != 1 or resolution):
+        # The warm state was saved with the image's single monitor; other hardware boots fresh.
+        print(f"[desk] {displays} display(s){f' at {resolution[0]}x{resolution[1]}' if resolution else ''}: "
+              "booting cold (the warm state has one monitor)")
+        cold = True
     if not cold:
         if not warm.exists():
             print(f"[desk] no warm state for {spec.name}, booting cold (desk image warm {spec.name})")
@@ -327,7 +340,8 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool) -> Run:
     now = time.time()
     run = Run(id=run_id, image=spec.name, domain=domain, ssh_port=free_port(),
               user=spec.user, created=now, last_used=now, vnc_password=secrets.token_urlsafe(6)[:8],
-              agent_port=free_port() if spec.agent_port else 0)
+              agent_port=free_port() if spec.agent_port else 0, displays=displays,
+              resolution=list(resolution) if resolution else None)
     run.save()
 
     disk, nvram = rd / "disk.qcow2", rd / "VARS.qcow2"
@@ -345,7 +359,7 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool) -> Run:
                                  ssh_port=run.ssh_port, console_log=rd / "console.log",
                                  keep_uuid=not cold, vnc_password=run.vnc_password,
                                  agent_ports=(run.agent_port, spec.agent_port) if spec.agent_port else None,
-                                 sound=spec.sound)
+                                 sound=spec.sound, displays=displays, resolution=resolution)
         if cold:
             dom = conn().createXML(xml, 0)
         else:
