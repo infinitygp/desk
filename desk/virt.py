@@ -84,7 +84,7 @@ def reflink_copy(src: Path, dst: Path) -> None:
 def prepare_domain_xml(
     template: str, *, name: str, disk: Path, nvram: Path, ssh_port: int, console_log: Path,
     keep_uuid: bool = False, vnc_password: str | None = None, agent_ports: tuple[int, int] | None = None,
-    sound: str | None = None,
+    sound: str | None = None, displays: int = 1, resolution: tuple[int, int] | None = None,
 ) -> str:
     """Turn the golden image's domain XML into a per-run transient domain.
 
@@ -150,6 +150,14 @@ def prepare_domain_xml(
         ET.SubElement(snd, "audio", id="1")
         if not any(a.get("id") == "1" for a in devices.findall("audio")):
             ET.SubElement(devices, "audio", id="1", type="none")
+    if displays != 1 or resolution:
+        # Monitors are heads of the virtio GPU; the resolution is the mode each one offers first.
+        model = devices.find("video/model")
+        model.set("heads", str(displays))
+        for r in model.findall("resolution"):
+            model.remove(r)
+        if resolution:
+            ET.SubElement(model, "resolution", x=str(resolution[0]), y=str(resolution[1]))
     if vnc_password:
         # For a person to watch (desk view). Loopback only, through an SSH tunnel; the password
         # keeps other local accounts out, since the VMs run under this user.

@@ -84,7 +84,15 @@ def _image_list() -> None:
 
 
 def cmd_up(args) -> None:
-    run = runs.up(load_image(args.image), run_id=args.name, cold=args.cold, force=args.force)
+    resolution = None
+    if args.resolution:
+        try:
+            resolution = tuple(int(v) for v in args.resolution.lower().split("x"))
+            assert len(resolution) == 2
+        except (ValueError, AssertionError):
+            raise DeskError(f"--resolution takes WIDTHxHEIGHT, e.g. 1920x1080 (got {args.resolution!r})") from None
+    run = runs.up(load_image(args.image), run_id=args.name, cold=args.cold, force=args.force,
+                  displays=args.displays, resolution=resolution)
     run.log_event(argv=sys.argv[1:])
     if args.record:
         record.start(run)
@@ -431,6 +439,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--cold", action="store_true", help="boot instead of restoring the warm state")
     p.add_argument("--force", action="store_true", help="start even if free memory looks too low")
     p.add_argument("--record", action="store_true", help="record a video from the start (desk record)")
+    p.add_argument("--displays", type=int, default=1, help="monitors (boots cold when not 1)")
+    p.add_argument("--resolution", help="mode the monitors start in, e.g. 1920x1080 (boots cold)")
     p.set_defaults(func=cmd_up)
 
     p = sub.add_parser("down", help="destroy a run and delete its files")
