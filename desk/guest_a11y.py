@@ -41,6 +41,14 @@ def shell_windows() -> list[dict]:
         return []
 
 
+def focus(query: str) -> dict:
+    """Bring a window to the front by application or title (the shell extension does it)."""
+    bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    res = bus.call_sync("org.desk.Helper", "/org/desk/Helper", "org.desk.Helper", "Activate",
+                        GLib.Variant("(s)", (query,)), GLib.VariantType("(s)"), Gio.DBusCallFlags.NONE, 2000, None)
+    return {"title": res.unpack()[0]}
+
+
 def states(acc) -> set[str]:
     ss = acc.get_state_set()
     return {s.value_nick for s in Atspi.StateType.__enum_values__.values() if ss.contains(s)}
@@ -400,6 +408,8 @@ def main() -> None:
     try:
         if cmd == "snapshot":
             out = snapshot(arg)
+        elif cmd == "focus":
+            out = focus(arg)
         elif cmd == "resolve":
             out = resolve(arg)
         elif cmd == "scroll":

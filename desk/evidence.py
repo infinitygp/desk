@@ -248,6 +248,18 @@ def collect(run, diff: bool = False) -> Path:
           f"- started: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(run.created))}, "
           f"reported: {time.strftime('%H:%M:%S', time.localtime(ended))} "
           f"({(ended - run.created) / 60:.0f} min)", ""]
+    events = _log(run)
+    stepped = [ev for ev in events if "step" in ev]
+    scenario = next((ev for ev in events if "scenario" in ev), None)
+    if scenario:
+        failed = [ev for ev in stepped if not ev["ok"]]
+        total = scenario.get("steps", len(stepped))
+        md += ["## Scenario", "", f"- file: `{scenario['scenario']}`",
+               f"- result: {'FAILED' if failed or len(stepped) < total else 'passed'}, "
+               f"{len(stepped) - len(failed)} of {total} steps passed"]
+        for ev in failed:
+            md.append(f"- failed at step {ev['step']} ({ev['action']}): {ev['detail']}")
+        md.append("")
     md.append("## Found automatically")
     md.append("")
     if not live:
@@ -271,7 +283,6 @@ def collect(run, diff: bool = False) -> Path:
                "", "Full list in files.txt, raw virt-diff output in virt-diff.txt."]
 
     md += ["", "## Timeline", ""]
-    events = _log(run)
     if not events:
         md.append("(no desk commands were recorded)")
     for ev in events:
@@ -282,6 +293,10 @@ def collect(run, diff: bool = False) -> Path:
         elif "rc" in ev:
             if ev["rc"] != 0 and md and md[-1].startswith("- "):
                 md[-1] += f" → exit {ev['rc']}"
+        elif "step" in ev:
+            mark = "ok" if ev["ok"] else "FAILED"
+            md.append(f"- {stamp} step {ev['step']} {mark}: {ev['action']} ({ev['seconds']} s)"
+                      + (f" → {ev['detail']}" if ev["detail"] else ""))
         elif ev.get("record") == "start":
             md.append(f"- {stamp} recording started ({ev.get('fps')} fps)")
         elif ev.get("record") == "stop" and ev.get("video"):
@@ -292,6 +307,18 @@ def collect(run, diff: bool = False) -> Path:
                 md.append(f"\n  ![{name}](shots/{name})\n")
     (out / "report.md").write_text("\n".join(md) + "\n")
     return out
+
+
+def finish(run, keep: bool = False, diff: bool = False, report: bool = True) -> tuple[Path | None, list[Path]]:
+    """Stop recording, write the report, keep the videos with it and destroy the run."""
+    from . import record, runs
+
+    record.stop(run)
+    out = collect(run, diff=diff) if report and run.live_domain() is not None else None
+    # Videos outlive the run in its report directory, report or not.
+    videos = record.save_videos(run, out or REPORTS / run.id)
+    runs.down(run, keep=keep)
+    return out, videos
 
 
 def prune_reports(verbose: bool = True) -> None:

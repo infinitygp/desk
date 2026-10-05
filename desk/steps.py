@@ -65,6 +65,12 @@ class Steps:
         x, y = a11y.locate_name(self.target, name, role, exact)
         display.click(self.target.dom(), x, y)
 
+    def focus(self, query: str) -> str:
+        """Bring a window to the front by application or title, as clicking it would."""
+        title = a11y.focus(self.target, query)
+        display.wait_stable(self.target.dom(), timeout=5)
+        return title
+
     def type(self, text: str) -> None:
         display.type_text(self.target.dom(), text, layout=self.spec.layout)
 

@@ -157,6 +157,18 @@ def locate_name(run, query: str, role: str | None = None, exact: bool = False) -
     return _visible_point(run, {k: best[k] for k in ("pid", "path", "role", "name")})
 
 
+def focus(run, query: str) -> str:
+    """Bring the topmost window whose application or title contains `query` to the front, as a
+    user clicking it would; returns its title."""
+    if run.agent_port:
+        title = winagent.request(run, cmd="focus", query=query).get("title", "")
+    else:
+        title = _helper(run, "focus", json.dumps(query))["title"]
+    if not title:
+        raise DeskError(f"no window of an application or with a title containing {query!r}")
+    return title
+
+
 def action(run, ref: str, name: str | None = None) -> dict:
     args = ["action", json.dumps(_spec(run, ref))] + ([name] if name else [])
     return _helper(run, *args)

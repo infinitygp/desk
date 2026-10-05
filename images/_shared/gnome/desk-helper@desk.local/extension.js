@@ -9,6 +9,10 @@ const IFACE = `
     <method name="GetWindows">
       <arg type="s" direction="out" name="json"/>
     </method>
+    <method name="Activate">
+      <arg type="s" direction="in" name="query"/>
+      <arg type="s" direction="out" name="title"/>
+    </method>
   </interface>
 </node>`;
 
@@ -58,5 +62,20 @@ export default class DeskHelper extends Extension {
             };
         });
         return JSON.stringify(windows);
+    }
+
+    // Bring the topmost window whose application (WM class) or title contains `query` to the
+    // front, as clicking it in the overview would; returns its title, or "" if there is none.
+    Activate(query) {
+        const q = query.toLowerCase();
+        const hit = global.get_window_actors().map(a => a.meta_window).reverse().find(w =>
+            (w.get_wm_class() ?? '').toLowerCase().includes(q) || (w.get_title() ?? '').toLowerCase().includes(q));
+        if (!hit)
+            return '';
+        Main.overview.hide();
+        if (hit.minimized)
+            hit.unminimize();
+        hit.activate(global.get_current_time());
+        return hit.get_title() ?? '';
     }
 }

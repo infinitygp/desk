@@ -87,6 +87,13 @@ journalctl --user -u desk-maintain  # output of the last runs
 
 `desk up` warns three weeks before a licence runs out and refuses an expired image.
 
+## Scenarios
+
+`desk scenario run FILE` runs a repeatable end-to-end test described in TOML (format in
+`skill/SKILL.md`): build on the host, copy the artifacts in, start a run, steps with the same real
+input as the CLI (`desk/steps.py`), report with the steps in its timeline, exit code 0/1.
+Projects keep theirs in `test/desk/`.
+
 ## Watching
 
 - `desk view`: every run has a VNC display on 127.0.0.1 with a per-run password; the command

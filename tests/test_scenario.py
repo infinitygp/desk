@@ -1,0 +1,53 @@
+import tempfile
+import unittest
+from pathlib import Path
+
+from desk import scenario
+from desk.config import DeskError
+
+
+def write(text: str) -> Path:
+    f = tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False)
+    f.write(text)
+    f.close()
+    return Path(f.name)
+
+
+class Load(unittest.TestCase):
+    def test_valid_file(self):
+        data = scenario.load(write('''
+image = "fedora-44-cockpit"
+record = true
+[build]
+run = "make rpm"
+artifacts = ["*.rpm"]
+[[step]]
+root = "dnf install -y /tmp/desk/*.rpm"
+[[step]]
+click = "Containers"
+role = "link"
+[[step]]
+key = ["ctrl+l", "f5"]
+[[step]]
+reboot = true
+'''))
+        self.assertEqual(len(data["step"]), 4)
+        self.assertEqual(scenario.describe(data["step"][1]), ("click", "Containers"))
+        self.assertEqual(scenario.describe(data["step"][2]), ("key", "ctrl+l f5"))
+        self.assertEqual(scenario.describe(data["step"][3]), ("reboot", ""))
+
+    def test_rejects_mistakes_before_starting_anything(self):
+        for text in (
+            '[[step]]\nclick = "x"',                               # no image
+            'image = "a"\n[[step]]\nclick = "x"\nkey = "f5"',      # two actions
+            'image = "a"\n[[step]]\nrole = "link"',                # no action
+            'image = "a"\n[[step]]\nclik = "x"',                   # typo
+            'image = "a"\nrecrod = true',                          # unknown top-level key
+            'image = "a"\n[build]\ncommand = "make"',              # unknown build key
+        ):
+            with self.subTest(text=text), self.assertRaises(DeskError):
+                scenario.load(write(text))
+
+
+if __name__ == "__main__":
+    unittest.main()

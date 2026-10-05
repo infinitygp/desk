@@ -43,6 +43,8 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk move X Y`, `desk drag X1 Y1 X2 Y2`, `desk scroll X Y DY` | Pointer; `DY>0` scrolls down |
 | `desk type TEXT` | Type with real key presses: ASCII and Polish letters |
 | `desk key COMBO...` | `super`, `enter`, `esc`, `tab`, `ctrl+alt+t`, `shift+f10`, `alt+f4`, `f5`, letters |
+| `desk focus NAME` | Bring a window to the front by application or title (keys go to the focused window) |
+| `desk scenario run FILE [--keep]`, `desk scenario check FILE` | Run a repeatable test from a TOML file (see below) |
 | `desk wait [--change] [--timeout S]` | Until the screen is still; `--change` first waits for it to change at all |
 | `desk reboot [--shot]` | Reboot and return when the new session is ready; reports apps that blocked shutdown |
 | `desk exec [--root] -- CMD` | Run in the guest over SSH as the desktop user (`--root`: as root) |
@@ -138,6 +140,42 @@ running out, pass it on to the user.
 - The report reads the event log (service failures, application errors and crashes, MSI
   installs); a "Network List Service terminated" entry comes from restoring the saved state, not
   from the app under test. `desk diff` works on NTFS too.
+
+## Scenarios: repeatable tests
+
+When a project has `test/desk/*.toml` (or the user wants a check that can be repeated), run it
+with `desk scenario run FILE`: it builds on the host (`[build] run`, in the repository), copies the
+newest file matching each `artifacts` pattern to `/tmp/desk/` in the guest, starts a run of
+`image`, executes the steps in order and stops at the first failure with a screenshot. Exit code 0
+or 1; the report (and the video with `record = true`) shows every step in its timeline.
+
+```toml
+image = "fedora-44-cockpit"
+record = true
+[build]
+run = "make rpm"
+artifacts = ["cockpit-foo-*.noarch.rpm"]
+[[step]]
+root = "dnf install -y /tmp/desk/cockpit-foo-*.noarch.rpm"   # also: exec (as tester); rc, output
+[[step]]
+focus = "Firefox"            # say which window keys go to; never rely on what happens to be in front
+[[step]]
+key = "f5"                   # one combo or a list
+[[step]]
+click = "Foo"                # by accessible name; role, exact (default true)
+role = "link"
+[[step]]
+expect = "Nothing here yet"  # waits until shown (name, value or text); role, exact, timeout
+[[step]]
+shot = "empty-state"
+```
+
+Other steps: `type`, `gui = "firefox https://..."`, `expect_absent` (after a reload, first
+`expect` something that is always there, or the check passes on a half-loaded page), `reboot = true`,
+`wait = true` (screen still) or `wait = 2` (seconds). Every step takes `name` for the report.
+`desk scenario check FILE` validates a file without starting anything. When a scenario fails,
+look at the failure screenshot and the report before changing the scenario: a failing step is
+usually a real finding.
 
 ## Testing a package end to end
 

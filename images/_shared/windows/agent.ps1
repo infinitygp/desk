@@ -31,15 +31,28 @@ function Focus-NewWindow($before, $procId, $timeout = 15) {
         $own = $fresh | Where-Object { $_.Pid -eq $procId } | Select-Object -First 1
         $new = if ($own) { $own.Handle }
                elseif ($fresh -and ((Get-Date) - $start).TotalSeconds -gt 3) { $fresh[0].Handle }
-        if ($new) {
-            [Desk.Win]::keybd_event(0x87, 0, 0, [UIntPtr]::Zero)
-            [Desk.Win]::keybd_event(0x87, 0, 2, [UIntPtr]::Zero)
-            [void][Desk.Win]::ShowWindow([IntPtr][long]$new, 9)
-            return [Desk.Win]::SetForegroundWindow([IntPtr][long]$new)
-        }
+        if ($new) { return Show-Window $new }
         Start-Sleep -Milliseconds 250
     }
     $false
+}
+
+function Show-Window($handle) {
+    [Desk.Win]::keybd_event(0x87, 0, 0, [UIntPtr]::Zero)
+    [Desk.Win]::keybd_event(0x87, 0, 2, [UIntPtr]::Zero)
+    [void][Desk.Win]::ShowWindow([IntPtr][long]$handle, 9)
+    [Desk.Win]::SetForegroundWindow([IntPtr][long]$handle)
+}
+
+# The topmost window whose title or process name contains the query, brought to the front.
+function Focus-Window($query) {
+    $hit = $AE::RootElement.FindAll([Windows.Automation.TreeScope]::Children, $ControlView) | Where-Object {
+        $_.Current.NativeWindowHandle -and (
+            $_.Current.Name -like "*$query*" -or
+            (Get-Process -Id $_.Current.ProcessId -ErrorAction SilentlyContinue).ProcessName -like "*$query*")
+    } | Select-Object -First 1
+    if (-not $hit) { return @{ ok = $true; title = '' } }
+    @{ ok = $true; title = $hit.Current.Name; focused = (Show-Window $hit.Current.NativeWindowHandle) }
 }
 
 $port = 47011
@@ -61,6 +74,7 @@ while ($true) {
                 @{ ok = $true; pid = $p.Id; focused = (Focus-NewWindow $before $p.Id) }
             }
             'uia' { Invoke-Uia $req.op $req.arg $req.text }
+            'focus' { Focus-Window $req.query }
             default { @{ error = "unknown command $($req.cmd)" } }
         }
     } catch {

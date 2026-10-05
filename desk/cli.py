@@ -96,13 +96,7 @@ def cmd_down(args) -> None:
     with runs.state_lock():
         targets = runs.all_runs() if args.all else [runs.resolve(args.id)]
         for run in targets:
-            report = None
-            record.stop(run)
-            if not args.no_report and run.live_domain() is not None:
-                report = evidence.collect(run, diff=args.diff)
-            # Videos outlive the run in its report directory, report or not.
-            videos = record.save_videos(run, report or evidence.REPORTS / run.id)
-            runs.down(run, keep=args.keep)
+            report, videos = evidence.finish(run, keep=args.keep, diff=args.diff, report=not args.no_report)
             print(f"run {run.id} down" + (" (files kept)" if args.keep else ""))
             if report:
                 print(f"report: {report / 'report.md'}")
@@ -333,6 +327,26 @@ def cmd_record(args) -> None:
         print(video if video else "nothing was recorded")
 
 
+def cmd_focus(args) -> None:
+    run = runs.resolve(args.run)
+    print(f"focused: {a11y.focus(run, args.query)}")
+    _after_action(run, run.dom(), args)
+
+
+def cmd_scenario(args) -> None:
+    from . import scenario
+
+    path = Path(args.file)
+    if args.action == "check":
+        data = scenario.load(path)
+        print(f"{path}: image {data['image']}, {len(data.get('step', []))} steps")
+        for i, step in enumerate(data.get("step", []), 1):
+            action, arg = scenario.describe(step)
+            print(f"  {i:>2}. {step.get('name') or (action + ' ' + arg).strip()}")
+        return
+    sys.exit(0 if scenario.run_scenario(path, keep=args.keep, image=args.image) else 1)
+
+
 def cmd_maintain(args) -> None:
     from . import maintain
 
@@ -524,6 +538,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reboot", action="store_true", help="also reboot the guest and check it comes back")
     p.add_argument("--keep", action="store_true", help="keep the run afterwards")
     p.set_defaults(func=cmd_selftest)
+
+    p = sub.add_parser("focus", help="bring a window to the front by application or title")
+    p.add_argument("query")
+    _action_opts(p)
+    p.set_defaults(func=cmd_focus)
+
+    p = sub.add_parser("scenario", help="run a repeatable end-to-end test from a TOML file")
+    p.add_argument("action", choices=["run", "check"])
+    p.add_argument("file")
+    p.add_argument("--keep", action="store_true", help="keep the run's files afterwards")
+    p.add_argument("--image", help="another image than the file names")
+    p.set_defaults(func=cmd_scenario)
 
     p = sub.add_parser("record", help="record the screen as a video (WebM), kept with the report")
     p.add_argument("action", choices=["start", "stop"])
