@@ -134,15 +134,25 @@ def _btn(button: str, down: bool) -> dict:
 
 class _Pointer:
     """Absolute pointer events in screen coordinates. With several monitors a point belongs to
-    one of them, and QEMU takes its events for that GPU's console in the console's own pixels."""
+    one of them, and QEMU takes its events for that GPU's console in the console's own pixels.
+    Windows maps the absolute tablet onto its primary monitor only, so an operation that touches
+    another monitor there goes through the in-session agent instead (SetCursorPos, SendInput)."""
 
-    def __init__(self, dom):
+    def __init__(self, dom, run=None, points=()):
         self.dom = dom
         self.sizes = screen_sizes(dom)
         self.width = sum(w for w, _ in self.sizes)
         self.target: dict = {}
+        primary = self.sizes[0]
+        self.agent = run if (run is not None and getattr(run, "agent_port", 0) and len(self.sizes) > 1 and
+                             any(not (x < primary[0] and y < primary[1]) for x, y in points)) else None
 
     def move(self, x: int, y: int) -> None:
+        if self.agent:
+            if not 0 <= x < self.width:
+                raise DeskError(f"coordinate {x} outside the screen (0..{self.width - 1})")
+            self._agent(action="move", x=x, y=y)
+            return
         left = 0
         for i, (w, h) in enumerate(self.sizes):
             if left <= x < left + w:
@@ -159,15 +169,27 @@ class _Pointer:
         qmp(self.dom, "input-send-event", events=events, **self.target)
 
     def button(self, button: str, down: bool) -> None:
+        if self.agent:
+            if button.startswith("wheel"):
+                if down:
+                    self._agent(action="wheel", delta=-1 if button == "wheel-down" else 1)
+            else:
+                self._agent(action="down" if down else "up", button=button)
+            return
         self.send([_btn(button, down)])
 
+    def _agent(self, **req) -> None:
+        from . import winagent
 
-def move(dom, x: int, y: int) -> None:
-    _Pointer(dom).move(x, y)
+        winagent.request(self.agent, cmd="pointer", **req)
 
 
-def click(dom, x: int, y: int, button: str = "left", count: int = 1) -> None:
-    p = _Pointer(dom)
+def move(dom, x: int, y: int, run=None) -> None:
+    _Pointer(dom, run, [(x, y)]).move(x, y)
+
+
+def click(dom, x: int, y: int, button: str = "left", count: int = 1, run=None) -> None:
+    p = _Pointer(dom, run, [(x, y)])
     p.move(x, y)
     time.sleep(0.05)
     for _ in range(count):
@@ -177,13 +199,13 @@ def click(dom, x: int, y: int, button: str = "left", count: int = 1) -> None:
         time.sleep(0.08)
 
 
-def drag(dom, x1: int, y1: int, x2: int, y2: int, steps: int = 30) -> None:
+def drag(dom, x1: int, y1: int, x2: int, y2: int, steps: int = 30, run=None) -> None:
     """Press, move like a hand would and release over the target.
 
     Toolkit drag-and-drop (GTK, WebKit, Qt on Wayland) only starts after the pointer has moved a
     few pixels with the button held, and only accepts the drop once the target has seen motion
     over it; jumping there and letting go at once leaves the drag hanging."""
-    p = _Pointer(dom)
+    p = _Pointer(dom, run, [(x1, y1), (x2, y2)])
     p.move(x1, y1)
     time.sleep(0.1)
     p.button("left", True)
@@ -200,9 +222,9 @@ def drag(dom, x1: int, y1: int, x2: int, y2: int, steps: int = 30) -> None:
     time.sleep(0.1)
 
 
-def scroll(dom, x: int, y: int, dy: int) -> None:
+def scroll(dom, x: int, y: int, dy: int, run=None) -> None:
     """Positive dy scrolls down, negative up; one unit is one wheel notch."""
-    p = _Pointer(dom)
+    p = _Pointer(dom, run, [(x, y)])
     p.move(x, y)
     button = "wheel-down" if dy > 0 else "wheel-up"
     for _ in range(abs(dy)):

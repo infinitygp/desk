@@ -63,7 +63,7 @@ class Steps:
     def click(self, name: str, role: str | None = None, exact: bool = True) -> None:
         self.wait_for(name, role, exact)
         x, y = a11y.locate_name(self.target, name, role, exact)
-        display.click(self.target.dom(), x, y)
+        display.click(self.target.dom(), x, y, run=self.target)
 
     def focus(self, query: str) -> str:
         """Bring a window to the front by application or title, as clicking it would."""

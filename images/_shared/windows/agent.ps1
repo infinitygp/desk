@@ -14,6 +14,8 @@ Add-Type -Namespace Desk -Name Win -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
 [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
 [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+[DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+[DllImport("user32.dll")] public static extern void mouse_event(uint flags, int dx, int dy, int data, UIntPtr extra);
 '@
 
 function Get-TopWindowInfo {
@@ -160,6 +162,17 @@ while ($true) {
             'uia' { Invoke-Uia $req.op $req.arg $req.text }
             'focus' { Focus-Window $req.query }
             'monitors' { @{ ok = $true; monitors = (Get-Monitors) } }
+            # Pointer on monitors other than the primary, which QEMU's absolute tablet cannot reach.
+            'pointer' {
+                $flag = @{ 'left-down' = 0x2; 'left-up' = 0x4; 'right-down' = 0x8; 'right-up' = 0x10
+                           'middle-down' = 0x20; 'middle-up' = 0x40 }
+                switch ($req.action) {
+                    'move' { [void][Desk.Win]::SetCursorPos([int]$req.x, [int]$req.y) }
+                    'wheel' { [Desk.Win]::mouse_event(0x800, 0, 0, 120 * [int]$req.delta, [UIntPtr]::Zero) }
+                    default { [Desk.Win]::mouse_event($flag["$($req.button)-$($req.action)"], 0, 0, 0, [UIntPtr]::Zero) }
+                }
+                @{ ok = $true }
+            }
             'display' { @{ ok = $true; monitors = (Set-Displays $req.width $req.height) } }
             default { @{ error = "unknown command $($req.cmd)" } }
         }

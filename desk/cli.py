@@ -185,7 +185,7 @@ def cmd_click(args) -> None:
     run = runs.resolve(args.run)
     dom = run.dom()
     x, y = _target_point(run, args)
-    display.click(dom, x, y, button=args.button, count=2 if args.double else 1)
+    display.click(dom, x, y, button=args.button, count=2 if args.double else 1, run=run)
     if not args.shot:
         print(f"clicked ({x},{y})")
     _after_action(run, dom, args)
@@ -228,21 +228,21 @@ def cmd_set_text(args) -> None:
 def cmd_move(args) -> None:
     run = runs.resolve(args.run)
     dom = run.dom()
-    display.move(dom, args.x, args.y)
+    display.move(dom, args.x, args.y, run=run)
     _after_action(run, dom, args)
 
 
 def cmd_drag(args) -> None:
     run = runs.resolve(args.run)
     dom = run.dom()
-    display.drag(dom, args.x1, args.y1, args.x2, args.y2)
+    display.drag(dom, args.x1, args.y1, args.x2, args.y2, run=run)
     _after_action(run, dom, args)
 
 
 def cmd_scroll(args) -> None:
     run = runs.resolve(args.run)
     dom = run.dom()
-    display.scroll(dom, args.x, args.y, args.dy)
+    display.scroll(dom, args.x, args.y, args.dy, run=run)
     _after_action(run, dom, args)
 
 

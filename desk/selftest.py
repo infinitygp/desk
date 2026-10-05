@@ -130,7 +130,7 @@ def run_selftest(image: str, reboot: bool = False, keep: bool = False, spec: Ima
         _launch(run, sc["calc"], sc["calc_window"])
         for label in sc["buttons"]:
             x, y = a11y.locate_name(run, label, role="button", exact=True)
-            display.click(run.dom(), x, y)
+            display.click(run.dom(), x, y, run=run)
         display.wait_stable(run.dom())
         role, field, want = sc["result"]
         nodes = a11y.snapshot(run)["nodes"]
