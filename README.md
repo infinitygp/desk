@@ -31,6 +31,7 @@ images/<name>/       image.toml, kickstart, provision.sh
 | Image | Install | Notes |
 |---|---|---|
 | `fedora-44-gnome` | kickstart over the network | default |
+| `fedora-45-gnome` | kickstart, the beta's installer tree, the release's packages | next release; follows it once it is out |
 | `fedora-44-gnome-pl` | variant of `fedora-44-gnome` | Polish locale; shares the base disk, own warm state |
 | `fedora-44-cockpit` | variant of `fedora-44-gnome` | Cockpit, Firefox logged in with administrative access |
 | `arch-gnome` | official cloud image, GNOME installed by cloud-init (NoCloud seed) | rolling; no Secure Boot |

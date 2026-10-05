@@ -1,0 +1,19 @@
+# Fedora 45 Workstation, the next release: installed from the beta's installer tree with the
+# release's packages (ks.cfg takes them from the fedora-45 mirrors), so it follows the release
+# once it is out. Then point location at releases/45 (the beta tree goes away eventually).
+os_variant = "fedora43"
+memory_mib = 4096
+vcpus = 4
+disk_gb = 40
+location = "https://dl.fedoraproject.org/pub/fedora/linux/releases/test/45_Beta/Everything/x86_64/os/"
+kickstart = "../fedora-44-gnome/ks.cfg"
+release = "45"
+user = "tester"
+provision = "../fedora-44-gnome/provision.sh"
+files = ["../_shared/gnome"]
+ready = "systemctl --user is-active --quiet graphical-session.target"
+agent_wrapper = ["/usr/local/libexec/desk-ga-run"]
+relogin = "systemctl restart gdm"
+layout = "pl"
+# A pre-release moves fast.
+rebuild_days = 7

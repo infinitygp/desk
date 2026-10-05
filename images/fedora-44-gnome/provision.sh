@@ -38,7 +38,9 @@ CONF
 chown -R tester:tester /home/tester/.config/environment.d
 
 # No machine-check exceptions in a VM; its failed unit would show up in every health check.
-systemctl disable --now mcelog.service
+if systemctl cat mcelog.service >/dev/null 2>&1; then
+    systemctl disable --now mcelog.service
+fi
 systemctl reset-failed
 
 # GNOME Software's update notifications pop up at random moments over the app under test.

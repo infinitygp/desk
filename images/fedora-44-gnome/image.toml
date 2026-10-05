@@ -5,6 +5,7 @@ vcpus = 4
 disk_gb = 40
 location = "https://dl.fedoraproject.org/pub/fedora/linux/releases/44/Everything/x86_64/os/"
 kickstart = "ks.cfg"
+release = "44"
 user = "tester"
 provision = "provision.sh"
 files = ["../_shared/gnome"]

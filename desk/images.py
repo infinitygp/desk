@@ -60,7 +60,8 @@ def current(link: Path) -> Path | None:
 
 # What decides how the base disk gets installed; any change means a new install.
 INSTALL_KEYS = ("installer", "location", "kickstart", "iso", "iso_url", "iso_sha256", "kernel", "initrd",
-                "extra_args", "user_data", "cloud_image_url", "secure_boot", "unattend", "unattend_files",
+                "extra_args", "user_data", "cloud_image_url", "secure_boot", "release", "unattend",
+                "unattend_files",
                 "image_index", "virtio_win_iso", "openssh_msi", "os_variant", "memory_mib", "vcpus", "disk_gb")
 
 
@@ -205,6 +206,10 @@ def _fetch_cloud_image(spec: ImageSpec) -> Path:
 def _render(spec: ImageSpec, template: str) -> str:
     pubkey = SSH_KEY.with_suffix(".pub").read_text().strip()
     text = (spec.dir / template).read_text().replace("@SSH_PUBKEY@", pubkey)
+    if spec.release:
+        text = text.replace("@RELEASE@", spec.release)
+    if "@RELEASE@" in text:
+        raise DeskError(f"{template} uses @RELEASE@ but {spec.name} sets no release")
     if "@PASSWORD_HASH@" in text:
         hashed = subprocess.run(["openssl", "passwd", "-6", spec.user], capture_output=True, text=True,
                                 check=True).stdout.strip()

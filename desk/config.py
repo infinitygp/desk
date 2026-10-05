@@ -38,6 +38,8 @@ class ImageSpec:
     installer: str = "kickstart"
     location: str | None = None
     kickstart: str | None = None
+    # Replaces @RELEASE@ in the kickstart, so one kickstart serves several releases.
+    release: str | None = None
     iso: str | None = None
     iso_url: str | None = None
     iso_sha256: str | None = None
