@@ -154,6 +154,15 @@ running out, pass it on to the user.
 - A clean Windows has no Visual C++ runtime. A program that needs `VCRUNTIME140.dll` dies before
   showing anything (exit code 0xC0000135, or a "System Error" dialog); check with
   `Start-Process <exe> -PassThru -Wait` and the exit code when something silently does not start.
+- Settings tests switch often, without clicking through the Settings app:
+  `desk win theme dark|light` (apps and system, applied at once) and
+  `desk win taskbar [--edge bottom|top|left|right] [--size default|small] [--align left|center]
+  [--autohide on|off]` (restarts Explorer, ~5 s). Auto-hide only works with the taskbar at the bottom.
+- Windows enables some features for a share of machines only (Controlled Feature Rollout). The
+  image opts in to "Get the latest updates as soon as they're available" and forces on, with
+  ViVeTool: taskbar position (59213768) and taskbar size (61090762). Everything else is as a
+  fresh install of that build has it; if the app's behaviour depends on a feature outside that
+  list, say so in the report instead of assuming users see the same.
 - The report reads the event log (service failures, application errors and crashes, MSI
   installs); a "Network List Service terminated" entry comes from restoring the saved state, not
   from the app under test. `desk diff` works on NTFS too.

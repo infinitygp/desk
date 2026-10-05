@@ -15,6 +15,7 @@ Add-Type -Namespace Desk -Name Win -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
 [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
 [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint msg, UIntPtr wp, string lp, uint flags, uint timeout, out UIntPtr result);
 [DllImport("user32.dll")] public static extern void mouse_event(uint flags, int dx, int dy, int data, UIntPtr extra);
 '@
 
@@ -202,6 +203,12 @@ while ($true) {
             'uia' { Invoke-Uia $req.op $req.arg $req.text }
             'focus' { Focus-Window $req.query }
             'monitors' { @{ ok = $true; monitors = (Get-Monitors) } }
+            # WM_SETTINGCHANGE to every window, as Settings sends after a change (theme colours).
+            'settingchange' {
+                $r = [UIntPtr]::Zero
+                [void][Desk.Win]::SendMessageTimeout([IntPtr]0xffff, 0x1A, [UIntPtr]::Zero, $req.area, 2, 5000, [ref]$r)
+                @{ ok = $true }
+            }
             # Pointer on monitors other than the primary, which QEMU's absolute tablet cannot reach.
             'pointer' {
                 $flag = @{ 'left-down' = 0x2; 'left-up' = 0x4; 'right-down' = 0x8; 'right-up' = 0x10

@@ -462,6 +462,21 @@ def cmd_display(args) -> None:
           + f"; scale {run.scale or 100} %")
 
 
+def cmd_win(args) -> None:
+    from . import winsettings
+
+    run = runs.resolve(args.run)
+    spec = runs.spec_for(run)
+    if spec.family != "windows":
+        raise DeskError("desk win is for Windows guests")
+    if args.win_cmd == "theme":
+        winsettings.theme(run, spec, args.mode)
+    else:
+        winsettings.taskbar(run, spec, align=args.align, autohide=args.autohide, edge=args.edge, size=args.size)
+    print("done")
+    _after_action(run, run.dom(), args)
+
+
 def cmd_maintain(args) -> None:
     from . import maintain
 
@@ -681,6 +696,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--resolution", help="mode for every monitor, e.g. 1920x1080 (one the monitors offer)")
     p.add_argument("--scale", type=int, help="scaling in percent, e.g. 150 (Windows: signs in again)")
     p.set_defaults(func=cmd_display)
+
+    p = sub.add_parser("win", help="Windows settings without the Settings app: theme, taskbar")
+    wsub = p.add_subparsers(dest="win_cmd", required=True)
+    wp = wsub.add_parser("theme", help="light or dark mode for Windows and apps")
+    wp.add_argument("mode", choices=["light", "dark"])
+    _action_opts(wp)
+    wp = wsub.add_parser("taskbar", help="taskbar edge, size, alignment and auto-hide (restarts Explorer)")
+    wp.add_argument("--edge", choices=["bottom", "top", "left", "right"])
+    wp.add_argument("--size", choices=["default", "small"])
+    wp.add_argument("--align", choices=["left", "center"])
+    wp.add_argument("--autohide", choices=["on", "off"])
+    _action_opts(wp)
+    p.set_defaults(func=cmd_win)
 
     p = sub.add_parser("snapshot", help="save the running guest and go back to it later")
     p.add_argument("action", choices=["save", "restore", "list", "delete"])

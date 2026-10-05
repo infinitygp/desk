@@ -44,6 +44,10 @@ display driver and qemu-guest-agent, and an agent in the logged-in session
 (`images/_shared/windows/agent.ps1`, port forwarded like SSH) for UI Automation and starting
 programs on the desktop, which SSH sessions cannot see. Commands are sent as
 `powershell -EncodedCommand`, since Windows' command line mangles quotes.
+Provisioning opts in to early feature updates and enables the taskbar position and size
+features (59213768, 61090762) with ViVeTool v0.3.4 (GPL-3.0, downloaded and checked against a
+pinned SHA-256), so `desk win taskbar --edge/--size` work on every build; `desk/winsettings.py`
+writes theme and taskbar settings where the Settings app writes them.
 
 ```bash
 bin/desk image build fedora-44-gnome   # unattended install, ~10 min, needs network
