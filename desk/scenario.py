@@ -16,7 +16,7 @@ from .steps import Steps
 # Exactly one per step; the value is the action's argument.
 ACTIONS = {"root", "exec", "gui", "focus", "click", "type", "key", "expect", "expect_absent", "shot",
            "reboot", "wait"}
-OPTIONS = {"role", "exact", "timeout", "output", "rc", "name"}
+OPTIONS = {"role", "exact", "timeout", "output", "rc", "name", "soft"}
 # Where build artifacts land in the guest.
 GUEST_IN = {"linux": "/tmp/desk", "windows": "C:/Users/tester/desk"}
 
@@ -116,7 +116,9 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
         run.log_event(shot=str(path))
         return str(path)
     elif action == "reboot":
-        took, _ = guest.reboot(run.ssh_port, spec)
+        # true: an ordinary reboot; a string: the command that reboots (dnf offline reboot -y).
+        took, _ = guest.reboot(run.ssh_port, spec, timeout=timeout or 300,
+                               command=value if isinstance(value, str) else None)
         return f"back in {took:.0f}s"
     elif action == "wait":
         if value is True:
@@ -165,7 +167,9 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None) -> bo
                     run.log_event(shot=str(shot))
                 except DeskError:
                     pass  # the VM itself is gone; the report says so
-                break
+                # soft: an independent check whose failure should not hide the ones after it.
+                if not step.get("soft"):
+                    break
     finally:
         report, videos = evidence.finish(run, keep=keep)
         if report:

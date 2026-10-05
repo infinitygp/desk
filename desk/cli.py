@@ -292,7 +292,7 @@ def cmd_exec(args) -> None:
 
 def cmd_reboot(args) -> None:
     run = runs.resolve(args.run)
-    took, inhibitors = guest.reboot(run.ssh_port, runs.spec_for(run))
+    took, inhibitors = guest.reboot(run.ssh_port, runs.spec_for(run), timeout=args.timeout, command=args.command)
     for line in inhibitors:
         print(f"note: shutdown was blocked by: {line}")
     dom = run.dom()
@@ -556,6 +556,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("reboot", help="reboot the guest and wait for the new session")
     p.add_argument("--shot", action="store_true")
+    p.add_argument("--timeout", type=float, default=300, help="seconds until the new session must be up")
+    p.add_argument("--command", help="reboot with this (as root), e.g. 'dnf offline reboot -y' for an upgrade")
     p.set_defaults(func=cmd_reboot)
 
     p = sub.add_parser("selftest", help="end-to-end check of an image and the harness")

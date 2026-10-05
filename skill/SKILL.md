@@ -104,7 +104,8 @@ itself after 30 minutes (`--limit`).
 
 ## Images
 
-`desk image list` shows them. `fedora-44-gnome` is the default; `fedora-44-gnome-pl` is the same
+`desk image list` shows them. `fedora-44-gnome` is the default; `fedora-45-gnome` is the next
+Fedora release (beta until it is out); `fedora-44-gnome-pl` is the same
 system in Polish (UI, Firefox, formats) for testing Polish interfaces; `fedora-44-cockpit` has
 Cockpit open in Firefox, logged in as tester with administrative access (see below); `arch-gnome` is Arch Linux
 (rolling, pacman, no SELinux) with the newest GNOME and libraries; `windows-11` is Windows 11
@@ -181,7 +182,8 @@ shot = "empty-state"
 
 Other steps: `type`, `gui = "firefox https://..."`, `expect_absent` (after a reload, first
 `expect` something that is always there, or the check passes on a half-loaded page), `reboot = true`,
-`wait = true` (screen still) or `wait = 2` (seconds). Every step takes `name` for the report.
+`wait = true` (screen still) or `wait = 2` (seconds). Every step takes `name` for the report, and
+`soft = true` for an independent check whose failure should not stop the steps after it.
 `desk scenario check FILE` validates a file without starting anything. When a scenario fails,
 look at the failure screenshot and the report before changing the scenario: a failing step is
 usually a real finding.
@@ -200,6 +202,22 @@ usually a real finding.
    `desk reboot` and check what remains or comes back (autostart, enabled units, timers);
    `desk diff` shows exactly which files the package left behind.
 7. `desk down --diff` and hand over the report.
+
+### Surviving a system upgrade
+
+Whether a package still works after the user upgrades Fedora: install it on the older release's
+image (`fedora-44-gnome`, `fedora-44-cockpit`), check it works, then upgrade like a user would and
+check again (package still installed, services and timers still enabled, the UI still works):
+
+```bash
+desk exec --root -- 'dnf system-upgrade download -y --releasever=45'
+desk reboot --command 'dnf offline reboot -y' --timeout 3600   # boots into the upgrade, then the new system
+```
+
+In a scenario: `root = "dnf system-upgrade download -y --releasever=45"` (with `timeout = 1800`),
+then `reboot = "dnf offline reboot -y"` with `timeout = 3600`. After the reboot only the desktop
+session is back: programs open before it (Firefox with Cockpit) have to be started again.
+`fedora-45-gnome` is the next release itself (a beta until it is out).
 
 ### Cockpit plugins
 

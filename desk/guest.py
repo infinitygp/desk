@@ -115,18 +115,21 @@ def shutdown_inhibitors(port: int, user: str) -> list[str]:
             if mode == "block" and "shutdown" in what.split(":")]
 
 
-def reboot(port: int, spec, timeout: float = 300) -> tuple[float, list[str]]:
+def reboot(port: int, spec, timeout: float = 300, command: str | None = None) -> tuple[float, list[str]]:
     """Reboot and return once a new boot is ready, plus whatever was blocking shutdown.
 
     Apps with unsaved work make gnome-session block shutdown; a user would see a dialog.
-    The harness reboots anyway and reports the inhibitors instead.
+    The harness reboots anyway and reports the inhibitors instead. `command` reboots another
+    way (`dnf offline reboot -y` into a system upgrade); boots without SSH on the way are waited out.
     """
     user, ready = spec.user, spec.cmd(spec.ready)
     inhibitors = shutdown_inhibitors(port, user) if spec.family == "linux" else []
     before = boot_id(port, user, spec.cmd(spec.boot_id))
     t0 = time.monotonic()
     try:
-        r = ssh_run(port, spec.root_user, spec.cmd(spec.reboot), capture=True, timeout=30)
+        # No stdin: a command that asks first (dnf offline reboot without -y) fails at once
+        # instead of waiting for an answer while the boot id check below waits for a reboot.
+        r = ssh_run(port, spec.root_user, spec.cmd(command or spec.reboot), capture=True, timeout=30, input=b"")
         if r.returncode not in (0, 255):  # 255: the connection dropped as the guest went down
             raise DeskError(f"reboot refused: {r.stderr.decode(errors='replace').strip()}")
     except subprocess.TimeoutExpired:
