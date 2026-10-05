@@ -1,4 +1,4 @@
-# agent-visual-analysis
+# desk
 
 `desk`: disposable desktop VMs that an agent drives through screenshots and real
 mouse/keyboard input, for testing desktop apps and system packages end to end.
