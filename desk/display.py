@@ -264,8 +264,12 @@ def _key_event(code: str, down: bool) -> dict:
     return {"type": "key", "data": {"down": down, "key": {"type": "qcode", "data": code}}}
 
 
-def chord(dom, codes: list[str], hold_ms: int = 30, gap_ms: int = 20) -> None:
+def chord(dom, codes: list[str], hold_ms: int = 40, gap_ms: int = 40) -> None:
     """Press keys in order, release in reverse.
+
+    Not faster: QEMU's USB keyboard queues few events, and a guest busy for a moment (Windows
+    right after a restore, Defender scanning) lost the rest of a word, a key release among it,
+    which left AltGr held for the letters after it.
 
     input-send-event is applied before the command returns, unlike send-key, which only
     queues timed events; so once this returns the guest has every key and the next action
