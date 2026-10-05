@@ -216,7 +216,9 @@ desk reboot --command 'dnf offline reboot -y' --timeout 3600   # boots into the 
 
 In a scenario: `root = "dnf system-upgrade download -y --releasever=45"` (with `timeout = 1800`),
 then `reboot = "dnf offline reboot -y"` with `timeout = 3600`. After the reboot only the desktop
-session is back: programs open before it (Firefox with Cockpit) have to be started again.
+session is back: programs open before it (Firefox with Cockpit) have to be started again, and
+Firefox adds an `about:sessionrestore` tab for the session the reboot cut off. The upgrade itself
+takes about 10 minutes (download ~2 min, offline upgrade and boot ~7 min).
 `fedora-45-gnome` is the next release itself (a beta until it is out).
 
 ### Cockpit plugins
