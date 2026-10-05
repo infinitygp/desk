@@ -141,6 +141,43 @@ function Set-Displays($width, $height) {
     Get-Monitors
 }
 
+# A program in this session with extra environment variables, optionally waiting for it and
+# returning its exit code and output (desk exec --gui --wait --env), which SSH cannot see.
+function Invoke-Program($req) {
+    $psi = New-Object Diagnostics.ProcessStartInfo
+    $psi.FileName = $req.file
+    $psi.Arguments = (@($req.args) | Where-Object { $_ -ne $null } | ForEach-Object {
+        if ($_ -match '[\s"]' -or $_ -eq '') { '"' + ($_ -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1') + '"' } else { $_ }
+    }) -join ' '
+    $psi.UseShellExecute = $false
+    if ($req.env) { foreach ($p in $req.env.PSObject.Properties) { $psi.EnvironmentVariables[$p.Name] = [string]$p.Value } }
+    if ($req.wait) {
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.CreateNoWindow = $true   # the output comes back to desk, no console window on the desktop
+    }
+    $before = Get-TopHandles
+    $p = [Diagnostics.Process]::Start($psi)
+    if (-not $req.wait) { return @{ ok = $true; pid = $p.Id; focused = (Focus-NewWindow $before $p.Id) } }
+    $out = New-Object IO.MemoryStream
+    $err = New-Object IO.MemoryStream
+    $copies = @($p.StandardOutput.BaseStream.CopyToAsync($out), $p.StandardError.BaseStream.CopyToAsync($err))
+    $ms = if ($req.timeout_s) { [int](1000 * $req.timeout_s) } else { -1 }
+    $done = $p.WaitForExit($ms)
+    if (-not $done) { try { $p.Kill() } catch { } }
+    [void][Threading.Tasks.Task]::WaitAll($copies, 5000)
+    $reply = @{ ok = $true; pid = $p.Id; stdout = (Decode-Output $out.ToArray()); stderr = (Decode-Output $err.ToArray()) }
+    if ($done) { $reply.code = $p.ExitCode } else { $reply.timeout = $true }
+    $reply
+}
+
+# Programs that print UTF-8 (Rust, Python with UTF-8 mode) come through as they are; console
+# tools write in the OEM code page when their output is redirected.
+function Decode-Output($bytes) {
+    try { (New-Object Text.UTF8Encoding($false, $true)).GetString($bytes) }
+    catch { [Text.Encoding]::GetEncoding([Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage).GetString($bytes) }
+}
+
 $port = 47011
 $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Any, $port)
 $listener.Start()
@@ -154,10 +191,13 @@ while ($true) {
         $reply = switch ($req.cmd) {
             'ping' { @{ ok = $true; session = (Get-Process -Id $PID).SessionId; user = $env:USERNAME } }
             'run' {
-                $before = Get-TopHandles
-                $p = if ($req.args) { Start-Process -FilePath $req.file -ArgumentList $req.args -PassThru }
-                     else { Start-Process -FilePath $req.file -PassThru }
-                @{ ok = $true; pid = $p.Id; focused = (Focus-NewWindow $before $p.Id) }
+                if ($req.wait -or $req.env) { Invoke-Program $req }
+                else {
+                    $before = Get-TopHandles
+                    $p = if ($req.args) { Start-Process -FilePath $req.file -ArgumentList $req.args -PassThru }
+                         else { Start-Process -FilePath $req.file -PassThru }
+                    @{ ok = $true; pid = $p.Id; focused = (Focus-NewWindow $before $p.Id) }
+                }
             }
             'uia' { Invoke-Uia $req.op $req.arg $req.text }
             'focus' { Focus-Window $req.query }

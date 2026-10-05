@@ -51,6 +51,8 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk reboot [--shot]` | Reboot and return when the new session is ready; reports apps that blocked shutdown |
 | `desk exec [--root] -- CMD` | Run in the guest over SSH as the desktop user (`--root`: as root) |
 | `desk exec --gui -- APP ARGS` | Start a program detached inside the graphical session |
+| `desk exec --gui --wait -- CMD` | Run inside the session and return its output and exit code: what only the desktop session sees (windows, FindWindow, UI Automation, the session's environment) |
+| `desk exec --env NAME=VALUE ...` | Environment for the command (with or without `--gui`, repeatable) |
 | `desk exec --agent -- CMD` | Run as root through qemu-guest-agent; works without guest networking |
 | `desk push LOCAL REMOTE`, `desk pull REMOTE LOCAL` | Copy files (scp) |
 | `desk diff [--all]` | Files changed in the guest since the image it started from: added, changed, removed (~30 s) |
@@ -135,6 +137,10 @@ running out, pass it on to the user.
 - Background helpers started with `exec --gui` (a test tone, a mock server) get a console window
   that covers the desktop, since Windows Terminal ignores `-WindowStyle Hidden`: start them as
   `desk exec --gui -- conhost.exe --headless powershell.exe -NoProfile -Command "..."`.
+- What only the desktop session sees (FindWindow, UI Automation, the session's environment):
+  `desk exec --gui --wait -- powershell.exe -NoProfile -Command "..."` returns the output and exit
+  code, with no console window. UTF-8 output comes through as it is (Rust, or PowerShell after
+  `[Console]::OutputEncoding = [Text.Encoding]::UTF8`); console tools' OEM code page is converted.
 - Windows PowerShell 5.1 writes files in the ANSI code page by default: use
   `Set-Content -Encoding UTF8` / `Get-Content -Encoding UTF8` for text with Polish letters.
 - If `desk a11y` says a window's contents are "not available through UI Automation", a popup of
@@ -201,7 +207,9 @@ expect = "Nothing here yet"  # waits until shown (name, value or text); role, ex
 shot = "empty-state"
 ```
 
-Other steps: `type`, `gui = "firefox https://..."`, `expect_absent` (after a reload, first
+Other steps: `type`, `gui = "firefox https://..."` (with `env = {NAME = "value"}`; on Windows the
+string splits like a Windows command line, so `C:\path` stays as it is and paths with spaces
+need quotes, or give a list), `expect_absent` (after a reload, first
 `expect` something that is always there, or the check passes on a half-loaded page), `reboot = true`,
 `wait = true` (screen still) or `wait = 2` (seconds). Every step takes `name` for the report, and
 `soft = true` for an independent check whose failure should not stop the steps after it.

@@ -31,17 +31,17 @@ class Steps:
     def __init__(self, spec: ImageSpec, target):
         self.spec, self.target = spec, target
 
-    def gui(self, *argv: str) -> None:
+    def gui(self, *argv: str, env: dict[str, str] | None = None) -> None:
         """Start a program in the desktop session and wait until the screen has changed."""
         dom = self.target.dom()
         before = display.screen_hash(dom)
         if self.spec.family == "windows":
             from . import winagent
 
-            winagent.request(self.target, cmd="run", file=argv[0], args=list(argv[1:]) or None)
+            winagent.request(self.target, cmd="run", file=argv[0], args=list(argv[1:]) or None, env=env or None)
         else:
-            r = guest.ssh_run(self.target.ssh_port, self.target.user, guest.remote_command(list(argv), gui=True),
-                              capture=True, timeout=60)
+            r = guest.ssh_run(self.target.ssh_port, self.target.user,
+                              guest.remote_command(list(argv), gui=True, env=env), capture=True, timeout=60)
             if r.returncode != 0:
                 raise DeskError(f"starting {argv[0]} failed: {r.stderr.decode(errors='replace').strip()}")
         display.wait_change(dom, timeout=30, base=before)

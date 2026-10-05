@@ -16,13 +16,48 @@ from .steps import Steps
 # Exactly one per step; the value is the action's argument.
 ACTIONS = {"root", "exec", "gui", "focus", "click", "type", "key", "expect", "expect_absent", "shot",
            "reboot", "wait"}
-OPTIONS = {"role", "exact", "timeout", "output", "rc", "name", "soft"}
+OPTIONS = {"role", "exact", "timeout", "output", "rc", "name", "soft", "env"}
 # Where build artifacts land in the guest.
 GUEST_IN = {"linux": "/tmp/desk", "windows": "C:/Users/tester/desk"}
 
 
 class StepFailed(Exception):
     pass
+
+
+def split_windows(command: str) -> list[str]:
+    """Split a command line the way Windows programs do (CommandLineToArgvW): spaces separate
+    unless quoted, and backslashes are literal except before a quote, so paths stay intact."""
+    args, cur, quoted, have, i = [], [], False, False, 0
+    while i < len(command):
+        c = command[i]
+        if c == "\\":
+            n = 0
+            while i < len(command) and command[i] == "\\":
+                n += 1
+                i += 1
+            if i < len(command) and command[i] == '"':
+                cur.append("\\" * (n // 2))
+                if n % 2:
+                    cur.append('"')
+                    i += 1
+            else:
+                cur.append("\\" * n)
+            have = True
+            continue
+        if c == '"':
+            quoted, have = not quoted, True
+        elif c in " \t" and not quoted:
+            if have:
+                args.append("".join(cur))
+                cur, have = [], False
+        else:
+            cur.append(c)
+            have = True
+        i += 1
+    if have:
+        args.append("".join(cur))
+    return args
 
 
 def load(path: Path) -> dict:
@@ -89,7 +124,11 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
     if action in ("root", "exec"):
         return _shell(run, spec, step, action == "root")
     if action == "gui":
-        steps.gui(*(shlex.split(value) if isinstance(value, str) else value))
+        if isinstance(value, list):
+            argv = value
+        else:
+            argv = split_windows(value) if spec.family == "windows" else shlex.split(value)
+        steps.gui(*argv, env={k: str(v) for k, v in step.get("env", {}).items()})
     elif action == "focus":
         return steps.focus(value)
     elif action == "click":

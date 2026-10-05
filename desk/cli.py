@@ -279,6 +279,34 @@ def cmd_exec(args) -> None:
         sys.exit(code)
     if args.root and args.gui:
         raise DeskError("--gui starts programs in the desktop user's session; drop --root")
+    if args.wait and not args.gui:
+        raise DeskError("--wait goes with --gui (plain exec waits anyway)")
+    env = {}
+    for item in args.env or []:
+        key, sep, value = item.partition("=")
+        if not sep or not key:
+            raise DeskError(f"--env takes NAME=VALUE (got {item!r})")
+        env[key] = value
+    if args.gui and args.wait:
+        # Runs in the desktop session and returns the program's output and exit code: what it
+        # sees there (windows, UI Automation, the session's environment) SSH does not.
+        if run.agent_port:
+            from . import winagent
+
+            timeout = args.timeout or 600
+            reply = winagent.request(run, timeout=timeout + 30, cmd="run", file=argv[0], args=argv[1:] or None,
+                                     env=env or None, wait=True, timeout_s=timeout)
+            sys.stdout.write(reply.get("stdout") or "")
+            sys.stderr.write(reply.get("stderr") or "")
+            if reply.get("timeout"):
+                raise DeskError(f"still running after {timeout:.0f}s; stopped it")
+            code = int(reply.get("code", 1))
+        else:
+            r = guest.ssh_run(run.ssh_port, run.user, guest.remote_command(argv, gui=True, wait=True, env=env),
+                              timeout=args.timeout)
+            code = r.returncode
+        run.log_event(rc=code)
+        sys.exit(code)
     if args.gui:
         # Returns once the program has drawn something (or after the timeout), on every guest:
         # the screen is compared with how it looked before the start, not after.
@@ -287,10 +315,11 @@ def cmd_exec(args) -> None:
         if run.agent_port:
             from . import winagent
 
-            reply = winagent.request(run, cmd="run", file=argv[0], args=argv[1:] or None)
+            reply = winagent.request(run, cmd="run", file=argv[0], args=argv[1:] or None, env=env or None)
             started = f"started pid {reply.get('pid')}"
         else:
-            r = guest.ssh_run(run.ssh_port, run.user, guest.remote_command(argv, gui=True), timeout=args.timeout)
+            r = guest.ssh_run(run.ssh_port, run.user, guest.remote_command(argv, gui=True, env=env),
+                              timeout=args.timeout)
             if r.returncode != 0:
                 run.log_event(rc=r.returncode)
                 sys.exit(r.returncode)
@@ -300,7 +329,11 @@ def cmd_exec(args) -> None:
         print(started + ("" if changed else "; nothing new on screen yet (slow start? check with desk shot)"))
         return
     spec = runs.spec_for(run)
-    command = spec.cmd(guest.remote_command(argv, gui=args.gui))
+    if spec.family == "windows":
+        prefix = "".join(f"$env:{k} = '{v.replace(chr(39), chr(39) * 2)}'; " for k, v in env.items())
+        command = spec.cmd(prefix + guest.remote_command(argv))
+    else:
+        command = guest.remote_command(argv, env=env)
     r = guest.ssh_run(run.ssh_port, spec.root_user if args.root else run.user, command,
                       timeout=args.timeout)
     run.log_event(rc=r.returncode)
@@ -568,6 +601,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--root", action="store_true", help="as root (the harness has its own root key)")
     p.add_argument("--gui", action="store_true", help="start detached inside the graphical session")
     p.add_argument("--agent", action="store_true", help="via qemu-guest-agent as root, no network needed")
+    p.add_argument("--wait", action="store_true",
+                   help="with --gui: wait for the program and return its output and exit code")
+    p.add_argument("--env", action="append", metavar="NAME=VALUE", help="environment variable (repeatable)")
     p.add_argument("--timeout", type=float, default=None)
     p.add_argument("command", nargs=argparse.REMAINDER)
     p.set_defaults(func=cmd_exec)

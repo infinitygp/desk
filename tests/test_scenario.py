@@ -49,5 +49,21 @@ reboot = true
                 scenario.load(write(text))
 
 
+class SplitWindows(unittest.TestCase):
+    def test_paths_keep_their_backslashes(self):
+        self.assertEqual(scenario.split_windows(r'C:\desk\app.exe --dir C:\Users\tester'),
+                         [r"C:\desk\app.exe", "--dir", r"C:\Users\tester"])
+
+    def test_quotes_group_and_disappear(self):
+        self.assertEqual(scenario.split_windows(r'"C:\Program Files\app.exe" --name "a b"'),
+                         [r"C:\Program Files\app.exe", "--name", "a b"])
+        self.assertEqual(scenario.split_windows('cmd.exe /c "set X=1&& start app.exe"'),
+                         ["cmd.exe", "/c", "set X=1&& start app.exe"])
+
+    def test_backslashes_before_a_quote(self):
+        self.assertEqual(scenario.split_windows(r'a\"b c'), ['a"b', "c"])
+        self.assertEqual(scenario.split_windows(r'"a\\" b'), ["a\\", "b"])
+
+
 if __name__ == "__main__":
     unittest.main()
