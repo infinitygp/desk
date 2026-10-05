@@ -23,6 +23,52 @@ $Interactive = 'button', 'check box', 'radio button', 'combo box', 'entry', 'lin
 $Quiet = 'panel', 'grouping', 'unknown', 'title bar', 'scroll bar', 'thumb', 'separator', 'header'
 $MaxVisit = 6000
 
+# Some classic list views (the desktop's icons: FolderView, a SysListView32 in Explorer) show
+# up in the managed UIA client as an empty pane; their items are only reachable through MSAA.
+Add-Type -AssemblyName Accessibility
+Add-Type -ReferencedAssemblies Accessibility -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+namespace Desk {
+    public class MsaaItem { public int Child; public string Name; public int X, Y, W, H, State; }
+    public static class Msaa {
+        [DllImport("oleacc.dll")]
+        static extern int AccessibleObjectFromWindow(IntPtr hwnd, uint id, ref Guid iid,
+            [MarshalAs(UnmanagedType.Interface)] out object acc);
+        public static List<MsaaItem> Items(IntPtr hwnd) {
+            var items = new List<MsaaItem>();
+            Guid iid = new Guid("618736E0-3C3D-11CF-810C-00AA00389B71");
+            object o;
+            if (AccessibleObjectFromWindow(hwnd, 0xFFFFFFFC, ref iid, out o) != 0) return items;
+            var acc = (Accessibility.IAccessible)o;
+            int n = acc.accChildCount;
+            for (int i = 1; i <= n; i++) {
+                var it = new MsaaItem { Child = i };
+                try { it.Name = acc.get_accName(i); } catch { }
+                try { int x, y, w, h; acc.accLocation(out x, out y, out w, out h, i); it.X = x; it.Y = y; it.W = w; it.H = h; } catch { }
+                try { it.State = Convert.ToInt32(acc.get_accState(i)); } catch { }
+                items.Add(it);
+            }
+            return items;
+        }
+    }
+}
+'@
+
+function Get-MsaaNodes($hwnd, $path, $depth, $pid_) {
+    foreach ($it in [Desk.Msaa]::Items([IntPtr][long]$hwnd)) {
+        $states = @()
+        if ($it.State -band 0x2) { $states += 'selected' }   # STATE_SYSTEM_SELECTED
+        if ($it.State -band 0x4) { $states += 'focused' }    # STATE_SYSTEM_FOCUSED
+        $node = [ordered]@{ pid = $pid_; path = ($path + (100000 + $it.Child)); role = 'list item'
+                            name = ([string]$it.Name).Trim(); depth = $depth; states = $states
+                            bbox = if ($it.W -gt 0 -and $it.H -gt 0) { @($it.X, $it.Y, $it.W, $it.H) } else { $null } }
+        if ($it.State -band 0x10000) { $node.offscreen = $true }  # STATE_SYSTEM_OFFSCREEN
+        $node
+    }
+}
+
 function Get-Role($el) {
     $name = $el.Cached.ControlType.ProgrammaticName -replace '^ControlType\.', ''
     if ($name -eq 'Pane') {
@@ -207,6 +253,24 @@ function Walk($el, $path, $depth, $parentName, $hwnd, $nodes, $limit) {
         Walk $ch ($path + $i) $childDepth $pname $hwnd $nodes $limit
         $i++
     }
+    if ($el.CachedChildren.Count -eq 0 -and (Cached $el $AE::ClassNameProperty) -eq 'SysListView32') {
+        foreach ($n in (Get-MsaaNodes (Cached $el $AE::NativeWindowHandleProperty) $path $childDepth $hwnd)) {
+            if ($n.name -and ($nodes.Count - $script:offscreen) -lt $limit) { [void]$nodes.Add($n) }
+        }
+    }
+}
+
+# Items of a SysListView32 read through MSAA (see Get-MsaaNodes): find them the same way.
+function Resolve-Msaa($spec) {
+    if ($spec.role -ne 'list item') { return $null }
+    $top = $AE::FromHandle([IntPtr][long]$spec.pid)
+    $cond = New-Object Windows.Automation.PropertyCondition($AE::ClassNameProperty, 'SysListView32')
+    foreach ($lv in $top.FindAll([Windows.Automation.TreeScope]::Subtree, $cond)) {
+        foreach ($n in (Get-MsaaNodes $lv.Current.NativeWindowHandle @() 0 $spec.pid)) {
+            if ($n.name -eq $spec.name -and $n.bbox) { return @{ bbox = $n.bbox; showing = -not $n.offscreen } }
+        }
+    }
+    $null
 }
 
 function Find-Node($spec) {
@@ -269,6 +333,8 @@ function Invoke-Uia($op, $arg, $text) {
             return $out
         }
         'resolve' {
+            $msaa = Resolve-Msaa $spec
+            if ($msaa) { return $msaa }
             $el = Find-Node $spec
             $r = $el.Current.BoundingRectangle
             if ($r.IsEmpty) { throw 'element has no on-screen extents' }

@@ -118,6 +118,11 @@ running out, pass it on to the user.
 - `desk exec -- CMD` runs PowerShell as `tester`, who is an administrator with a full token, so
   `--root` changes nothing; `desk exec --agent -- CMD` runs as SYSTEM (session 0, no desktop).
   Quoting is safe: commands reach PowerShell encoded.
+- The desktop is a window too: `desk a11y --all` lists its icons as `list item`s under
+  "Program Manager" with their positions (read through MSAA, since UI Automation shows the icon
+  view empty), so `desk click --name "Recycle Bin" --role "list item"`, `desk drag` an icon and
+  `desk find NAME --all --role "list item"` to read where it ended up all work. The wallpaper is
+  the fixed Windows 11 default (no Spotlight), so screenshots of the desktop are comparable.
 - `desk exec --gui -- app.exe ARGS` starts the program on the desktop (through an agent in the
   user's session) and brings its window to the front, as starting it from the Start menu would.
 - `desk a11y` / `find` / `click --name` use UI Automation; names are the ones Narrator would read
