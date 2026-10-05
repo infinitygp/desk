@@ -43,6 +43,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk move X Y`, `desk drag X1 Y1 X2 Y2`, `desk scroll X Y DY` | Pointer; `DY>0` scrolls down |
 | `desk type TEXT` | Type with real key presses: ASCII and Polish letters |
 | `desk key COMBO...` | `super`, `enter`, `esc`, `tab`, `ctrl+alt+t`, `shift+f10`, `alt+f4`, `f5`, letters |
+| `desk snapshot save NAME`, `desk snapshot restore NAME`, `desk snapshot list`, `desk snapshot delete NAME` | Save the running guest (~3-5 s) and go back to it (~1-3 s) |
 | `desk focus NAME` | Bring a window to the front by application or title (keys go to the focused window) |
 | `desk scenario run FILE [--keep]`, `desk scenario check FILE` | Run a repeatable test from a TOML file (see below) |
 | `desk wait [--change] [--timeout S]` | Until the screen is still; `--change` first waits for it to change at all |
@@ -140,6 +141,14 @@ running out, pass it on to the user.
 - The report reads the event log (service failures, application errors and crashes, MSI
   installs); a "Network List Service terminated" entry comes from restoring the saved state, not
   from the app under test. `desk diff` works on NTFS too.
+
+## Snapshots
+
+When a test needs several attempts from the same point (a wizard, an installer's later pages,
+a bug that takes setup to reach), `desk snapshot save NAME` there and `desk snapshot restore NAME`
+before each attempt, instead of a new run and the setup all over again. Restoring puts back
+memory, disk and screen exactly (programs opened later are gone) and syncs the clock. Each
+snapshot keeps the guest's memory on disk (2.5-4 GB) until `desk snapshot delete` or `desk down`.
 
 ## Scenarios: repeatable tests
 

@@ -84,11 +84,22 @@ function Ev($filter) { $filter.EndTime = $E; Get-WinEvent -FilterHashtable $filt
 function Line($e) {
     '{0:s} {1} [{2}] {3}' -f $e.TimeCreated, $e.ProviderName, $e.Id, (($e.Message -split "`n")[0]).Trim()
 }
+# A reboot kills sshd (shutdown /f) and the service manager then fails to restart it: noise when
+# it happens in the last minute before a boot, a finding at any other time.
+$boots = @(Ev @{LogName='System'; ProviderName='Microsoft-Windows-Kernel-General'; Id=12; StartTime=$S} |
+           % { $_.TimeCreated })
+function ShutdownNoise($e) {
+    $e.ProviderName -eq 'Service Control Manager' -and $e.Id -in 7000, 7031, 7034 -and
+    $e.Message -match 'OpenSSH SSH Server' -and
+    @($boots | ? { $_ -gt $e.TimeCreated -and ($_ - $e.TimeCreated).TotalSeconds -lt 60 }).Count -gt 0
+}
 '=== failed'
 $scm = 7000, 7001, 7009, 7011, 7022, 7023, 7024, 7031, 7034
-Ev @{LogName='System'; ProviderName='Service Control Manager'; Id=$scm; StartTime=$S} | % { Line $_ }
+Ev @{LogName='System'; ProviderName='Service Control Manager'; Id=$scm; StartTime=$S} |
+    ? { -not (ShutdownNoise $_) } | % { Line $_ }
 '=== journal'
-Ev @{LogName='System','Application'; Level=1,2,3; StartTime=$S} | Select-Object -First 400 | % { Line $_ }
+Ev @{LogName='System','Application'; Level=1,2,3; StartTime=$S} | ? { -not (ShutdownNoise $_) } |
+    Select-Object -First 400 | % { Line $_ }
 '=== coredumps'
 Ev @{LogName='Application'; Id=1000,1002; StartTime=$S} | % { Line $_ }
 '=== packages'
@@ -297,6 +308,8 @@ def collect(run, diff: bool = False) -> Path:
             mark = "ok" if ev["ok"] else "FAILED"
             md.append(f"- {stamp} step {ev['step']} {mark}: {ev['action']} ({ev['seconds']} s)"
                       + (f" → {ev['detail']}" if ev["detail"] else ""))
+        elif "snapshot" in ev:
+            md.append(f"- {stamp} snapshot {ev['snapshot']}d: {ev['name']}")
         elif ev.get("record") == "start":
             md.append(f"- {stamp} recording started ({ev.get('fps')} fps)")
         elif ev.get("record") == "stop" and ev.get("video"):

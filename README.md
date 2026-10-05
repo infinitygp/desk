@@ -87,6 +87,13 @@ journalctl --user -u desk-maintain  # output of the last runs
 
 `desk up` warns three weeks before a licence runs out and refuses an expired image.
 
+## Snapshots
+
+`desk snapshot save|restore|list|delete` works like the warm state, for a running run: the
+guest's memory is saved (the VM stops for a few seconds), disk and firmware variables are reflink
+copies, and the run carries on restored from the saved memory. Restoring destroys the domain,
+puts the copies back and restores the memory. Snapshots live in `runs/<id>/snapshots/`.
+
 ## Scenarios
 
 `desk scenario run FILE` runs a repeatable end-to-end test described in TOML (format in

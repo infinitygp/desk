@@ -20,6 +20,8 @@ DEFAULT_FPS = 4
 # A forgotten recording stops itself.
 MAX_SECONDS = 30 * 60
 MAX_BYTES = 4 << 30
+# How long the recorder waits for a domain that went away (a snapshot being saved) to return.
+GONE_GRACE = 60
 
 
 def _frames(run) -> Path:
@@ -135,17 +137,31 @@ def _record(run_id: str, fps: int, limit: float) -> None:
     run = runs.load(run_id)
     d = _frames(run)
     dom = run.live_domain()
+    if dom is None:
+        return
     period, t0 = 1 / fps, time.monotonic()
     k, prev, prev_digest, written = 0, None, None, 0
-    while dom is not None and not stopping and k < limit * fps and written < MAX_BYTES:
+    gone_since = None
+    while not stopping and k < limit * fps and written < MAX_BYTES:
         wait = t0 + k * period - time.monotonic()
         if wait > 0:
             time.sleep(wait)
             continue
         try:
             png = display.screenshot(dom)
-        except Exception:  # noqa: BLE001 - the domain went away, or a reboot hiccup
-            dom = run.live_domain()
+            gone_since = None
+        except Exception:  # noqa: BLE001 - the domain is gone, maybe only for a while
+            # A snapshot saves and restores the domain: keep the last frame on screen meanwhile.
+            # A run that was destroyed does not come back.
+            gone_since = gone_since or time.monotonic()
+            if time.monotonic() - gone_since > GONE_GRACE:
+                break
+            dom = run.live_domain() or dom
+            if prev is not None:
+                os.link(prev, d / f"{k:06d}.png")
+                k += 1
+            else:
+                time.sleep(period)
             continue
         path = d / f"{k:06d}.png"
         digest = hashlib.sha256(png).digest()

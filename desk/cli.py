@@ -347,6 +347,31 @@ def cmd_scenario(args) -> None:
     sys.exit(0 if scenario.run_scenario(path, keep=args.keep, image=args.image) else 1)
 
 
+def cmd_snapshot(args) -> None:
+    from . import snapshot
+
+    run = runs.resolve(args.run)
+    if args.action == "list":
+        for s in snapshot.listing(run):
+            print(f"{s['name']}\t{time.strftime('%H:%M:%S', time.localtime(s['created']))}\t"
+                  f"{s['bytes'] / 2**30:.1f} GiB")
+        return
+    if not args.name:
+        raise DeskError(f"desk snapshot {args.action} needs a NAME")
+    if args.action == "delete":
+        snapshot.delete(run, args.name)
+        print(f"deleted {args.name}")
+        return
+    # Like up/down: no other desk command creates or destroys VMs meanwhile.
+    with runs.state_lock():
+        if args.action == "save":
+            took = snapshot.save(run, args.name, force=args.force)
+            print(f"saved {args.name} ({took:.1f}s; desk snapshot restore {args.name})")
+        else:
+            took = snapshot.restore(run, args.name)
+            print(f"restored {args.name} ({took:.1f}s)")
+
+
 def cmd_maintain(args) -> None:
     from . import maintain
 
@@ -550,6 +575,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--keep", action="store_true", help="keep the run's files afterwards")
     p.add_argument("--image", help="another image than the file names")
     p.set_defaults(func=cmd_scenario)
+
+    p = sub.add_parser("snapshot", help="save the running guest and go back to it later")
+    p.add_argument("action", choices=["save", "restore", "list", "delete"])
+    p.add_argument("name", nargs="?")
+    p.add_argument("--force", action="store_true", help="replace a snapshot of that name")
+    p.set_defaults(func=cmd_snapshot)
 
     p = sub.add_parser("record", help="record the screen as a video (WebM), kept with the report")
     p.add_argument("action", choices=["start", "stop"])
