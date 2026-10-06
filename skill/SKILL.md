@@ -249,8 +249,11 @@ Other steps: `type`, `gui = "firefox https://..."` (with `env = {NAME = "value"}
 string splits like a Windows command line, so `C:\path` stays as it is and paths with spaces
 need quotes, or give a list), `expect_absent` (after a reload, first
 `expect` something that is always there, or the check passes on a half-loaded page), `reboot = true`,
-`wait = true` (screen still) or `wait = 2` (seconds), `clock = "+1d"` (or `"reset"`). Every step takes `name` for the report, and
-`soft = true` for an independent check whose failure should not stop the steps after it.
+`wait = true` (screen still) or `wait = 2` (seconds), `clock = "+1d"` (or `"reset"`),
+`disk_add = "8G:data"`, `disk_rm = "data"` (top-level `disks = ["8G:data"]` plugs them in before
+the first step), `console_errors = 0` (at most that many new errors in Firefox's web console since
+the start or the previous such step; end a UI scenario with one). Every step takes `name` for the
+report, and `soft = true` for an independent check whose failure should not stop the steps after it.
 `desk scenario check FILE` validates a file without starting anything. When a scenario fails,
 look at the failure screenshot and the report before changing the scenario: a failing step is
 usually a real finding.

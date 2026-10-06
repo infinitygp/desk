@@ -44,9 +44,22 @@ reboot = true
             'image = "a"\n[[step]]\nclik = "x"',                   # typo
             'image = "a"\nrecrod = true',                          # unknown top-level key
             'image = "a"\n[build]\ncommand = "make"',              # unknown build key
+            'image = "a"\ndisks = "8G"',                           # disks is a list
         ):
             with self.subTest(text=text), self.assertRaises(DeskError):
                 scenario.load(write(text))
+
+    def test_disks_and_console(self):
+        data = scenario.load(write('''
+image = "fedora-44-cockpit"
+disks = ["8G:data"]
+[[step]]
+disk_rm = "data"
+[[step]]
+console_errors = 0
+'''))
+        self.assertEqual(data["disks"], ["8G:data"])
+        self.assertEqual(scenario.describe(data["step"][0]), ("disk_rm", "data"))
 
 
 class SplitWindows(unittest.TestCase):

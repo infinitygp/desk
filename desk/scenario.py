@@ -9,13 +9,13 @@ import time
 import tomllib
 from pathlib import Path
 
-from . import a11y, clock, display, evidence, guest, record, runs
+from . import a11y, browser, clock, disks, display, evidence, guest, record, runs
 from .config import DeskError, load_image
 from .steps import Steps
 
 # Exactly one per step; the value is the action's argument.
 ACTIONS = {"root", "exec", "gui", "focus", "click", "type", "key", "expect", "expect_absent", "shot",
-           "reboot", "wait", "clock"}
+           "reboot", "wait", "clock", "disk_add", "disk_rm", "console_errors"}
 OPTIONS = {"role", "exact", "timeout", "output", "rc", "name", "soft", "env"}
 # Where build artifacts land in the guest.
 GUEST_IN = {"linux": "/tmp/desk", "windows": "C:/Users/tester/desk"}
@@ -63,11 +63,13 @@ def split_windows(command: str) -> list[str]:
 def load(path: Path) -> dict:
     with path.open("rb") as f:
         data = tomllib.load(f)
-    unknown = set(data) - {"image", "record", "build", "step"}
+    unknown = set(data) - {"image", "record", "build", "disks", "step"}
     if unknown:
         raise DeskError(f"{path}: unknown keys {sorted(unknown)}")
     if "image" not in data:
         raise DeskError(f"{path}: no image")
+    if not isinstance(data.get("disks", []), list) or not all(isinstance(d, str) for d in data.get("disks", [])):
+        raise DeskError(f"{path}: disks is a list like [\"8G:data\"]")
     build = data.get("build", {})
     if set(build) - {"run", "artifacts"}:
         raise DeskError(f"{path}: [build] takes run and artifacts")
@@ -161,6 +163,19 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
         if run.clock_offset:
             clock.apply(run)
         return f"back in {took:.0f}s"
+    elif action == "disk_add":
+        size, _, name = value.partition(":")
+        return f"disk {disks.add(run, size, name or None)} plugged in"
+    elif action == "disk_rm":
+        disks.remove(run, value, timeout=timeout or 30)
+        return f"disk {value} unplugged"
+    elif action == "console_errors":
+        # New errors in Firefox's web console since the scenario started or the previous check.
+        found = browser.errors(browser.console(run))
+        new, steps.console_seen = found[steps.console_seen:], len(found)
+        if len(new) > value:
+            raise StepFailed(f"{len(new)} console errors (at most {value}): " + " | ".join(new[:3])[:300])
+        return f"{len(new)} console errors"
     elif action == "clock":
         if value == "reset":
             clock.reset(run)
@@ -194,6 +209,9 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None) -> bo
             for f in artifacts:
                 if guest.scp(run.ssh_port, str(f), f"{run.user}@127.0.0.1:{dest}/{f.name}") != 0:
                     raise DeskError(f"copying {f.name} to the guest failed")
+        for d in data.get("disks", []):
+            size, _, name = d.partition(":")
+            disks.add(run, size, name or None)
         steps = Steps(spec, run)
         for i, step in enumerate(data.get("step", []), 1):
             action, arg = describe(step)

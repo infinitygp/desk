@@ -30,6 +30,8 @@ class Target:
 class Steps:
     def __init__(self, spec: ImageSpec, target):
         self.spec, self.target = spec, target
+        # Web console errors already checked by a scenario's console_errors step.
+        self.console_seen = 0
 
     def gui(self, *argv: str, env: dict[str, str] | None = None) -> None:
         """Start a program in the desktop session and wait until the screen has changed."""
