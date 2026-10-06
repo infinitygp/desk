@@ -54,7 +54,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk exec --gui --wait -- CMD` | Run inside the session and return its output and exit code: what only the desktop session sees (windows, FindWindow, UI Automation, the session's environment) |
 | `desk exec --env NAME=VALUE ...` | Environment for the command (with or without `--gui`, repeatable) |
 | `desk exec --agent -- CMD` | Run as root through qemu-guest-agent; works without guest networking |
-| `desk push LOCAL REMOTE`, `desk pull REMOTE LOCAL` | Copy files (scp) |
+| `desk push [--root] LOCAL REMOTE`, `desk pull [--root] REMOTE LOCAL` | Copy files (scp) as the desktop user; `--root` for `/root`, `/etc` and the like |
 | `desk diff [--all]` | Files changed in the guest since the image it started from: added, changed, removed (~30 s) |
 | `desk report [--diff]` | Write the evidence report now (see below) |
 | `desk ls`, `desk down [ID] [--all] [--keep] [--diff] [--no-report]`, `desk gc` | List (with who holds each run), destroy (writing the report first), clean up idle runs |
@@ -67,6 +67,11 @@ guest shell; `--root` and `--gui` apply to the whole snippet.
 
 ## Pitfalls
 
+- Your own shell tool may stop a command after about 10 minutes, whatever `desk exec --timeout`
+  says. For longer guest work (an upgrade, a big build, a slow backup) run the desk command in
+  the background with your tool's background option and wait for it to finish, or start it
+  detached in the guest (`desk exec --root -- 'systemd-run --unit=job CMD'`) and poll
+  `systemctl is-active job` with short `desk exec` calls.
 - A still screen is not proof that something happened: right after `desk exec --gui` nothing has
   changed yet, so plain `desk wait` returns at once. Use `desk wait --change`; when an app is slow,
   check `pgrep` in the guest before concluding it failed.

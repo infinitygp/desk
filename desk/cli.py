@@ -598,14 +598,25 @@ def cmd_selftest(args) -> None:
     sys.exit(0 if run_selftest(args.image, reboot=args.reboot, keep=args.keep) else 1)
 
 
-def cmd_push(args) -> None:
+def _copy(args, push: bool) -> None:
     run = runs.resolve(args.run)
-    sys.exit(guest.scp(run.ssh_port, args.local, f"{run.user}@127.0.0.1:{args.remote}"))
+    user = runs.spec_for(run).root_user if args.root else run.user
+    remote = f"{user}@127.0.0.1:{args.remote}"
+    rc = guest.scp(run.ssh_port, args.local, remote) if push else guest.scp(run.ssh_port, remote, args.local)
+    run.log_event(rc=rc)
+    if rc != 0:
+        print(f"desk: copying failed (scp exit {rc})"
+              + ("" if args.root else f"; {args.remote} may be outside what {run.user} can access: --root"),
+              file=sys.stderr)
+    sys.exit(rc)
+
+
+def cmd_push(args) -> None:
+    _copy(args, push=True)
 
 
 def cmd_pull(args) -> None:
-    run = runs.resolve(args.run)
-    sys.exit(guest.scp(run.ssh_port, f"{run.user}@127.0.0.1:{args.remote}", args.local))
+    _copy(args, push=False)
 
 
 def cmd_ssh(args) -> None:
@@ -774,6 +785,7 @@ def build_parser() -> argparse.ArgumentParser:
         else:
             p.add_argument("remote")
             p.add_argument("local")
+        p.add_argument("--root", action="store_true", help="as root, for paths the desktop user cannot access")
         p.set_defaults(func=fn)
 
     sub.add_parser("ssh", help="interactive shell in the guest").set_defaults(func=cmd_ssh)
