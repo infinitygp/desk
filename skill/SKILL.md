@@ -260,7 +260,10 @@ need quotes, or give a list), `expect_absent` (after a reload, first
 `wait = true` (screen still) or `wait = 2` (seconds), `clock = "+1d"` (or `"reset"`),
 `disk_add = "8G:data"`, `disk_rm = "data"` (top-level `disks = ["8G:data"]` plugs them in before
 the first step), `console_errors = 0` (at most that many new errors in Firefox's web console since
-the start or the previous such step; end a UI scenario with one). Every step takes `name` for the
+the start or the previous such step; end a UI scenario with one). In a scenario's report every
+console message is tagged with the step running when it was logged (`[before the first step]` for
+what the warm state and setup logged; a page logs a moment after the step that opened it, so look
+at the step before as well), so no extra step is needed just to separate setup noise. Every step takes `name` for the
 report, and `soft = true` for an independent check whose failure should not stop the steps after it.
 `desk scenario check FILE` validates a file without starting anything. When a scenario fails,
 look at the failure screenshot and the report before changing the scenario: a failing step is

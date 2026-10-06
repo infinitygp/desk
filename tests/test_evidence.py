@@ -92,3 +92,19 @@ class Report(unittest.TestCase):
         self.assertIn("2 of 2 steps passed", md)
         self.assertIn("clock +3d in steps of 1d", md)
         self.assertIn("clock +1d in steps of 6h", md)
+
+
+class StepLabels(unittest.TestCase):
+    def test_messages_go_to_the_step_running_then(self):
+        from desk.evidence import _step_labels
+
+        events = [
+            {"t": 110.0, "step": 1, "action": "root dnf install", "ok": True, "seconds": 10.0},
+            {"t": 120.0, "step": 2, "action": "click Example", "ok": True, "seconds": 2.0},
+            # desk clock +1d during step 3: guest times run a day ahead from here on.
+            {"t": 125.0, "clock": "+1d", "offset": 86400},
+            {"t": 126.0, "step": 3, "action": "clock +1d", "ok": True, "seconds": 3.0},
+        ]
+        self.assertEqual(_step_labels([50.0, 105.0, 119.0, 123.0 + 86400], events),
+                         ["before the first step", "step 1: root dnf install", "step 2: click Example",
+                          "step 3: clock +1d"])

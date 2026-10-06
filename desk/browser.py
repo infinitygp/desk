@@ -2,6 +2,7 @@
 console.* calls, uncaught exceptions and rejected promises of every page."""
 
 import re
+from datetime import datetime
 
 from . import guest
 from .config import DeskError, load_image
@@ -14,21 +15,29 @@ FIREFOX_OWN = re.compile(r"console\.[a-z]+: [A-Za-z][\w.-]*: |JavaScript (error|
 ERROR = re.compile(r"(console\.(error|assert)|JavaScript error): ")
 # Bash with the start time in $S, also part of the report's guest script; as root, journalctl
 # reads the desktop user's journal too.
-JOURNAL = r"""journalctl --since "@$S" --no-pager -o short-iso </dev/null 2>/dev/null \
+JOURNAL = r"""journalctl --since "@$S" --no-pager -o short-iso-precise </dev/null 2>/dev/null \
     | grep -E ': (console\.[a-z]+|JavaScript (error|warning)): ' | tail -n 2000
 """
 
 
-def parse(text: str, everything: bool = False) -> list[str]:
-    """`TIME console.error: ...` lines from journalctl short-iso output."""
+def stamped(text: str, everything: bool = False) -> list[tuple[float, str]]:
+    """(guest time, `TIME console.error: ...`) from journalctl short-iso-precise output."""
     out = []
     for line in text.splitlines():
         m = MESSAGE.search(line)
         if not m or (not everything and FIREFOX_OWN.match(m.group(0))):
             continue
         stamp = line.split(" ", 1)[0]
-        out.append(f"{stamp[11:19]} {m.group(0)}")
+        try:
+            when = datetime.fromisoformat(stamp).timestamp()
+        except ValueError:
+            when = 0.0
+        out.append((when, f"{stamp[11:19]} {m.group(0)}"))
     return out
+
+
+def parse(text: str, everything: bool = False) -> list[str]:
+    return [line for _, line in stamped(text, everything)]
 
 
 def errors(lines: list[str]) -> list[str]:

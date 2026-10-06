@@ -3,9 +3,9 @@ import unittest
 from desk import browser
 
 JOURNAL = """\
-2026-10-06T09:58:01+02:00 desk-fedora bash[4612]: console.log: "hello from log" ({a:1})
-2026-10-06T09:58:01+02:00 desk-fedora bash[4612]: console.error: "an error"
-2026-10-06T09:58:01+02:00 desk-fedora bash[4612]: JavaScript error: file:///tmp/t.html, line 5: ReferenceError: x
+2026-10-06T09:58:01.250311+02:00 desk-fedora bash[4612]: console.log: "hello from log" ({a:1})
+2026-10-06T09:58:01.250311+02:00 desk-fedora bash[4612]: console.error: "an error"
+2026-10-06T09:58:01.250311+02:00 desk-fedora bash[4612]: JavaScript error: file:///tmp/t.html, line 5: ReferenceError: x
 2026-10-06T09:58:02+02:00 desk-fedora bash[4612]: console.warn: RSLoader: Recipe new-tab-1 not returned
 2026-10-06T09:58:02+02:00 desk-fedora bash[4612]: console.log: "Note: with a colon"
 2026-10-06T09:58:03+02:00 desk-fedora bash[4612]: JavaScript error: resource://autofill/FormAutofillChild.sys.mjs, line 639: TypeError

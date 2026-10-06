@@ -217,6 +217,25 @@ def _count(text: str, pattern: str | None = None) -> int:
     return len([ln for ln in lines if re.search(pattern, ln)]) if pattern else len(lines)
 
 
+def _step_labels(guest_times: list[float], events: list[dict]) -> list[str]:
+    """The scenario step that was running (or had last run) at each guest time. Step events carry
+    host times; the guest's clock differs by the offsets desk clock set along the way."""
+    offset, starts = 0.0, []
+    for ev in events:
+        if "offset" in ev:
+            offset = ev["offset"]
+        elif ev.get("clock") == "reset":
+            offset = 0.0
+        if "step" in ev and "ok" in ev:
+            starts.append((ev["t"] - ev.get("seconds", 0) + offset, f"step {ev['step']}: {ev['action']}"[:60]))
+    labels = []
+    for when in guest_times:
+        # Step durations are logged to a tenth of a second.
+        current = [label for start, label in starts if start <= when + 0.1]
+        labels.append(current[-1] if current else "before the first step")
+    return labels
+
+
 def _log(run) -> list[dict]:
     f = run.dir / "log.jsonl"
     if not f.exists():
@@ -292,11 +311,22 @@ def collect(run, diff: bool = False) -> Path:
         md.append(f"- crashes (coredumps): {_count(cores)}" + (f"\n\n```\n{cores}\n```\n" if cores else ""))
         md.append(f"- warnings and errors in the system log: {_count(problems.get('journal', ''), r'^[0-9]{4}-')}"
                   + (" (see journal.txt)" if problems.get("journal") else ""))
-        web = browser.parse(problems.get("browser", ""))
-        if web:
-            (out / "browser-console.txt").write_text("\n".join(web) + "\n")
+        entries = browser.stamped(problems.get("browser", ""))
+        if entries:
+            web = [line for _, line in entries]
             errs = browser.errors(web)
-            md.append(f"- browser console (Firefox): {len(errs)} errors, {len(web)} messages (see browser-console.txt)"
+            summary = f"{len(errs)} errors, {len(web)} messages"
+            if stepped:
+                # Which scenario step each message came in, so what setup (installing, logging in,
+                # loading other pages) logged is told apart from what the steps under test did.
+                labels = _step_labels([t for t, _ in entries], events)
+                web = [f"{line[:8]} [{label}] {line[9:]}" for (_, line), label in zip(entries, labels)]
+                errs = [w for w, (_, line) in zip(web, entries) if browser.ERROR.match(line[9:])]
+                setup = sum(1 for e in errs if "[before the first step]" in e)
+                if setup:
+                    summary += f"; {setup} of the errors before the first step"
+            (out / "browser-console.txt").write_text("\n".join(web) + "\n")
+            md.append(f"- browser console (Firefox): {summary} (see browser-console.txt)"
                       + ("\n\n```\n" + "\n".join(errs[:20]) + "\n```\n" if errs else ""))
         pkgs = problems.get("packages", "")
         md.append("- package changes:" + (f"\n\n```\n{pkgs}\n```\n" if pkgs else " none"))

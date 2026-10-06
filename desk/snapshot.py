@@ -92,7 +92,7 @@ def restore(run, name: str) -> float:
             reflink_copy(f, disks.directory(run) / f.name)
             (disks.directory(run) / f.name).chmod(0o644)
     _resume(run, d / "memory.save")
-    run.log_event(snapshot="restore", name=name)
+    run.log_event(snapshot="restore", name=name, offset=run.clock_offset)
     return time.monotonic() - t0
 
 
