@@ -9,13 +9,13 @@ import time
 import tomllib
 from pathlib import Path
 
-from . import a11y, display, evidence, guest, record, runs
+from . import a11y, clock, display, evidence, guest, record, runs
 from .config import DeskError, load_image
 from .steps import Steps
 
 # Exactly one per step; the value is the action's argument.
 ACTIONS = {"root", "exec", "gui", "focus", "click", "type", "key", "expect", "expect_absent", "shot",
-           "reboot", "wait"}
+           "reboot", "wait", "clock"}
 OPTIONS = {"role", "exact", "timeout", "output", "rc", "name", "soft", "env"}
 # Where build artifacts land in the guest.
 GUEST_IN = {"linux": "/tmp/desk", "windows": "C:/Users/tester/desk"}
@@ -158,7 +158,15 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
         # true: an ordinary reboot; a string: the command that reboots (dnf offline reboot -y).
         took, _ = guest.reboot(run.ssh_port, spec, timeout=timeout or 300,
                                command=value if isinstance(value, str) else None)
+        if run.clock_offset:
+            clock.apply(run)
         return f"back in {took:.0f}s"
+    elif action == "clock":
+        if value == "reset":
+            clock.reset(run)
+        else:
+            clock.set_time(run, value)
+        return clock.describe(run)
     elif action == "wait":
         if value is True:
             steps.settle(timeout or 10)

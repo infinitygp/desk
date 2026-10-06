@@ -113,6 +113,8 @@ puts the copies back and restores the memory. Snapshots live in `runs/<id>/snaps
 
 `desk disk add|rm|ls` hot-plugs empty qcow2 disks (`runs/<id>/disks/NAME.qcow2`) as virtio-blk
 into the spare PCIe root ports, serial = name; snapshots copy them along.
+`desk clock` (`desk/clock.py`) sets the guest's time through qemu-guest-agent with the guest's
+time sync off and keeps the offset in `run.json`, reapplied after snapshot restores and reboots.
 
 ## Scenarios
 

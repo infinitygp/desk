@@ -12,7 +12,7 @@ from pathlib import Path
 
 import libvirt
 
-from . import disks, guest
+from . import clock, disks, guest
 from .config import DeskError
 from .virt import conn, reflink_copy
 
@@ -33,7 +33,7 @@ def _resume(run, memory: Path) -> None:
     xml = conn().saveImageGetXMLDesc(str(memory), libvirt.VIR_DOMAIN_SAVE_IMAGE_XML_SECURE)
     conn().restoreFlags(str(memory), xml, libvirt.VIR_DOMAIN_SAVE_RUNNING)
     try:
-        guest.agent_sync_time(run.dom())
+        clock.apply(run)
     except DeskError as e:
         print(f"[desk] warning: clock not synced: {e}")
     guest.wait_ssh(run.ssh_port, run.user, timeout=60)
@@ -62,7 +62,8 @@ def save(run, name: str, force: bool = False) -> float:
         raise
     _resume(run, d / "memory.save")
     took = time.monotonic() - t0
-    (d / "meta.json").write_text(json.dumps({"created": time.time(), "seconds": round(took, 1)}))
+    (d / "meta.json").write_text(json.dumps({"created": time.time(), "seconds": round(took, 1),
+                                             "clock_offset": run.clock_offset}))
     run.log_event(snapshot="save", name=name)
     return took
 
@@ -80,6 +81,9 @@ def restore(run, name: str) -> float:
         reflink_copy(d / f, tmp)
         tmp.chmod(0o644)
         os.replace(tmp, run.dir / f)
+    # The clock as it was then too: whether the guest syncs its time is part of its disk.
+    run.clock_offset = json.loads((d / "meta.json").read_text()).get("clock_offset", 0.0)
+    run.save()
     # Extra disks as they were then: the saved guest has exactly those plugged in.
     shutil.rmtree(disks.directory(run), ignore_errors=True)
     if (d / "disks").exists():

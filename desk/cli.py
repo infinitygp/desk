@@ -414,6 +414,10 @@ def cmd_exec(args) -> None:
 def cmd_reboot(args) -> None:
     run = runs.resolve(args.run)
     took, inhibitors = guest.reboot(run.ssh_port, runs.spec_for(run), timeout=args.timeout, command=args.command)
+    if run.clock_offset:
+        from . import clock
+
+        clock.apply(run)
     for line in inhibitors:
         print(f"note: shutdown was blocked by: {line}")
     dom = run.dom()
@@ -535,6 +539,17 @@ def cmd_disk(args) -> None:
         for d in disks.listing(run):
             print(f"{d['name']}\t{d['size'] / 2**30:.1f} GiB\t{d['used'] / 2**20:.0f} MiB used\t"
                   + ("plugged in" if d["attached"] else "not plugged in"))
+
+
+def cmd_clock(args) -> None:
+    from . import clock
+
+    run = runs.resolve(args.run)
+    if args.value == "reset":
+        clock.reset(run)
+    elif args.value:
+        clock.set_time(run, args.value)
+    print(clock.describe(run))
 
 
 def cmd_maintain(args) -> None:
@@ -783,6 +798,11 @@ def build_parser() -> argparse.ArgumentParser:
     dp.add_argument("name")
     dsub.add_parser("ls", help="the run's extra disks")
     p.set_defaults(func=cmd_disk)
+
+    p = sub.add_parser("clock", help="show or move the guest's clock (schedules, expiry, retention)")
+    p.add_argument("value", nargs="?", help="+3d, -2h30m (s m h d w), '2026-12-24 23:59' (guest local time), "
+                   "or reset (back to the host's time, time sync on)")
+    p.set_defaults(func=cmd_clock)
 
     p = sub.add_parser("snapshot", help="save the running guest and go back to it later")
     p.add_argument("action", choices=["save", "restore", "list", "delete"])

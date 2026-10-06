@@ -199,6 +199,15 @@ serial number `backup`, online but not initialized (`Initialize-Disk`, `New-Part
 `Format-Volume`). `desk disk rm NAME` unplugs and deletes it; the guest is not asked, so unmount
 first unless pulling a disk out is what you test. `desk disk ls` lists them; snapshots include them.
 
+## Guest clock
+
+For what depends on time (schedules, timers, expiry, retention): `desk clock +3d` (also `-2h30m`;
+units s m h d w) or `desk clock '2026-12-24 23:59'` (guest local time, Europe/Warsaw) moves the
+guest's clock, which keeps running from there; `desk clock` shows it. The guest's own time sync is
+switched off (timedatectl / w32time) and desk keeps the offset across snapshot restores and
+`desk reboot`. `desk clock reset` goes back to the host's time and turns time sync on again.
+Timers that were due in the skipped time fire right after the jump, as after a suspend.
+
 ## Scenarios: repeatable tests
 
 When a project has `test/desk/*.toml` (or the user wants a check that can be repeated), run it
@@ -232,7 +241,7 @@ Other steps: `type`, `gui = "firefox https://..."` (with `env = {NAME = "value"}
 string splits like a Windows command line, so `C:\path` stays as it is and paths with spaces
 need quotes, or give a list), `expect_absent` (after a reload, first
 `expect` something that is always there, or the check passes on a half-loaded page), `reboot = true`,
-`wait = true` (screen still) or `wait = 2` (seconds). Every step takes `name` for the report, and
+`wait = true` (screen still) or `wait = 2` (seconds), `clock = "+1d"` (or `"reset"`). Every step takes `name` for the report, and
 `soft = true` for an independent check whose failure should not stop the steps after it.
 `desk scenario check FILE` validates a file without starting anything. When a scenario fails,
 look at the failure screenshot and the report before changing the scenario: a failing step is

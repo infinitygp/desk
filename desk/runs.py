@@ -83,6 +83,8 @@ class Run:
     # When the run was handed over: a cold boot provisions the image in the run first, and what
     # that changes belongs to the image, not to the test. 0: at creation (warm restore).
     ready: float = 0.0
+    # Seconds the guest clock is ahead of the host's (desk clock); 0: in sync.
+    clock_offset: float = 0.0
 
     @property
     def since(self) -> float:
