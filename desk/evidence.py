@@ -196,10 +196,10 @@ def format_changes(ch: FileChanges, limit: int = 200) -> str:
 def guest_problems(run) -> dict[str, str]:
     spec = load_image(run.image)
     if spec.family == "windows":
-        r = guest.ssh_run(run.ssh_port, spec.root_user, spec.cmd(WINDOWS_SCRIPT.replace("@S@", str(int(run.created)))),
+        r = guest.ssh_run(run.ssh_port, spec.root_user, spec.cmd(WINDOWS_SCRIPT.replace("@S@", str(int(run.since)))),
                           capture=True, timeout=180)
     else:
-        r = guest.ssh_run(run.ssh_port, spec.root_user, f"bash -s -- {int(run.created)}",
+        r = guest.ssh_run(run.ssh_port, spec.root_user, f"bash -s -- {int(run.since)}",
                           input=GUEST_SCRIPT.encode(), capture=True, timeout=120)
     sections, current = {}, None
     for line in r.stdout.decode(errors="replace").splitlines():
@@ -258,7 +258,12 @@ def collect(run, diff: bool = False) -> Path:
           f"- image: `{run.image}`",
           f"- started: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(run.created))}, "
           f"reported: {time.strftime('%H:%M:%S', time.localtime(ended))} "
-          f"({(ended - run.created) / 60:.0f} min)", ""]
+          f"({(ended - run.created) / 60:.0f} min)"]
+    if run.ready:
+        md.append(f"- booted cold: the image was provisioned in the run until "
+                  f"{time.strftime('%H:%M:%S', time.localtime(run.ready))}; guest logs and package changes "
+                  "count from then" + (", the list of changed files includes it" if changes is not None else ""))
+    md.append("")
     events = _log(run)
     stepped = [ev for ev in events if "step" in ev]
     scenario = next((ev for ev in events if "scenario" in ev), None)

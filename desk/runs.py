@@ -80,6 +80,13 @@ class Run:
     resolution: list[int] | None = None
     # Scaling in percent set by desk (None: the image's 100 %).
     scale: int | None = None
+    # When the run was handed over: a cold boot provisions the image in the run first, and what
+    # that changes belongs to the image, not to the test. 0: at creation (warm restore).
+    ready: float = 0.0
+
+    @property
+    def since(self) -> float:
+        return self.ready or self.created
 
     @property
     def dir(self) -> Path:
@@ -383,6 +390,8 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
             from . import steps
 
             steps.run_prepare(spec, run)
+            run.ready = time.time()
+            run.save()
     except BaseException:
         down(run, keep=True)
         raise
