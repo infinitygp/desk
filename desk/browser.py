@@ -7,9 +7,10 @@ from . import guest
 from .config import DeskError, load_image
 
 MESSAGE = re.compile(r"(console\.[a-z]+|JavaScript (?:error|warning)): .*")
-# Firefox's own components log with their name in front, unquoted ("console.warn: RSLoader: ...");
-# a page's console.log("text") is printed quoted, objects and numbers as values.
-FIREFOX_OWN = re.compile(r"console\.[a-z]+: [A-Za-z][\w.-]*: ")
+# Firefox's own components log with their name in front, unquoted ("console.warn: RSLoader: ...";
+# a page's console.log("text") is printed quoted, objects and numbers as values), and their
+# exceptions come from its internal URLs.
+FIREFOX_OWN = re.compile(r"console\.[a-z]+: [A-Za-z][\w.-]*: |JavaScript (error|warning): (resource|chrome)://")
 ERROR = re.compile(r"(console\.(error|assert)|JavaScript error): ")
 # Bash with the start time in $S, also part of the report's guest script; as root, journalctl
 # reads the desktop user's journal too.
