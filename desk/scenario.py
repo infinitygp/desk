@@ -179,7 +179,8 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None) -> bo
     data = load(path)
     spec = load_image(image or data["image"])
     artifacts = _build(data, _repo(path))
-    run = runs.up(spec)
+    agent, _ = runs.agent_process()
+    run = runs.up(spec, label=f"scenario {_repo(path).name}/{path.name}" + (f" ({agent})" if agent else ""))
     print(f"run {run.id} ({spec.name})", flush=True)
     ok = True
     try:

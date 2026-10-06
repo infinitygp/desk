@@ -97,7 +97,7 @@ def _resolution(text: str | None) -> tuple[int, int] | None:
 def cmd_up(args) -> None:
     resolution = _resolution(args.resolution)
     spec = load_image(args.image)
-    run = runs.up(spec, run_id=args.name, cold=args.cold, force=args.force,
+    run = runs.up(spec, run_id=args.name, cold=args.cold, force=args.force, label=args.label,
                   displays=args.displays, resolution=resolution)
     if args.displays != 1 or resolution or args.scale:
         from . import monitors
@@ -143,7 +143,8 @@ def cmd_diff(args) -> None:
 def cmd_ls(args) -> None:
     for r in runs.all_runs():
         state = "running" if r.live_domain() is not None else "stopped"
-        print(f"{r.id}\t{r.image}\t{state}\tidle {r.idle() / 60:.0f} min\tssh:{r.ssh_port}\t{r.dir}")
+        held = (r.label or "-") + ("" if not r.holder or runs.holder_alive(r) else " (agent gone)")
+        print(f"{r.id}\t{r.image}\t{state}\tidle {r.idle() / 60:.0f} min\t{held}\tssh:{r.ssh_port}\t{r.dir}")
 
 
 def cmd_gc(args) -> None:
@@ -618,6 +619,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("up", help="start a disposable run")
     p.add_argument("image")
     p.add_argument("--name", help="run id (default: random)")
+    p.add_argument("--label", help="who or what uses the run, shown by desk ls (default: $DESK_LABEL, "
+                   "or the coding agent and its directory)")
     p.add_argument("--cold", action="store_true", help="boot instead of restoring the warm state")
     p.add_argument("--force", action="store_true", help="start even if free memory looks too low")
     p.add_argument("--record", action="store_true", help="record a video from the start (desk record)")

@@ -85,6 +85,10 @@ class Run:
     ready: float = 0.0
     # Seconds the guest clock is ahead of the host's (desk clock); 0: in sync.
     clock_offset: float = 0.0
+    # Who holds the run (desk ls): a scenario, --label / $DESK_LABEL, or the coding agent and the
+    # directory it works in; holder is the agent's PID, to tell when it is gone.
+    label: str = ""
+    holder: int = 0
 
     @property
     def since(self) -> float:
@@ -301,8 +305,42 @@ def prune_versions(verbose: bool = True) -> list[str]:
     return removed
 
 
+AGENTS = ("claude", "codex", "opencode", "gemini", "aider", "goose")
+
+
+def agent_process() -> tuple[str, int]:
+    """The coding agent this desk command runs under, by walking up the process tree."""
+    pid = os.getppid()
+    for _ in range(20):
+        if pid <= 1:
+            break
+        try:
+            stat = Path(f"/proc/{pid}/stat").read_text()
+        except OSError:
+            break
+        comm = stat[stat.index("(") + 1:stat.rindex(")")].lstrip(".")
+        if comm in AGENTS:
+            return comm, pid
+        pid = int(stat[stat.rindex(")") + 2:].split()[1])
+    return "", 0
+
+
+def default_label() -> tuple[str, int]:
+    agent, pid = agent_process()
+    label = os.environ.get("DESK_LABEL") or (f"{agent} @ {Path.cwd().name}" if agent else Path.cwd().name)
+    return label, pid
+
+
+def holder_alive(run: Run) -> bool:
+    try:
+        stat = Path(f"/proc/{run.holder}/stat").read_text()
+    except OSError:
+        return False
+    return stat[stat.index("(") + 1:stat.rindex(")")].lstrip(".") in AGENTS
+
+
 def up(spec: ImageSpec, run_id: str | None = None, cold: bool = False, force: bool = False,
-       displays: int = 1, resolution: tuple[int, int] | None = None) -> Run:
+       displays: int = 1, resolution: tuple[int, int] | None = None, label: str | None = None) -> Run:
     from .maintain import check_usable
 
     for warning in check_usable(spec):
@@ -311,11 +349,11 @@ def up(spec: ImageSpec, run_id: str | None = None, cold: bool = False, force: bo
         gc()
         if not force:
             check_memory(spec)
-        return _up(spec, run_id, cold, displays, resolution)
+        return _up(spec, run_id, cold, displays, resolution, label)
 
 
 def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
-        resolution: tuple[int, int] | None = None) -> Run:
+        resolution: tuple[int, int] | None = None, label: str | None = None) -> Run:
     run_id = run_id or secrets.token_hex(3)
     rd = RUNS / run_id
     if rd.exists():
@@ -354,10 +392,12 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
     # A restore must also keep the saved domain name; run ids stay independent of it.
     domain = f"desk-{run_id}" if cold else ET.fromstring(saved_xml).findtext("name")
     now = time.time()
+    auto_label, holder = default_label()
     run = Run(id=run_id, image=spec.name, domain=domain, ssh_port=free_port(),
               user=spec.user, created=now, last_used=now, vnc_password=secrets.token_urlsafe(6)[:8],
               agent_port=free_port() if spec.agent_port else 0, displays=displays,
-              resolution=list(resolution) if resolution else None)
+              resolution=list(resolution) if resolution else None,
+              label=label or auto_label, holder=holder)
     run.save()
 
     disk, nvram = rd / "disk.qcow2", rd / "VARS.qcow2"

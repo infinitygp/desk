@@ -111,7 +111,7 @@ def run_selftest(image: str, reboot: bool = False, keep: bool = False, spec: Ima
 
     def start():
         nonlocal run
-        run = runs.up(spec, run_id=f"selftest-{secrets.token_hex(3)}")
+        run = runs.up(spec, run_id=f"selftest-{secrets.token_hex(3)}", label="selftest")
         # A new build under test must really restore its warm state, not fall back to a cold boot.
         _check(not spec.warm_version or run.domain != f"desk-{run.id}", "booted cold instead of restoring")
         return f"run {run.id}"

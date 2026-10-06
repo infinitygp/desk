@@ -57,7 +57,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk push LOCAL REMOTE`, `desk pull REMOTE LOCAL` | Copy files (scp) |
 | `desk diff [--all]` | Files changed in the guest since the image it started from: added, changed, removed (~30 s) |
 | `desk report [--diff]` | Write the evidence report now (see below) |
-| `desk ls`, `desk down [ID] [--all] [--keep] [--diff] [--no-report]`, `desk gc` | List, destroy (writing the report first), clean up idle runs |
+| `desk ls`, `desk down [ID] [--all] [--keep] [--diff] [--no-report]`, `desk gc` | List (with who holds each run), destroy (writing the report first), clean up idle runs |
 | `desk view` | Tell the user how to watch the run live (VNC through an SSH tunnel) |
 | `desk record start [--fps N]`, `desk record stop`, `desk up --record` | Record the screen as a WebM video, kept with the report |
 
@@ -313,8 +313,11 @@ instead, where Cockpit is not installed, as on a fresh Workstation: a plugin tha
   animations and screen lock off, session starts on the desktop rather than the overview.
 - Guest clocks are synced on restore; network goes through user-mode networking (outbound
   works, inbound only SSH).
-- Several runs can exist at once; pass `-r ID` or set `DESK_RUN`. Only one run per image is
-  restored from the warm state (~2 s); further ones boot cold (~20 s). Each takes ~4 GB RAM;
+- Several runs can exist at once; pass `-r ID` or set `DESK_RUN`. `desk ls` shows who holds each:
+  the scenario, `desk up --label TEXT` (or `$DESK_LABEL`), or by default the coding agent and its
+  directory ("claude @ cockpit-example", "(agent gone)" once it has exited). Leave other agents'
+  runs alone. Only one run per image is restored from the warm state (~2 s); further ones boot
+  cold (~20 s). Each takes ~4 GB RAM;
   `desk up` refuses when the host is short of memory. Runs idle for 2 h are destroyed by the
   next `desk up` or `desk gc` (`DESK_TTL` seconds to change).
 - The image is a clean Workstation install: anything the product needs beyond its declared
