@@ -12,7 +12,7 @@ from pathlib import Path
 
 import libvirt
 
-from . import guest
+from . import disks, guest
 from .config import DeskError
 from .virt import conn, reflink_copy
 
@@ -52,6 +52,9 @@ def save(run, name: str, force: bool = False) -> float:
         dom.save(str(d / "memory.save"))
         reflink_copy(run.dir / "disk.qcow2", d / "disk.qcow2")
         reflink_copy(run.dir / "VARS.qcow2", d / "VARS.qcow2")
+        for f in disks.directory(run).glob("*.qcow2"):
+            (d / "disks").mkdir(exist_ok=True)
+            reflink_copy(f, d / "disks" / f.name)
     except BaseException:
         if run.live_domain() is None and (d / "memory.save").exists():
             _resume(run, d / "memory.save")
@@ -77,6 +80,13 @@ def restore(run, name: str) -> float:
         reflink_copy(d / f, tmp)
         tmp.chmod(0o644)
         os.replace(tmp, run.dir / f)
+    # Extra disks as they were then: the saved guest has exactly those plugged in.
+    shutil.rmtree(disks.directory(run), ignore_errors=True)
+    if (d / "disks").exists():
+        disks.directory(run).mkdir()
+        for f in (d / "disks").glob("*.qcow2"):
+            reflink_copy(f, disks.directory(run) / f.name)
+            (disks.directory(run) / f.name).chmod(0o644)
     _resume(run, d / "memory.save")
     run.log_event(snapshot="restore", name=name)
     return time.monotonic() - t0
@@ -86,7 +96,7 @@ def listing(run) -> list[dict]:
     out = []
     for d in sorted(_dir(run).glob("*/meta.json")) if _dir(run).exists() else []:
         meta = json.loads(d.read_text())
-        size = sum(f.stat().st_blocks * 512 for f in d.parent.iterdir())
+        size = sum(f.stat().st_blocks * 512 for f in d.parent.rglob("*") if f.is_file())
         out.append({"name": d.parent.name, "created": meta["created"], "bytes": size})
     return out
 

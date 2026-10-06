@@ -104,6 +104,12 @@ def cmd_up(args) -> None:
 
         monitors.apply(run, spec, resolution=resolution, scale=args.scale)
     run.log_event(argv=sys.argv[1:])
+    if args.disk:
+        from . import disks
+
+        for item in args.disk:
+            size, _, name = item.partition(":")
+            disks.add(run, size, name or None)
     if args.record:
         record.start(run)
     print(f"run {run.id} up (image {run.image}, ssh port {run.ssh_port})" + (", recording" if args.record else ""))
@@ -514,6 +520,23 @@ def cmd_win(args) -> None:
     _after_action(run, run.dom(), args)
 
 
+def cmd_disk(args) -> None:
+    from . import disks
+
+    run = runs.resolve(args.run)
+    if args.disk_cmd == "add":
+        name = disks.add(run, args.size, args.name)
+        print(f"disk {name} plugged in ({args.size}; Linux: /dev/disk/by-id/virtio-{name}, "
+              f"Windows: serial number {name}, not initialized)")
+    elif args.disk_cmd == "rm":
+        disks.remove(run, args.name)
+        print(f"disk {args.name} unplugged and deleted")
+    else:
+        for d in disks.listing(run):
+            print(f"{d['name']}\t{d['size'] / 2**30:.1f} GiB\t{d['used'] / 2**20:.0f} MiB used\t"
+                  + ("plugged in" if d["attached"] else "not plugged in"))
+
+
 def cmd_maintain(args) -> None:
     from . import maintain
 
@@ -576,6 +599,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--displays", type=int, default=1, help="monitors (boots cold when not 1)")
     p.add_argument("--resolution", help="mode the monitors start in, e.g. 1920x1080 (boots cold)")
     p.add_argument("--scale", type=int, help="scaling in percent, e.g. 150 (Windows: signs in again)")
+    p.add_argument("--disk", action="append", metavar="SIZE[:NAME]", help="extra empty disk, e.g. 10G:backup "
+                   "(repeatable; desk disk)")
     p.set_defaults(func=cmd_up)
 
     p = sub.add_parser("down", help="destroy a run and delete its files")
@@ -748,6 +773,16 @@ def build_parser() -> argparse.ArgumentParser:
     wp.add_argument("--autohide", choices=["on", "off"])
     _action_opts(wp)
     p.set_defaults(func=cmd_win)
+
+    p = sub.add_parser("disk", help="extra empty disks plugged into the running guest")
+    dsub = p.add_subparsers(dest="disk_cmd", required=True)
+    dp = dsub.add_parser("add", help="create an empty disk and plug it in")
+    dp.add_argument("size", help="e.g. 10G (thin: takes host space only as the guest writes)")
+    dp.add_argument("--name", help="a-z, 0-9, - (default disk1, disk2, ...): the guest sees it as the serial")
+    dp = dsub.add_parser("rm", help="unplug a disk (the guest must release it) and delete it")
+    dp.add_argument("name")
+    dsub.add_parser("ls", help="the run's extra disks")
+    p.set_defaults(func=cmd_disk)
 
     p = sub.add_parser("snapshot", help="save the running guest and go back to it later")
     p.add_argument("action", choices=["save", "restore", "list", "delete"])

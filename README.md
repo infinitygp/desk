@@ -111,6 +111,9 @@ guest's memory is saved (the VM stops for a few seconds), disk and firmware vari
 copies, and the run carries on restored from the saved memory. Restoring destroys the domain,
 puts the copies back and restores the memory. Snapshots live in `runs/<id>/snapshots/`.
 
+`desk disk add|rm|ls` hot-plugs empty qcow2 disks (`runs/<id>/disks/NAME.qcow2`) as virtio-blk
+into the spare PCIe root ports, serial = name; snapshots copy them along.
+
 ## Scenarios
 
 `desk scenario run FILE` runs a repeatable end-to-end test described in TOML (format in

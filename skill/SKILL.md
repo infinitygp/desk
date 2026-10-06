@@ -190,6 +190,15 @@ before each attempt, instead of a new run and the setup all over again. Restorin
 memory, disk and screen exactly (programs opened later are gone) and syncs the clock. Each
 snapshot keeps the guest's memory on disk (2.5-4 GB) until `desk snapshot delete` or `desk down`.
 
+## Extra disks
+
+For backup targets, a second data disk or a disk to fill up: `desk disk add 10G --name backup`
+(or `desk up IMAGE --disk 10G:backup`) plugs an empty, thin disk into the running guest, as a USB
+disk would be. Linux sees it as `/dev/disk/by-id/virtio-backup`; on Windows it is the disk with
+serial number `backup`, online but not initialized (`Initialize-Disk`, `New-Partition`,
+`Format-Volume`). `desk disk rm NAME` unplugs and deletes it; the guest is not asked, so unmount
+first unless pulling a disk out is what you test. `desk disk ls` lists them; snapshots include them.
+
 ## Scenarios: repeatable tests
 
 When a project has `test/desk/*.toml` (or the user wants a check that can be repeated), run it
