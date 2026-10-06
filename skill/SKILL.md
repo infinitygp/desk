@@ -72,6 +72,9 @@ guest shell; `--root` and `--gui` apply to the whole snippet.
   check `pgrep` in the guest before concluding it failed.
 - Refs (`@e7`) come from the latest `desk a11y` or `desk find`; take a new one after the UI changes.
   `desk click @eN` re-reads the element's position, so moved elements are still hit.
+- `click --name TEXT` (and scenario `click`) takes the element whose whole name is TEXT, ignoring
+  case; only if there is none does a part of a name do, and then only when it is part of one name:
+  "Save" next to "Save as..." clicks "Save", "Sav" is an error listing both.
 - `desk a11y` lists what is visible and ends with "N more outside the visible area" when a page or
   list is scrolled; `desk find` searches those too. Long forms and dialogs at 1280x800 often hide
   their last fields and buttons that way.

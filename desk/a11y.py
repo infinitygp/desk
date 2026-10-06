@@ -156,7 +156,7 @@ def find(run, query: str, role: str | None = None, exact: bool = False,
 DIALOG_ROLES = {"dialog", "alert", "file chooser"}
 
 
-def best_match(snap: dict, hits: list[dict]) -> dict:
+def _ranker(snap: dict):
     dialogs = [(n["pid"], n["path"]) for n in snap["nodes"] if n["role"] in DIALOG_ROLES]
 
     def in_dialog(n: dict) -> bool:
@@ -168,7 +168,29 @@ def best_match(snap: dict, hits: list[dict]) -> dict:
         return (bool(n.get("offscreen")), not in_dialog(n),
                 n["role"] in ("label", "heading", "paragraph", "static", "section"))
 
-    return min(hits, key=rank)
+    return rank
+
+
+def best_match(snap: dict, hits: list[dict]) -> dict:
+    return min(hits, key=_ranker(snap))
+
+
+def pick(snap: dict, hits: list[dict], query: str) -> dict:
+    """The element a click by name means: the whole name over a part of one, and no guessing
+    between different names that merely contain the query ("Save" vs "Save as...")."""
+    q = query.casefold()
+    whole = [n for n in hits if q in {(n.get(k) or "").casefold() for k in ("name", "value", "text")}]
+    if whole:
+        return best_match(snap, whole)
+    rank = _ranker(snap)
+    best = min(rank(n) for n in hits)
+    top = [n for n in hits if rank(n) == best]
+    names = sorted({n["name"] or n.get("text") or n.get("value") or "" for n in top})
+    if len(names) > 1:
+        shown = ", ".join(f"{n!r}" for n in names[:8]) + (" ..." if len(names) > 8 else "")
+        raise DeskError(f"{query!r} is part of several names: {shown}; give the whole name "
+                        "(or --role to narrow it down)")
+    return top[0] if len(top) == 1 else best_match(snap, top)
 
 
 def locate_name(run, query: str, role: str | None = None, exact: bool = False) -> tuple[int, int]:
@@ -179,7 +201,7 @@ def locate_name(run, query: str, role: str | None = None, exact: bool = False) -
         hits = _matches(snap, query, role, exact)
     if not hits:
         raise DeskError(f"nothing named {query!r} on screen")
-    best = best_match(snap, hits)
+    best = pick(snap, hits, query)
     return _visible_point(run, {k: best[k] for k in ("pid", "path", "role", "name")})
 
 

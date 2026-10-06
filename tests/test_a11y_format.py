@@ -78,5 +78,39 @@ class BestMatch(unittest.TestCase):
         self.assertIs(best_match({"nodes": [hidden, shown]}, [hidden, shown]), shown)
 
 
+class Pick(unittest.TestCase):
+    def test_whole_name_wins(self):
+        from desk.a11y import pick
+
+        save = {"pid": 1, "path": [0, 1], "role": "button", "name": "Save"}
+        save_as = {"pid": 1, "path": [0, 2], "role": "button", "name": "Save as..."}
+        snap = {"nodes": [save_as, save]}
+        self.assertIs(pick(snap, [save_as, save], "save"), save)
+
+    def test_different_names_containing_the_query_are_not_guessed(self):
+        from desk.a11y import pick
+        from desk.config import DeskError
+
+        a = {"pid": 1, "path": [0, 1], "role": "button", "name": "Save draft"}
+        b = {"pid": 1, "path": [0, 2], "role": "button", "name": "Save as..."}
+        with self.assertRaises(DeskError) as e:
+            pick({"nodes": [a, b]}, [a, b], "Save")
+        self.assertIn("'Save as...'", str(e.exception))
+
+    def test_one_name_containing_the_query_is_enough(self):
+        from desk.a11y import pick
+
+        link = {"pid": 1, "path": [0, 1], "role": "link", "name": "Backups"}
+        text = {"pid": 1, "path": [0, 2], "role": "heading", "name": "Backups", "offscreen": True}
+        self.assertIs(pick({"nodes": [link, text]}, [link, text], "Backup"), link)
+
+    def test_only_the_best_ranked_count(self):
+        from desk.a11y import pick
+
+        shown = {"pid": 1, "path": [0, 1], "role": "button", "name": "Delete task"}
+        hidden = {"pid": 1, "path": [0, 2], "role": "button", "name": "Delete all", "offscreen": True}
+        self.assertIs(pick({"nodes": [shown, hidden]}, [shown, hidden], "Delete"), shown)
+
+
 if __name__ == "__main__":
     unittest.main()
