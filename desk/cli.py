@@ -563,6 +563,19 @@ def cmd_browser(args) -> None:
     print("\n".join(lines) if lines else "(nothing in the web console since the run started)")
 
 
+def cmd_prepare(args) -> None:
+    from . import steps
+
+    run = runs.resolve(args.run)
+    spec = runs.spec_for(run)
+    if not spec.prepare:
+        raise DeskError(f"{spec.name} has no prepare step")
+    steps.run_prepare(spec, run)
+    run.log_event(prepare=spec.prepare)
+    print("done")
+    _after_action(run, run.dom(), args)
+
+
 def cmd_maintain(args) -> None:
     from . import maintain
 
@@ -816,6 +829,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("value", nargs="?", help="+3d, -2h30m (s m h d w), '2026-12-24 23:59' (guest local time), "
                    "or reset (back to the host's time, time sync on)")
     p.set_defaults(func=cmd_clock)
+
+    p = sub.add_parser("prepare", help="redo the image's preparation where it is missing (fedora-44-cockpit: "
+                       "Firefox logged in to Cockpit with administrative access), e.g. after a reboot")
+    _action_opts(p)
+    p.set_defaults(func=cmd_prepare)
 
     p = sub.add_parser("browser", help="Firefox in the guest: its web console")
     bsub = p.add_subparsers(dest="browser_cmd", required=True)

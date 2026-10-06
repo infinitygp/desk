@@ -20,7 +20,8 @@ cat > /etc/firefox/policies/policies.json <<'JSON'
     "DontCheckDefaultBrowser": true,
     "DisableTelemetry": true,
     "OfferToSaveLogins": false,
-    "UserMessaging": {"SkipOnboarding": true, "MoreFromMozilla": false, "FeatureRecommendations": false}
+    "UserMessaging": {"SkipOnboarding": true, "MoreFromMozilla": false, "FeatureRecommendations": false},
+    "Preferences": {"browser.sessionstore.resume_from_crash": {"Value": false, "Status": "default"}}
   }
 }
 JSON

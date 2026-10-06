@@ -15,7 +15,7 @@ from .steps import Steps
 
 # Exactly one per step; the value is the action's argument.
 ACTIONS = {"root", "exec", "gui", "focus", "click", "type", "key", "expect", "expect_absent", "shot",
-           "reboot", "wait", "clock", "disk_add", "disk_rm", "console_errors"}
+           "reboot", "wait", "clock", "disk_add", "disk_rm", "console_errors", "prepare"}
 OPTIONS = {"role", "exact", "timeout", "output", "rc", "name", "soft", "env"}
 # Where build artifacts land in the guest.
 GUEST_IN = {"linux": "/tmp/desk", "windows": "C:/Users/tester/desk"}
@@ -163,6 +163,11 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
         if run.clock_offset:
             clock.apply(run)
         return f"back in {took:.0f}s"
+    elif action == "prepare":
+        from .steps import run_prepare
+
+        run_prepare(spec, run)
+        return "prepared"
     elif action == "disk_add":
         size, _, name = value.partition(":")
         return f"disk {disks.add(run, size, name or None)} plugged in"

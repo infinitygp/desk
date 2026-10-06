@@ -62,6 +62,27 @@ class Steps:
                 raise DeskError(f"{role or 'element'} {name!r} did not appear within {timeout:.0f}s")
             time.sleep(1)
 
+    def first(self, *candidates: tuple[str, str | None], timeout: float = 60) -> int:
+        """Until one of these (name, role) elements is in the focused window; which one."""
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                snap = a11y.snapshot(self.target, limit=2000, save=False)
+            except DeskError:
+                snap = None  # the window is still coming up
+            for i, (name, role) in enumerate(candidates):
+                if snap and a11y._matches(snap, name, role, True):
+                    return i
+            if time.monotonic() > deadline:
+                raise DeskError(f"none of {[c[0] for c in candidates]} appeared within {timeout:.0f}s")
+            time.sleep(1)
+
+    def running(self, program: str) -> bool:
+        """Whether the desktop user runs a process of this name (Linux guests)."""
+        r = guest.ssh_run(self.target.ssh_port, self.target.user, f"pgrep -x -u \"$(id -u)\" {program}",
+                          capture=True, timeout=30)
+        return r.returncode == 0
+
     def click(self, name: str, role: str | None = None, exact: bool = True) -> None:
         self.wait_for(name, role, exact)
         x, y = a11y.locate_name(self.target, name, role, exact)

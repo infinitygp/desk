@@ -286,8 +286,8 @@ desk reboot --command 'dnf offline reboot -y' --timeout 3600   # boots into the 
 
 In a scenario: `root = "dnf system-upgrade download -y --releasever=45"` (with `timeout = 1800`),
 then `reboot = "dnf offline reboot -y"` with `timeout = 3600`. After the reboot only the desktop
-session is back: programs open before it (Firefox with Cockpit) have to be started again, and
-Firefox adds an `about:sessionrestore` tab for the session the reboot cut off. The upgrade itself
+session is back: programs open before it have to be started again; on `fedora-44-cockpit` a
+`prepare = true` step (or `desk prepare`) opens Firefox logged in to Cockpit again. The upgrade itself
 takes about 10 minutes (download ~2 min, offline upgrade and boot ~7 min).
 `fedora-45-gnome` is the next release itself (a beta until it is out).
 
@@ -296,7 +296,9 @@ takes about 10 minutes (download ~2 min, offline upgrade and boot ~7 min).
 Use `fedora-44-cockpit` to test what the plugin does: Firefox shows Cockpit at
 `https://localhost:9090`, logged in with administrative access. Install the plugin's package with
 `desk exec --root -- dnf install -y /tmp/foo.rpm`, then press F5 in Firefox: the new entry appears
-in Cockpit's menu without logging in again. Test packaging and dependencies on `fedora-44-gnome`
+in Cockpit's menu without logging in again. After `desk reboot` (or when Cockpit asks to log in
+again) run `desk prepare`, in a scenario `prepare = true`: it opens Firefox at Cockpit, logs in and
+turns on administrative access, whichever of that is missing. Test packaging and dependencies on `fedora-44-gnome`
 instead, where Cockpit is not installed, as on a fresh Workstation: a plugin that depends only on
 `cockpit-bridge` installs there without the web console a user needs to reach it.
 
