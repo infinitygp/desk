@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import guest
+from . import browser, guest
 from .config import HOME, DeskError, load_image
 
 REPORTS = HOME / "reports"
@@ -71,7 +71,7 @@ if command -v dnf >/dev/null; then
     dnf history list </dev/null 2>/dev/null | awk -v s="$(date -u -d "@$S" '+%F %T')" \
         'NR > 1 && match($0, /[0-9-]{10} [0-9:]{8}/) && substr($0, RSTART, RLENGTH) >= s'
 fi
-"""
+""" + "section browser\n" + browser.JOURNAL
 
 
 # Windows: the same sections from the event log. Passed as one PowerShell command line.
@@ -290,6 +290,12 @@ def collect(run, diff: bool = False) -> Path:
         md.append(f"- crashes (coredumps): {_count(cores)}" + (f"\n\n```\n{cores}\n```\n" if cores else ""))
         md.append(f"- warnings and errors in the system log: {_count(problems.get('journal', ''), r'^[0-9]{4}-')}"
                   + (" (see journal.txt)" if problems.get("journal") else ""))
+        web = browser.parse(problems.get("browser", ""))
+        if web:
+            (out / "browser-console.txt").write_text("\n".join(web) + "\n")
+            errs = browser.errors(web)
+            md.append(f"- browser console (Firefox): {len(errs)} errors, {len(web)} messages (see browser-console.txt)"
+                      + ("\n\n```\n" + "\n".join(errs[:20]) + "\n```\n" if errs else ""))
         pkgs = problems.get("packages", "")
         md.append("- package changes:" + (f"\n\n```\n{pkgs}\n```\n" if pkgs else " none"))
     if "error" in problems or "diff error" in problems:

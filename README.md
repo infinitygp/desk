@@ -113,6 +113,9 @@ puts the copies back and restores the memory. Snapshots live in `runs/<id>/snaps
 
 `desk disk add|rm|ls` hot-plugs empty qcow2 disks (`runs/<id>/disks/NAME.qcow2`) as virtio-blk
 into the spare PCIe root ports, serial = name; snapshots copy them along.
+Firefox in the Linux images writes every page's console and uncaught errors to its output, so to
+the journal (`images/_shared/gnome/desk-firefox.js`); `desk browser console` and the report read
+them from there. The Remote Agent (WebDriver BiDi) is not used, as it marks the browser window.
 `desk clock` (`desk/clock.py`) sets the guest's time through qemu-guest-agent with the guest's
 time sync off and keeps the offset in `run.json`, reapplied after snapshot restores and reboots.
 

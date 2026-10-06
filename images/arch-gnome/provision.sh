@@ -7,6 +7,9 @@ FILES=/tmp/desk-provision/files
 install -d /usr/share/gnome-shell/extensions/desk-helper@desk.local
 install -m 0644 "$FILES"/desk-helper@desk.local/* /usr/share/gnome-shell/extensions/desk-helper@desk.local/
 
+# Pages' web console into the journal (desk browser console); also for a Firefox installed later.
+install -D -m 0644 "$FILES"/desk-firefox.js /usr/lib/firefox/browser/defaults/preferences/desk-firefox.js
+
 # Stable screen for screenshots: no lock, blanking, animations or blinking cursor.
 mkdir -p /etc/dconf/db/local.d /etc/dconf/profile
 [ -f /etc/dconf/profile/user ] || printf 'user-db:user\nsystem-db:local\n' > /etc/dconf/profile/user

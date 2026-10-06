@@ -80,6 +80,10 @@ guest shell; `--root` and `--gui` apply to the whole snippet.
   element, check with a screenshot and click by pixels.
 - Browsers build their accessibility tree lazily: if a page's content is missing from the first
   `desk a11y`, run it again.
+- Web pages' console: `desk browser console` (`--errors`: console.error, uncaught exceptions and
+  rejected promises only) prints what every page in Firefox logged since the run started, iframes
+  included (Cockpit plugins run in one). Firefox's own messages are left out (`--all` shows them).
+  Reading only; to evaluate JavaScript open the devtools (`desk key ctrl+shift+k`) and type.
 - `desk type` only knows ASCII and Polish letters; for anything else use `desk set-text`.
 - In a GTK file chooser, `ctrl+l`, type the path, then click "Open": Enter may only accept the
   path completion.
@@ -93,7 +97,8 @@ guest shell; `--root` and `--gui` apply to the whole snippet.
 ## Evidence report
 
 `desk down` first writes `/var/lib/vmlab/reports/<run>/report.md` and prints its path: failed
-units, SELinux denials, crashes, journal warnings and package changes since the run started, plus a
+units, SELinux denials, crashes, journal warnings, package changes and Firefox console errors since
+the run started, plus a
 timeline of every desk command with its exit code and the screenshots taken. `desk down --diff`
 adds the files the run changed. Point the user to the report and summarise what it found; read
 `journal.txt` / `avc.txt` next to it before blaming the product for a warning.

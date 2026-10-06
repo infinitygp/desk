@@ -7,6 +7,9 @@ FILES=/tmp/desk-provision/files
 install -d /usr/share/gnome-shell/extensions/desk-helper@desk.local
 install -m 0644 "$FILES"/desk-helper@desk.local/* /usr/share/gnome-shell/extensions/desk-helper@desk.local/
 
+# Pages' web console into the journal (desk browser console); also for a Firefox installed later.
+install -D -m 0644 "$FILES"/desk-firefox.js /usr/lib64/firefox/browser/defaults/preferences/desk-firefox.js
+
 # A blinking text cursor would keep the screen from ever settling.
 cat > /etc/dconf/db/local.d/01-desk-provision <<'CONF'
 [org/gnome/desktop/interface]

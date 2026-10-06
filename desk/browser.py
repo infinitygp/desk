@@ -1,0 +1,43 @@
+"""Firefox's web console, as the images send it to the journal (images/_shared/gnome/desk-firefox.js):
+console.* calls, uncaught exceptions and rejected promises of every page."""
+
+import re
+
+from . import guest
+from .config import DeskError, load_image
+
+MESSAGE = re.compile(r"(console\.[a-z]+|JavaScript (?:error|warning)): .*")
+# Firefox's own components log with their name in front, unquoted ("console.warn: RSLoader: ...");
+# a page's console.log("text") is printed quoted, objects and numbers as values.
+FIREFOX_OWN = re.compile(r"console\.[a-z]+: [A-Za-z][\w.-]*: ")
+ERROR = re.compile(r"(console\.(error|assert)|JavaScript error): ")
+# Bash with the start time in $S, also part of the report's guest script; as root, journalctl
+# reads the desktop user's journal too.
+JOURNAL = r"""journalctl --since "@$S" --no-pager -o short-iso </dev/null 2>/dev/null \
+    | grep -E ': (console\.[a-z]+|JavaScript (error|warning)): ' | tail -n 2000
+"""
+
+
+def parse(text: str, everything: bool = False) -> list[str]:
+    """`TIME console.error: ...` lines from journalctl short-iso output."""
+    out = []
+    for line in text.splitlines():
+        m = MESSAGE.search(line)
+        if not m or (not everything and FIREFOX_OWN.match(m.group(0))):
+            continue
+        stamp = line.split(" ", 1)[0]
+        out.append(f"{stamp[11:19]} {m.group(0)}")
+    return out
+
+
+def errors(lines: list[str]) -> list[str]:
+    return [ln for ln in lines if ERROR.match(ln.split(" ", 1)[1])]
+
+
+def console(run, everything: bool = False) -> list[str]:
+    spec = load_image(run.image)
+    if spec.family == "windows":
+        raise DeskError("desk browser console reads Firefox on Linux guests")
+    r = guest.ssh_run(run.ssh_port, spec.root_user, f"S={int(run.since)} bash -s", input=JOURNAL.encode(),
+                      capture=True, timeout=60)
+    return parse(r.stdout.decode(errors="replace"), everything)

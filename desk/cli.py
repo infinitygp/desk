@@ -552,6 +552,16 @@ def cmd_clock(args) -> None:
     print(clock.describe(run))
 
 
+def cmd_browser(args) -> None:
+    from . import browser
+
+    run = runs.resolve(args.run)
+    lines = browser.console(run, everything=args.all)
+    if args.errors:
+        lines = browser.errors(lines)
+    print("\n".join(lines) if lines else "(nothing in the web console since the run started)")
+
+
 def cmd_maintain(args) -> None:
     from . import maintain
 
@@ -803,6 +813,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("value", nargs="?", help="+3d, -2h30m (s m h d w), '2026-12-24 23:59' (guest local time), "
                    "or reset (back to the host's time, time sync on)")
     p.set_defaults(func=cmd_clock)
+
+    p = sub.add_parser("browser", help="Firefox in the guest: its web console")
+    bsub = p.add_subparsers(dest="browser_cmd", required=True)
+    bp = bsub.add_parser("console", help="console messages, uncaught exceptions and rejected promises of every "
+                         "page since the run started")
+    bp.add_argument("--errors", action="store_true", help="only errors (console.error, uncaught exceptions)")
+    bp.add_argument("--all", action="store_true", help="also Firefox's own components")
+    p.set_defaults(func=cmd_browser)
 
     p = sub.add_parser("snapshot", help="save the running guest and go back to it later")
     p.add_argument("action", choices=["save", "restore", "list", "delete"])
