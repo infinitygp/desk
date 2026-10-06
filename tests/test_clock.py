@@ -22,3 +22,12 @@ class Parse(unittest.TestCase):
         for bad in ("3d", "+3x", "+", "tomorrow", ""):
             with self.subTest(bad=bad), self.assertRaises(DeskError):
                 clock.parse(bad, 0.0)
+
+
+class Duration(unittest.TestCase):
+    def test_steps(self):
+        self.assertEqual(clock.duration("1d"), 86400)
+        self.assertEqual(clock.duration("1h30m"), 5400)
+        for bad in ("+1d", "1x", "", "d"):
+            with self.subTest(bad=bad), self.assertRaises(DeskError):
+                clock.duration(bad)

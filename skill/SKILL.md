@@ -214,7 +214,10 @@ units s m h d w) or `desk clock '2026-12-24 23:59'` (guest local time, Europe/Wa
 guest's clock, which keeps running from there; `desk clock` shows it. The guest's own time sync is
 switched off (timedatectl / w32time) and desk keeps the offset across snapshot restores and
 `desk reboot`. `desk clock reset` goes back to the host's time and turns time sync on again.
-Timers that were due in the skipped time fire right after the jump, as after a suspend.
+Timers that were due in the skipped time fire right after the jump, as after a suspend, but each
+only once however many of its times were skipped. To let a daily job run for every day, move in
+steps: `desk clock +3d --step 1d` jumps a day at a time, waits each time until what the timers
+started has finished, and prints which units ran (in a scenario: `clock = "+3d"`, `step = "1d"`).
 
 ## Scenarios: repeatable tests
 

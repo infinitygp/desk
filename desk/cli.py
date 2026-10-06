@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 from . import a11y, display, evidence, guest, images, record, runs
@@ -546,8 +547,14 @@ def cmd_clock(args) -> None:
     from . import clock
 
     run = runs.resolve(args.run)
+    if args.step and (not args.value or args.value == "reset"):
+        raise DeskError("--step goes with a time to move to, e.g. desk clock +3d --step 1d")
     if args.value == "reset":
         clock.reset(run)
+    elif args.step:
+        for t, started in clock.advance(run, args.value, args.step, timeout=args.timeout):
+            stamp = datetime.fromtimestamp(t, clock.GUEST_TZ).strftime("%Y-%m-%d %H:%M")
+            print(f"{stamp}: " + (", ".join(started) if started else "nothing started"), flush=True)
     elif args.value:
         clock.set_time(run, args.value)
     print(clock.describe(run))
@@ -828,6 +835,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("clock", help="show or move the guest's clock (schedules, expiry, retention)")
     p.add_argument("value", nargs="?", help="+3d, -2h30m (s m h d w), '2026-12-24 23:59' (guest local time), "
                    "or reset (back to the host's time, time sync on)")
+    p.add_argument("--step", help="get there in steps of this size (1d, 6h), each once what it set off has "
+                   "finished, so timers run for every time they were due")
+    p.add_argument("--timeout", type=float, default=600, help="seconds to wait for each step to finish")
     p.set_defaults(func=cmd_clock)
 
     p = sub.add_parser("prepare", help="redo the image's preparation where it is missing (fedora-44-cockpit: "
