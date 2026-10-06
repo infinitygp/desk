@@ -62,3 +62,33 @@ class WindowsNoise(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Report(unittest.TestCase):
+    def test_clock_steps_are_not_scenario_steps(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+
+        from desk import evidence
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            run_dir.mkdir()
+            events = [
+                {"t": 100.0, "scenario": "/x/retention.toml", "steps": 2},
+                {"t": 101.0, "step": 1, "action": "clock +3d", "ok": True, "detail": "", "seconds": 9.0},
+                # Written by desk clock --step before its step size had a key of its own.
+                {"t": 101.0, "clock": "+3d", "step": "1d", "offset": 259200},
+                {"t": 102.0, "clock": "+1d", "clock_step": "6h", "offset": 345600},
+                {"t": 103.0, "step": 2, "action": "expect done", "ok": True, "detail": "", "seconds": 1.0},
+            ]
+            (run_dir / "log.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
+            run = mock.Mock(id="r1", dir=run_dir, image="fedora-44-gnome", created=99.0, ready=0.0)
+            run.live_domain.return_value = None
+            with mock.patch.object(evidence, "REPORTS", Path(tmp) / "reports"):
+                md = (evidence.collect(run) / "report.md").read_text()
+        self.assertIn("2 of 2 steps passed", md)
+        self.assertIn("clock +3d in steps of 1d", md)
+        self.assertIn("clock +1d in steps of 6h", md)

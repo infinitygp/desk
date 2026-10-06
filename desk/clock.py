@@ -155,7 +155,7 @@ def advance(run, value: str, step: str, timeout: float = 600):
         _settle(run, spec, before, timeout)
         started = [] if spec.family == "windows" else sorted(_lines(run, spec, LINUX_STARTED, cursor))
         yield t, started
-    run.log_event(clock=value, step=step, offset=round(run.clock_offset))
+    run.log_event(clock=value, clock_step=step, offset=round(run.clock_offset))
 
 
 def reset(run) -> None:

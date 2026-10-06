@@ -4,6 +4,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -265,7 +266,8 @@ def collect(run, diff: bool = False) -> Path:
                   "count from then" + (", the list of changed files includes it" if changes is not None else ""))
     md.append("")
     events = _log(run)
-    stepped = [ev for ev in events if "step" in ev]
+    # Scenario steps; `desk clock --step` logged its step size as "step" before it had a name of its own.
+    stepped = [ev for ev in events if "step" in ev and "ok" in ev]
     scenario = next((ev for ev in events if "scenario" in ev), None)
     if scenario:
         failed = [ev for ev in stepped if not ev["ok"]]
@@ -315,10 +317,13 @@ def collect(run, diff: bool = False) -> Path:
         elif "rc" in ev:
             if ev["rc"] != 0 and md and md[-1].startswith("- "):
                 md[-1] += f" → exit {ev['rc']}"
-        elif "step" in ev:
+        elif "step" in ev and "ok" in ev:
             mark = "ok" if ev["ok"] else "FAILED"
             md.append(f"- {stamp} step {ev['step']} {mark}: {ev['action']} ({ev['seconds']} s)"
                       + (f" → {ev['detail']}" if ev["detail"] else ""))
+        elif "clock" in ev:
+            step = ev.get("clock_step") or (ev.get("step") if "ok" not in ev else None)
+            md.append(f"- {stamp} clock {ev['clock']}" + (f" in steps of {step}" if step else ""))
         elif "snapshot" in ev:
             md.append(f"- {stamp} snapshot {ev['snapshot']}d: {ev['name']}")
         elif ev.get("record") == "start":
@@ -338,7 +343,13 @@ def finish(run, keep: bool = False, diff: bool = False, report: bool = True) -> 
     from . import record, runs
 
     record.stop(run)
-    out = collect(run, diff=diff) if report and run.live_domain() is not None else None
+    out = None
+    if report and run.live_domain() is not None:
+        # A report that cannot be written must not keep the VM running.
+        try:
+            out = collect(run, diff=diff)
+        except Exception as e:  # noqa: BLE001
+            print(f"[desk] warning: no report ({type(e).__name__}: {e})", file=sys.stderr)
     # Videos outlive the run in its report directory, report or not.
     videos = record.save_videos(run, out or REPORTS / run.id)
     runs.down(run, keep=keep)
