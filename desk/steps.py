@@ -62,7 +62,7 @@ class Steps:
                 raise DeskError(f"{role or 'element'} {name!r} did not appear within {timeout:.0f}s")
             time.sleep(1)
 
-    def first(self, *candidates: tuple[str, str | None], timeout: float = 60) -> int:
+    def first(self, *candidates: tuple[str, str | None], timeout: float = 60, exact: bool = True) -> int:
         """Until one of these (name, role) elements is in the focused window; which one."""
         deadline = time.monotonic() + timeout
         while True:
@@ -71,7 +71,7 @@ class Steps:
             except DeskError:
                 snap = None  # the window is still coming up
             for i, (name, role) in enumerate(candidates):
-                if snap and a11y._matches(snap, name, role, True):
+                if snap and a11y._matches(snap, name, role, exact):
                     return i
             if time.monotonic() > deadline:
                 raise DeskError(f"none of {[c[0] for c in candidates]} appeared within {timeout:.0f}s")
@@ -105,10 +105,14 @@ class Steps:
         display.wait_stable(self.target.dom(), timeout=timeout)
 
 
-def run_prepare(spec: ImageSpec, target) -> None:
+def run_prepare(spec: ImageSpec, target, hook: str = "prepare") -> None:
     """The image's `prepare` script: a Python file whose prepare(steps) runs on the host once the
-    provisioned session is up, before the warm state is saved (and after cold boots)."""
+    provisioned session is up, before the warm state is saved (and after cold boots). Other
+    functions in it are further steps a test can call by name (desk prepare NAME)."""
     if not spec.prepare:
         return
     script = runpy.run_path(str(spec.dir / spec.prepare))
-    script["prepare"](Steps(spec, target))
+    hooks = {k: v for k, v in script.items() if callable(v) and not k.startswith("_") and k.islower()}
+    if hook not in hooks:
+        raise DeskError(f"{spec.name} has no prepare step {hook!r} (has: {', '.join(sorted(hooks))})")
+    hooks[hook](Steps(spec, target))

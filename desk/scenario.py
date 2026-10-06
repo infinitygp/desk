@@ -166,8 +166,9 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
     elif action == "prepare":
         from .steps import run_prepare
 
-        run_prepare(spec, run)
-        return "prepared"
+        hook = "prepare" if value is True else value
+        run_prepare(spec, run, hook)
+        return f"{hook} done"
     elif action == "disk_add":
         size, _, name = value.partition(":")
         return f"disk {disks.add(run, size, name or None)} plugged in"

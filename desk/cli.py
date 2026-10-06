@@ -577,8 +577,8 @@ def cmd_prepare(args) -> None:
     spec = runs.spec_for(run)
     if not spec.prepare:
         raise DeskError(f"{spec.name} has no prepare step")
-    steps.run_prepare(spec, run)
-    run.log_event(prepare=spec.prepare)
+    steps.run_prepare(spec, run, args.hook)
+    run.log_event(prepare=args.hook)
     print("done")
     _after_action(run, run.dom(), args)
 
@@ -854,6 +854,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("prepare", help="redo the image's preparation where it is missing (fedora-44-cockpit: "
                        "Firefox logged in to Cockpit with administrative access), e.g. after a reboot")
+    p.add_argument("hook", nargs="?", default="prepare",
+                   help="another step of the image's prepare script (fedora-44-cockpit: admin)")
     _action_opts(p)
     p.set_defaults(func=cmd_prepare)
 
