@@ -49,7 +49,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk scenario run FILE [--keep]`, `desk scenario check FILE` | Run a repeatable test from a TOML file (see below) |
 | `desk wait [--change] [--timeout S]` | Until the screen is still; `--change` first waits for it to change at all |
 | `desk reboot [--shot]` | Reboot and return when the new session is ready; reports apps that blocked shutdown |
-| `desk exec [--root] -- CMD` | Run in the guest over SSH as the desktop user (`--root`: as root) |
+| `desk exec [--root] [--timeout S] -- CMD` | Run in the guest over SSH as the desktop user (`--root`: as root); stopped in the guest after 600 s by default (exit 124; `--timeout 0`: no limit) |
 | `desk exec --gui -- APP ARGS` | Start a program detached inside the graphical session |
 | `desk exec --gui --wait -- CMD` | Run inside the session and return its output and exit code: what only the desktop session sees (windows, FindWindow, UI Automation, the session's environment) |
 | `desk exec --env NAME=VALUE ...` | Environment for the command (with or without `--gui`, repeatable) |

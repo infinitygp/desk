@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -291,8 +292,21 @@ def cmd_key(args) -> None:
     _after_action(run, dom, args)
 
 
+# Plain `desk exec` and `exec --gui --wait`: long enough for a package build, short enough that a
+# hung command does not block the caller indefinitely.
+EXEC_TIMEOUT = 600.0
+
+
+def _exec_stopped(run, limit: float) -> None:
+    run.log_event(rc=124)
+    print(f"desk: still running after {limit:.0f}s; stopped it (--timeout SECONDS to allow longer, 0: no limit)",
+          file=sys.stderr)
+    sys.exit(124)
+
+
 def cmd_exec(args) -> None:
     run = runs.resolve(args.run)
+    limit = EXEC_TIMEOUT if args.timeout is None else (args.timeout or None)
     argv = args.command
     if argv and argv[0] == "--":
         argv = argv[1:]
@@ -323,17 +337,24 @@ def cmd_exec(args) -> None:
         if run.agent_port:
             from . import winagent
 
-            timeout = args.timeout or 600
+            timeout = limit or 7 * 86400
             reply = winagent.request(run, timeout=timeout + 30, cmd="run", file=argv[0], args=argv[1:] or None,
                                      env=env or None, wait=True, timeout_s=timeout)
             sys.stdout.write(reply.get("stdout") or "")
             sys.stderr.write(reply.get("stderr") or "")
             if reply.get("timeout"):
-                raise DeskError(f"still running after {timeout:.0f}s; stopped it")
+                _exec_stopped(run, timeout)
             code = int(reply.get("code", 1))
         else:
-            r = guest.ssh_run(run.ssh_port, run.user, guest.remote_command(argv, gui=True, wait=True, env=env),
-                              timeout=args.timeout)
+            start = time.monotonic()
+            try:
+                r = guest.ssh_run(run.ssh_port, run.user,
+                                  guest.remote_command(argv, gui=True, wait=True, env=env, limit=limit),
+                                  timeout=limit and limit + 30)
+            except subprocess.TimeoutExpired:
+                _exec_stopped(run, limit)
+            if limit and r.returncode != 0 and time.monotonic() - start >= limit:
+                _exec_stopped(run, limit)
             code = r.returncode
         run.log_event(rc=code)
         sys.exit(code)
@@ -361,11 +382,25 @@ def cmd_exec(args) -> None:
     spec = runs.spec_for(run)
     if spec.family == "windows":
         prefix = "".join(f"$env:{k} = '{v.replace(chr(39), chr(39) * 2)}'; " for k, v in env.items())
-        command = spec.cmd(prefix + guest.remote_command(argv))
+        script = prefix + guest.remote_command(argv)
+        if limit:
+            # Processes outlive a closed SSH session on Windows, so a watchdog in the guest
+            # ends the command and everything it started.
+            script = (f"$deskWatch = Start-Process powershell.exe -WindowStyle Hidden -PassThru -ArgumentList "
+                      f"'-NoProfile', '-Command', \"Start-Sleep {limit:.0f}; taskkill.exe /T /F /PID $PID\"; "
+                      f"try {{ {script}\n}} finally {{ Stop-Process -Id $deskWatch.Id -Force -ErrorAction Ignore }}")
+        command = spec.cmd(script)
     else:
-        command = guest.remote_command(argv, env=env)
-    r = guest.ssh_run(run.ssh_port, spec.root_user if args.root else run.user, command,
-                      timeout=args.timeout)
+        command = guest.remote_command(argv, env=env, limit=limit)
+    start = time.monotonic()
+    try:
+        # The guest stops the command first; SSH's timeout is the fallback.
+        r = guest.ssh_run(run.ssh_port, spec.root_user if args.root else run.user, command,
+                          timeout=limit and limit + 30)
+    except subprocess.TimeoutExpired:
+        _exec_stopped(run, limit)
+    if limit and r.returncode != 0 and time.monotonic() - start >= limit:
+        _exec_stopped(run, limit)
     run.log_event(rc=r.returncode)
     sys.exit(r.returncode)
 
@@ -652,7 +687,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--wait", action="store_true",
                    help="with --gui: wait for the program and return its output and exit code")
     p.add_argument("--env", action="append", metavar="NAME=VALUE", help="environment variable (repeatable)")
-    p.add_argument("--timeout", type=float, default=None)
+    p.add_argument("--timeout", type=float, default=None,
+                   help=f"seconds before the command is stopped (default {EXEC_TIMEOUT:.0f}, 0: no limit; "
+                   "--gui: how long to wait for its window, default 30)")
     p.add_argument("command", nargs=argparse.REMAINDER)
     p.set_defaults(func=cmd_exec)
 

@@ -27,13 +27,18 @@ def ssh_argv(port: int, user: str, tty: bool = False) -> list[str]:
 
 
 def remote_command(argv: list[str], gui: bool = False, wait: bool = False,
-                   env: dict[str, str] | None = None) -> str:
+                   env: dict[str, str] | None = None, limit: float | None = None) -> str:
     # A single argument is a shell snippet (`a && b | c`); wrap it whole so that the
     # session scope applies to all of it, not just the first command.
     cmd = shlex.join(argv) if len(argv) > 1 else argv[0]
     setenv = "".join(f" -E {shlex.quote(f'{k}={v}')}" for k, v in (env or {}).items())
     if env and not gui:
         cmd = "env " + " ".join(shlex.quote(f"{k}={v}") for k, v in env.items()) + " bash -c " + shlex.quote(cmd)
+    if limit and not gui:
+        # Stopped in the guest too: closing SSH would leave a hung command running there.
+        cmd = f"timeout -k 5 {limit:.0f} bash -c {shlex.quote(cmd)}"
+    if limit and gui:
+        setenv += f" -p RuntimeMaxSec={limit:.0f}"
     if gui:
         # Starts the program inside the logged-in graphical session and returns at once. The
         # language comes from the shell's own environment: the systemd user manager can outlive
