@@ -111,7 +111,9 @@ def cmd_up(args) -> None:
 
 def cmd_down(args) -> None:
     with runs.state_lock():
-        targets = runs.all_runs() if args.all else [runs.resolve(args.id)]
+        if args.id and args.run and args.id != args.run:
+            raise DeskError(f"two different runs given: -r {args.run} and {args.id}")
+        targets = runs.all_runs() if args.all else [runs.resolve(args.id or args.run)]
         for run in targets:
             report, videos = evidence.finish(run, keep=args.keep, diff=args.diff, report=not args.no_report)
             print(f"run {run.id} down" + (" (files kept)" if args.keep else ""))
