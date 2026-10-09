@@ -435,6 +435,17 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
             run.ready = time.time()
             run.save()
     except BaseException:
+        # What the screen showed is the best clue to a start that failed (prepare not finding
+        # what it waits for, a session that did not come up).
+        dom = run.live_domain()
+        if dom is not None:
+            from . import display
+
+            try:
+                (rd / "failed-start.png").write_bytes(display.screenshot(dom))
+                print(f"[desk] run {run_id} did not start; its screen then: {rd / 'failed-start.png'}", file=sys.stderr)
+            except (DeskError, libvirt.libvirtError, OSError) as e:
+                print(f"[desk] run {run_id} did not start, and its screen could not be saved: {e}", file=sys.stderr)
         down(run, keep=True)
         raise
     return run

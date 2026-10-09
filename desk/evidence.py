@@ -371,8 +371,10 @@ def collect(run, diff: bool = False) -> Path:
     return out
 
 
-def finish(run, keep: bool = False, diff: bool = False, report: bool = True) -> tuple[Path | None, list[Path]]:
-    """Stop recording, write the report, keep the videos with it and destroy the run."""
+def finish(run, keep: bool = False, diff: bool = False, report: bool = True,
+           running: bool = False) -> tuple[Path | None, list[Path]]:
+    """Stop recording, write the report, keep the videos with it and destroy the run (unless
+    `running`: a scenario run kept for testing by hand)."""
     from . import record, runs
 
     record.stop(run)
@@ -385,7 +387,8 @@ def finish(run, keep: bool = False, diff: bool = False, report: bool = True) -> 
             print(f"[desk] warning: no report ({type(e).__name__}: {e})", file=sys.stderr)
     # Videos outlive the run in its report directory, report or not.
     videos = record.save_videos(run, out or REPORTS / run.id)
-    runs.down(run, keep=keep)
+    if not running:
+        runs.down(run, keep=keep)
     return out, videos
 
 

@@ -280,10 +280,13 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None) -> bo
                 if not step.get("soft"):
                     break
     finally:
-        report, videos = evidence.finish(run, keep=keep)
+        report, videos = evidence.finish(run, keep=keep, running=keep)
         if report:
             print(f"report: {report / 'report.md'}")
         for v in videos:
             print(f"video: {v}")
     print("scenario passed" if ok else "scenario FAILED")
+    if keep and run.live_domain() is not None:
+        print(f"run {run.id} left running: export DESK_RUN={run.id} (fish: set -x DESK_RUN {run.id}); "
+              f"desk down {run.id} when done")
     return ok

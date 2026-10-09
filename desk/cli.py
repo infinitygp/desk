@@ -125,12 +125,29 @@ def cmd_down(args) -> None:
             raise DeskError(f"two different runs given: -r {args.run} and {args.id}")
         targets = runs.all_runs() if args.all else [runs.resolve(args.id or args.run)]
         for run in targets:
+            gone = _run_files(run)
             report, videos = evidence.finish(run, keep=args.keep, diff=args.diff, report=not args.no_report)
-            print(f"run {run.id} down" + (" (files kept)" if args.keep else ""))
+            if args.keep:
+                print(f"run {run.id} down (files kept in {run.dir})")
+            else:
+                print(f"run {run.id} down; deleted {run.dir}{gone} (--keep keeps it)"
+                      + ("; screenshots and logs are in the report" if report else ""))
             if report:
                 print(f"report: {report / 'report.md'}")
             for v in videos:
                 print(f"video: {v}")
+
+
+def _run_files(run: runs.Run) -> str:
+    """What `desk down` deletes beyond the disk, worth naming: snapshots, extra disks, kept files."""
+    parts = []
+    snaps = [d for d in (run.dir / "snapshots").iterdir() if d.is_dir()] if (run.dir / "snapshots").is_dir() else []
+    disks = list((run.dir / "disks").glob("*.qcow2")) if (run.dir / "disks").is_dir() else []
+    if snaps:
+        parts.append(f"{len(snaps)} snapshot(s)")
+    if disks:
+        parts.append("disk(s) " + ", ".join(d.stem for d in disks))
+    return f" with {' and '.join(parts)}" if parts else ""
 
 
 def _print_forward(run: runs.Run, port: int, local: int | None = None) -> None:
@@ -926,7 +943,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("scenario", help="run a repeatable end-to-end test from a TOML file")
     p.add_argument("action", choices=["run", "check"])
     p.add_argument("file")
-    p.add_argument("--keep", action="store_true", help="keep the run's files afterwards")
+    p.add_argument("--keep", action="store_true",
+                   help="leave the run running afterwards (report written), to go on testing by hand")
     p.add_argument("--image", help="another image than the file names")
     p.set_defaults(func=cmd_scenario)
 

@@ -120,8 +120,10 @@ guest shell; `--root` and `--gui` apply to the whole snippet.
 units, SELinux denials, crashes, journal warnings, package changes and Firefox console errors since
 the run started, plus a
 timeline of every desk command with its exit code and the screenshots taken. `desk down --diff`
-adds the files the run changed. Point the user to the report and summarise what it found; read
-`journal.txt` / `avc.txt` next to it before blaming the product for a warning.
+adds the files the run changed. Without `--keep`, `desk down` deletes the run's directory (disk,
+snapshots, extra disks); screenshots and logs stay in the report. Point the user to the report
+and summarise what it found; read `journal.txt` / `avc.txt` next to it before blaming the product
+for a warning.
 
 Record a video (`desk up --record`, or `desk record start` before the interesting part) when the
 user will want to see the flow itself: a walkthrough of a feature, an installer, a bug that needs
@@ -281,7 +283,13 @@ at the step before as well), so no extra step is needed just to separate setup n
 report, and `soft = true` for an independent check whose failure should not stop the steps after it.
 `desk scenario check FILE` validates a file without starting anything. When a scenario fails,
 look at the failure screenshot and the report before changing the scenario: a failing step is
-usually a real finding.
+usually a real finding. A failed `exec`/`root` step prints the end of its stdout and stderr, where
+the cause usually is. `desk scenario run FILE --keep` writes the report and leaves the run running
+(it prints the `DESK_RUN` to use) to go on by hand from where the scenario stopped; `desk down` it
+afterwards (left alone, it is destroyed after 2 h idle). A `type` step refuses, like `desk type`,
+when a browser's focus is not in a text field; `anywhere = true` types anyway (page shortcuts).
+If the run itself cannot start, `desk` exits 2 and names a screenshot of what the screen showed
+then (`runs/<id>/failed-start.png`).
 
 ## Testing a package end to end
 
