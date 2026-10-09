@@ -13,8 +13,10 @@ from .config import DeskError, load_image
 MESSAGE = re.compile(r"(console\.[a-z]+|JavaScript (?:error|warning)): .*")
 # Firefox's own components log with their name in front, unquoted ("console.warn: RSLoader: ...";
 # a page's console.log("text") is printed quoted, objects and numbers as values), and their
-# exceptions come from its internal URLs.
-FIREFOX_OWN = re.compile(r"console\.[a-z]+: [A-Za-z][\w.-]*: |JavaScript (error|warning): (resource|chrome)://")
+# exceptions come from its internal URLs, or name its actors (after a restart with the devtools
+# open, e.g. desk browser viewport's responsive design mode).
+FIREFOX_OWN = re.compile(r"console\.[a-z]+: [A-Za-z][\w.-]*: |JavaScript (error|warning): (resource|chrome)://|"
+                         r"JavaScript error: , line 0: NotFoundError: No such JS(Process|Window)Actor ")
 ERROR = re.compile(r"(console\.(error|assert)|JavaScript error): ")
 # Bash with the start time in $S, also part of the report's guest script; as root, journalctl
 # reads the desktop user's journal too.
@@ -128,3 +130,63 @@ def open_url(run, target: str, timeout: float = 30) -> str:
         time.sleep(0.5)
     display.wait_stable(dom, timeout=10)
     return a11y.page_url(run).get("url") or current or url
+
+
+RDM_CLOSE = "Close Responsive Design Mode"
+
+
+def _rdm(run, focus: bool = False) -> dict:
+    # _helper has turned its box into screen pixels already.
+    return a11y._helper(run, "rdm", json.dumps({"focus": focus}))
+
+
+def viewport(run, size: str) -> str:
+    """Pages at WIDTHxHEIGHT CSS pixels, a phone's layout, through Firefox's responsive design mode
+    (a window cannot get that narrow), with its sizes typed into the mode's toolbar like a person
+    would; `reset` closes the mode. Returns the size and where the page area is on screen."""
+    spec = _linux(run)
+    a11y.focus(run, "Firefox")
+    state = _rdm(run)
+    if size == "reset":
+        if state["open"]:
+            display.click(run.dom(), *a11y.locate_name(run, RDM_CLOSE, exact=True), run=run)
+            display.wait_stable(run.dom(), timeout=5)
+        return "responsive design mode closed: pages get the whole window again"
+    try:
+        width, height = (int(v) for v in size.lower().split("x"))
+    except ValueError:
+        raise DeskError(f"viewport is WIDTHxHEIGHT, e.g. 390x700, or reset (got {size!r})") from None
+    if not state["open"]:
+        display.key(run.dom(), "ctrl+shift+m")
+        deadline = time.monotonic() + 15
+        while not state["open"]:
+            if time.monotonic() > deadline:
+                raise DeskError("Firefox's responsive design mode did not open (ctrl+shift+m)")
+            time.sleep(0.5)
+            state = _rdm(run)
+    snap = a11y.snapshot(run, app="Firefox", limit=400, save=False)
+    bar = next((n for n in snap["nodes"] if n["role"] == "embedded" and n["name"].startswith("chrome://devtools/"
+                                                                                            "content/responsive")), None)
+    fields = [n for n in snap["nodes"] if bar is not None and n["role"] == "spin button"
+              and n["pid"] == bar["pid"] and n["path"][:len(bar["path"])] == bar["path"]]
+    if len(fields) < 2:
+        raise DeskError("cannot find the width and height fields of Firefox's responsive design mode")
+    for node, value in zip(fields[:2], (width, height), strict=True):
+        note = a11y.replace_text(run, {k: node[k] for k in ("pid", "path", "role", "name")}, str(value), spec.layout)
+        display.key(run.dom(), "ret")
+        if note:
+            raise DeskError(f"setting the viewport size: {note}")
+    display.wait_stable(run.dom(), timeout=5)
+    # Keys typed next are for the page, not the mode's height field.
+    box = _rdm(run, focus=True).get("bbox")
+    if not box:
+        return f"page area {width}x{height} CSS pixels (where it is on screen is unknown; look at a screenshot)"
+    # The page sits inside a 1 px frame.
+    x, y, w, h = box[0] + 1, box[1] + 1, box[2] - 2, box[3] - 2
+    f = (run.scale or 100) / 100
+    shown = (round(w / f), round(h / f))
+    note = "" if shown == (width, height) else f" (asked for {width}x{height}; Firefox shows {shown[0]}x{shown[1]})"
+    clipped = " and runs past the bottom of the screen (desk display --resolution for a taller one)" \
+        if y + h > display.png_size(display.screenshot(run.dom()))[1] else ""
+    return (f"page area {shown[0]}x{shown[1]} CSS pixels{note}{clipped}; on screen: "
+            f"desk shot --region {x},{y},{w},{h}; desk browser viewport reset to close the mode")

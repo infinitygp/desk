@@ -573,6 +573,10 @@ def cmd_browser(args) -> None:
         print(f"showing {browser.open_url(run, args.url)}")
         _after_action(run, run.dom(), args)
         return
+    if args.browser_cmd == "viewport":
+        print(browser.viewport(run, args.size))
+        _after_action(run, run.dom(), args)
+        return
     lines = browser.console(run, everything=args.all)
     if args.errors:
         lines = browser.errors(lines)
@@ -870,7 +874,7 @@ def build_parser() -> argparse.ArgumentParser:
     _action_opts(p)
     p.set_defaults(func=cmd_prepare)
 
-    p = sub.add_parser("browser", help="Firefox in the guest: its web console")
+    p = sub.add_parser("browser", help="Firefox in the guest: its web console, opening pages, page size")
     bsub = p.add_subparsers(dest="browser_cmd", required=True)
     bp = bsub.add_parser("console", help="console messages, uncaught exceptions and rejected promises of every "
                          "page since the run started")
@@ -879,6 +883,10 @@ def build_parser() -> argparse.ArgumentParser:
     bp = bsub.add_parser("open", help="open an address in the current tab, or a path (/system/services) on the "
                          "site shown now")
     bp.add_argument("url")
+    _action_opts(bp)
+    bp = bsub.add_parser("viewport", help="pages at WIDTHxHEIGHT CSS pixels (a phone: 390x700) through Firefox's "
+                         "responsive design mode, or reset")
+    bp.add_argument("size", metavar="WxH|reset")
     _action_opts(bp)
     p.set_defaults(func=cmd_browser)
 

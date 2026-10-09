@@ -115,7 +115,13 @@ puts the copies back and restores the memory. Snapshots live in `runs/<id>/snaps
 into the spare PCIe root ports, serial = name; snapshots copy them along.
 Firefox in the Linux images writes every page's console and uncaught errors to its output, so to
 the journal (`images/_shared/gnome/desk-firefox.js`); `desk browser console` and the report read
-them from there. The Remote Agent (WebDriver BiDi) is not used, as it marks the browser window.
+them from there. Promises keep their rejection stack without the devtools open, and an autoconfig
+script (`desk.cfg`, loaded into every content process) adds the thrown value and stack of each
+uncaught exception as a `JavaScript error detail:` line, which desk joins to its error. Addresses
+opened from outside (`desk browser open`, `firefox URL`) replace the current tab. The Remote Agent
+(WebDriver BiDi) is not used, as it marks the browser window; `desk browser viewport` types sizes
+into the responsive design mode instead.
+
 `desk clock` (`desk/clock.py`) sets the guest's time through qemu-guest-agent with the guest's
 time sync off and keeps the offset in `run.json`, reapplied after snapshot restores and reboots.
 

@@ -1,6 +1,8 @@
 """Runs inside the guest (piped to `python3 -` over SSH): AT-SPI tree with screen coordinates.
 
-Usage: snapshot JSON_OPTS | resolve JSON_SPEC | action JSON_SPEC | set-text JSON_SPEC TEXT
+Usage: snapshot JSON_OPTS | resolve JSON_SPEC | scroll JSON_SPEC [HOW] | action JSON_SPEC [NAME] |
+set-text JSON_SPEC TEXT | edit JSON_SPEC | read JSON_SPEC | focused JSON | page JSON |
+clipboard JSON_TEXT | rdm JSON | focus JSON_QUERY
 Prints one JSON document. Needs DBUS_SESSION_BUS_ADDRESS of the graphical session.
 """
 
@@ -676,6 +678,44 @@ def page(_opts) -> dict:
     return {"url": url or None, "app": app.get_name() or "", "window": front["title"]}
 
 
+RDM_TOOLBAR = "chrome://devtools/content/responsive/toolbar"
+
+
+def rdm(opts) -> dict:
+    """Firefox's responsive design mode in the focused window: where its page area (the browser
+    framed below the mode's toolbar) is on screen, and with {"focus": true} the keyboard focus
+    moved there from the mode's toolbar. {"open": False} when the mode is off."""
+    _, app, top = front_toplevel()
+    if top is None:
+        return {"open": False}
+    base = Mapper(shell_windows()).for_toplevel(app.get_name() or "", app.get_process_id(), top, app)
+    found = []
+
+    def visit(a):
+        if a.get_role_name() == "embedded" and (a.get_name() or "").startswith(RDM_TOOLBAR):
+            found.append(a)
+            return True
+        return None
+
+    showing_walk(top, visit, time.monotonic() + 5)
+    if not found or base is None:
+        return {"open": False}
+    # embedded toolbar < internal frame < scroll pane, whose other internal frame holds the page.
+    holder = found[0].get_parent()
+    pane = holder.get_parent() if holder is not None else None
+    frames = [pane.get_child_at_index(i) for i in range(pane.get_child_count())] if pane is not None else []
+    page_frames = [f for f in frames if f is not None and f != holder and f.get_role_name() == "internal frame"]
+    if not page_frames:
+        return {"open": True, "bbox": None}
+    if opts.get("focus"):
+        doc = page_frames[0].get_child_at_index(0) if page_frames[0].get_child_count() else None
+        try:
+            Atspi.Component.grab_focus(doc or page_frames[0])
+        except (GLib.Error, AttributeError, TypeError):
+            pass
+    return {"open": True, "bbox": Mapper.place(page_frames[0], base)}
+
+
 def main() -> None:
     cmd, arg = sys.argv[1], json.loads(sys.argv[2])
     extra = sys.argv[3] if len(sys.argv) > 3 else None
@@ -702,6 +742,8 @@ def main() -> None:
             out = page(arg)
         elif cmd == "clipboard":
             out = clipboard(arg)
+        elif cmd == "rdm":
+            out = rdm(arg)
         else:
             out = {"error": f"unknown command {cmd}"}
     except (LookupError, GLib.Error) as e:
