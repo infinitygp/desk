@@ -62,8 +62,9 @@ Shared provisioning files live in `images/_shared/`. A variant (`base = "..."` i
 `prepare = "prepare.py"` in `image.toml` runs `prepare(steps)` on the host once the provisioned
 session is up, before the warm state is saved (and after cold boots): what a user does before the
 tests start, with real input (`desk/steps.py`: `gui`, `wait_for`, `click`, `type`, `key`).
-`fedora-44-cockpit` logs in to Cockpit that way; its Firefox trusts Cockpit's CA and the session
-has no idle timeout, since restoring the warm state moves the clock forward.
+`fedora-44-cockpit` logs in to Cockpit that way; Cockpit serves a certificate from a CA of the
+image's own, which its Firefox trusts (Cockpit 368 keeps no CA of its own any more), and the
+session has no idle timeout, since restoring the warm state moves the clock forward.
 
 ## Builds and maintenance
 
