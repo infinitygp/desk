@@ -260,7 +260,9 @@ def cmd_action(args) -> None:
 def cmd_set_text(args) -> None:
     run = runs.resolve(args.run)
     dom = run.dom()
-    a11y.set_text(run, args.ref, args.text)
+    note = a11y.set_text(run, args.ref, args.text, layout=runs.spec_for(run).layout)
+    if note:
+        print(f"note: {note}")
     _after_action(run, dom, args)
 
 

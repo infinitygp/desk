@@ -57,6 +57,14 @@ def focus(query: str) -> dict:
     return {"title": res.unpack()[0]}
 
 
+def clipboard(text: str) -> dict:
+    """Set the clipboard through the shell extension, for pasting."""
+    bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    bus.call_sync("org.desk.Helper", "/org/desk/Helper", "org.desk.Helper", "SetClipboard",
+                  GLib.Variant("(s)", (text,)), None, Gio.DBusCallFlags.NONE, 2000, None)
+    return {"done": True}
+
+
 def states(acc) -> set[str]:
     ss = acc.get_state_set()
     return {s.value_nick for s in Atspi.StateType.__enum_values__.values() if ss.contains(s)}
@@ -558,6 +566,33 @@ def set_text(spec: dict, text: str) -> dict:
     return {"done": True}
 
 
+def edit(spec: dict) -> dict:
+    """Give an editable element the keyboard focus, its window in front, so that real key presses
+    reach it; with its current text."""
+    app, path, acc = find_node(spec)
+    if "EditableText" not in acc.get_interfaces():
+        raise LookupError("element is not editable")
+    front = next((w for w in shell_windows() if w["focus"]), None)
+    title = app.get_child_at_index(path[0]).get_name() or ""
+    if title and (front is None or front["pid"] != app.get_process_id()):
+        focus(title)
+    try:
+        Atspi.Component.grab_focus(acc)
+    except (GLib.Error, AttributeError, TypeError):
+        pass
+    deadline = time.monotonic() + 2
+    while "focused" not in states(acc) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    front = next((w for w in shell_windows() if w["focus"]), None)
+    return {"focused": "focused" in states(acc) and front is not None and front["pid"] == app.get_process_id(),
+            "text": text_of(acc) if "Text" in acc.get_interfaces() else ""}
+
+
+def read(spec: dict) -> dict:
+    _, _, acc = find_node(spec)
+    return {"text": text_of(acc) if "Text" in acc.get_interfaces() else ""}
+
+
 def main() -> None:
     cmd, arg = sys.argv[1], json.loads(sys.argv[2])
     extra = sys.argv[3] if len(sys.argv) > 3 else None
@@ -574,6 +609,12 @@ def main() -> None:
             out = action(arg, extra)
         elif cmd == "set-text":
             out = set_text(arg, extra)
+        elif cmd == "edit":
+            out = edit(arg)
+        elif cmd == "read":
+            out = read(arg)
+        elif cmd == "clipboard":
+            out = clipboard(arg)
         else:
             out = {"error": f"unknown command {cmd}"}
     except (LookupError, GLib.Error) as e:

@@ -1,5 +1,6 @@
 import Gio from 'gi://Gio';
 import Meta from 'gi://Meta';
+import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
@@ -12,6 +13,9 @@ const IFACE = `
     <method name="Activate">
       <arg type="s" direction="in" name="query"/>
       <arg type="s" direction="out" name="title"/>
+    </method>
+    <method name="SetClipboard">
+      <arg type="s" direction="in" name="text"/>
     </method>
   </interface>
 </node>`;
@@ -64,12 +68,16 @@ export default class DeskHelper extends Extension {
         return JSON.stringify(windows);
     }
 
+    _find(query) {
+        const q = query.toLowerCase();
+        return global.get_window_actors().map(a => a.meta_window).reverse().find(w =>
+            (w.get_wm_class() ?? '').toLowerCase().includes(q) || (w.get_title() ?? '').toLowerCase().includes(q));
+    }
+
     // Bring the topmost window whose application (WM class) or title contains `query` to the
     // front, as clicking it in the overview would; returns its title, or "" if there is none.
     Activate(query) {
-        const q = query.toLowerCase();
-        const hit = global.get_window_actors().map(a => a.meta_window).reverse().find(w =>
-            (w.get_wm_class() ?? '').toLowerCase().includes(q) || (w.get_title() ?? '').toLowerCase().includes(q));
+        const hit = this._find(query);
         if (!hit)
             return '';
         Main.overview.hide();
@@ -77,5 +85,11 @@ export default class DeskHelper extends Extension {
             hit.unminimize();
         hit.activate(global.get_current_time());
         return hit.get_title() ?? '';
+    }
+
+    // The clipboard, which only the compositor can set without a focused window of its own
+    // (desk set-text pastes what the keyboard cannot type).
+    SetClipboard(text) {
+        St.Clipboard.get_default().set_text(St.ClipboardType.CLIPBOARD, text);
     }
 }

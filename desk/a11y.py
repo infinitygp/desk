@@ -271,5 +271,44 @@ def action(run, ref: str, name: str | None = None) -> dict:
     return _helper(run, *args)
 
 
-def set_text(run, ref: str, text: str) -> None:
-    _helper(run, "set-text", json.dumps(_spec(run, ref)), text)
+def set_text(run, ref: str, text: str, layout: str = "us") -> str:
+    """Replace a field's text the way a user would, so that web pages notice (React reads the
+    input events of real typing, and AT-SPI's text replacement sends none): focus the field,
+    select everything, then type, or paste what the keyboard cannot produce. Returns a note when
+    only AT-SPI could do it or the field shows something else afterwards."""
+    return replace_text(run, _spec(run, ref), text, layout)
+
+
+def replace_text(run, spec: dict, text: str, layout: str = "us") -> str:
+    if run.agent_port:
+        _helper(run, "set-text", json.dumps(spec), text)
+        return ""
+    if not _helper(run, "edit", json.dumps(spec))["focused"]:
+        _helper(run, "set-text", json.dumps(spec), text)
+        return ("the field did not take the keyboard focus, so its text was replaced through AT-SPI only, "
+                "which a web page does not notice; click into it and use desk type")
+    dom = run.dom()
+    display.key(dom, "ctrl+a")
+    try:
+        # Newlines and tabs typed would be Return and Tab: a form submitted, the focus moved.
+        plan = None if any(c in text for c in "\n\t\r") else display.key_plan(text, layout)
+    except DeskError:
+        plan = None
+    if not text:
+        display.key(dom, "delete")
+    elif plan is not None:
+        for codes in plan:
+            display.chord(dom, codes)
+    else:
+        try:
+            _helper(run, "clipboard", json.dumps(text))
+        except DeskError:
+            _helper(run, "set-text", json.dumps(spec), text)
+            return ("the text has characters the keyboard cannot type and this image cannot paste "
+                    "(desk image warm), so it was replaced through AT-SPI only, which a web page does not notice")
+        display.key(dom, "ctrl+v")
+    if spec["role"] == "password text":
+        return ""  # it shows bullets, not the text
+    shown = _helper(run, "read", json.dumps(spec))["text"]
+    wanted = " ".join(text.replace("\ufffc", " ").split())[:400]
+    return "" if shown == wanted else f"the field shows {shown!r} afterwards"
