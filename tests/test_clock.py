@@ -31,3 +31,12 @@ class Duration(unittest.TestCase):
         for bad in ("+1d", "1x", "", "d"):
             with self.subTest(bad=bad), self.assertRaises(DeskError):
                 clock.duration(bad)
+
+
+class Describe(unittest.TestCase):
+    def test_whole_days_stay_whole(self):
+        import time
+
+        # The guest's clock is read a moment before the host's.
+        shown = clock.describe(None, now=time.time() + 31 * 86400 - 0.05)
+        self.assertIn("host +31d 00:00:00", shown)

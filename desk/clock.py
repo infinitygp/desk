@@ -166,12 +166,26 @@ def reset(run) -> None:
     run.log_event(clock="reset")
 
 
-def describe(run) -> str:
-    t = guest_time(run)
-    shown = datetime.fromtimestamp(t, GUEST_TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
-    off = t - time.time()
+def describe(run, now: float | None = None) -> str:
+    t = guest_time(run) if now is None else now
+    host = time.time()
+    shown = datetime.fromtimestamp(t, GUEST_TZ)
+    off = t - host
     if abs(off) < 2:
-        return f"{shown} (as the host)"
-    sign, off = ("+" if off > 0 else "-"), abs(off)
-    d, rest = divmod(int(off), 86400)
-    return f"{shown} (host {sign}{d}d {rest // 3600:02d}:{rest % 3600 // 60:02d}:{rest % 60:02d})"
+        return f"{shown:%Y-%m-%d %H:%M:%S %Z} (as the host)"
+    # The guest's clock was read a moment before the host's: +31d is 2678399.98 s ahead.
+    sign, off = ("+" if off > 0 else "-"), round(abs(off))
+    d, rest = divmod(off, 86400)
+    note = ""
+    here = datetime.fromtimestamp(host, GUEST_TZ)
+    if shown.utcoffset() != here.utcoffset():
+        # Offsets count real time; across a change of summer time the wall clock shows an hour more or less.
+        note = f"; {shown:%Z} there, {here:%Z} now, so the wall clock differs by {_wall(shown, here)}"
+    return f"{shown:%Y-%m-%d %H:%M:%S %Z} (host {sign}{d}d {rest // 3600:02d}:{rest % 3600 // 60:02d}:{rest % 60:02d}{note})"
+
+
+def _wall(a: datetime, b: datetime) -> str:
+    diff = round((a.replace(tzinfo=None) - b.replace(tzinfo=None)).total_seconds())
+    sign, diff = ("+" if diff >= 0 else "-"), abs(diff)
+    d, rest = divmod(diff, 86400)
+    return f"{sign}{d}d {rest // 3600:02d}:{rest % 3600 // 60:02d}:{rest % 60:02d}"
