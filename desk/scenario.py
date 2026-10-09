@@ -16,7 +16,7 @@ from .steps import Steps
 # Exactly one per step; the value is the action's argument.
 ACTIONS = {"root", "exec", "gui", "focus", "click", "type", "key", "expect", "expect_absent", "shot",
            "reboot", "wait", "clock", "disk_add", "disk_rm", "console_errors", "prepare"}
-OPTIONS = {"role", "exact", "timeout", "output", "rc", "name", "soft", "env", "step"}
+OPTIONS = {"role", "exact", "timeout", "output", "rc", "name", "soft", "env", "step", "until", "anywhere"}
 # Where build artifacts land in the guest.
 GUEST_IN = {"linux": "/tmp/desk", "windows": "C:/Users/tester/desk"}
 
@@ -136,7 +136,7 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
     elif action == "click":
         steps.click(value, role, step.get("exact", True))
     elif action == "type":
-        steps.type(value)
+        steps.type(value, anywhere=step.get("anywhere", False))
     elif action == "key":
         steps.key(*([value] if isinstance(value, str) else value))
     elif action == "expect":

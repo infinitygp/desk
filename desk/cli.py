@@ -290,7 +290,10 @@ def cmd_scroll(args) -> None:
 def cmd_type(args) -> None:
     run = runs.resolve(args.run)
     dom = run.dom()
-    display.type_text(dom, args.text, layout=runs.spec_for(run).layout)
+    spec = runs.spec_for(run)
+    if not args.anywhere:
+        a11y.check_typing_target(run, spec)
+    display.type_text(dom, args.text, layout=spec.layout)
     _after_action(run, dom, args)
 
 
@@ -757,7 +760,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_scroll)
 
     p = sub.add_parser("type", help="type text with real key presses (ASCII, plus Polish letters on the pl layout)")
-    p.add_argument("text")
+    p.add_argument("text", help="text to type; one that starts with a dash too ('---')")
+    p.add_argument("--anywhere", action="store_true",
+                   help="type even when no text field of a web page has the focus (its keyboard shortcuts)")
     _action_opts(p)
     p.set_defaults(func=cmd_type)
 
@@ -890,7 +895,34 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+# Commands whose last positional argument is free text, and their options with a value.
+TEXT_COMMANDS = {"type": {"--settle"}, "set-text": {"--settle"}}
+
+
+def _text_args(argv: list[str]) -> list[str]:
+    """`desk type '---'`: text that starts with a dash is text, not an unknown option. Puts `--`
+    before the first such argument of `type` and `set-text`."""
+    i = 0
+    while i < len(argv) and argv[i].startswith("-"):
+        i += 2 if argv[i] in ("-r", "--run") else 1
+    if i >= len(argv) or argv[i] not in TEXT_COMMANDS or "--" in argv[i + 1:]:
+        return argv
+    valued = TEXT_COMMANDS[argv[i]]
+    j = i + 1
+    while j < len(argv):
+        a = argv[j]
+        if a in valued:
+            j += 2
+            continue
+        if a.startswith("-") and len(a) > 1 and not a.startswith(tuple(f"{v}=" for v in valued)) \
+                and a not in ("--shot", "--anywhere", "-h", "--help"):
+            return argv[:j] + ["--"] + argv[j:]
+        j += 1
+    return argv
+
+
 def main(argv: list[str] | None = None) -> None:
+    argv = _text_args(sys.argv[1:] if argv is None else argv)
     args = build_parser().parse_args(argv)
     try:
         args.func(args)

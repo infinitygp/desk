@@ -119,6 +119,17 @@ them from there. The Remote Agent (WebDriver BiDi) is not used, as it marks the 
 `desk clock` (`desk/clock.py`) sets the guest's time through qemu-guest-agent with the guest's
 time sync off and keeps the offset in `run.json`, reapplied after snapshot restores and reboots.
 
+## Clicking and typing
+
+`desk click @ref|--name` asks the application, through AT-SPI hit tests, what is at the point it
+is about to click: an element there that is not the target or inside it (a sticky footer, a
+toast) counts as covering it, and another point of the target or scrolling is tried. Firefox does
+not mark the buttons of sticky footers as showing; when the hit test reaches the footer around
+them, they count as visible. `desk a11y` marks covered elements. `desk set-text` focuses the
+field, selects all and types (or pastes through the shell extension's `SetClipboard`), since
+AT-SPI's text replacement leaves web pages' input events out. `desk type` into a browser window
+whose focus is not in a text field is refused. Walks of the tree stop after 20 s.
+
 ## Scenarios
 
 `desk scenario run FILE` runs a repeatable end-to-end test described in TOML (format in

@@ -312,3 +312,32 @@ def replace_text(run, spec: dict, text: str, layout: str = "us") -> str:
     shown = _helper(run, "read", json.dumps(spec))["text"]
     wanted = " ".join(text.replace("\ufffc", " ").split())[:400]
     return "" if shown == wanted else f"the field shows {shown!r} afterwards"
+
+
+# Web browsers as AT-SPI names them: their pages take keys pressed outside a text field as
+# shortcuts (Firefox's quick find on "/" and "'").
+BROWSERS = {"Firefox", "Chromium", "Google Chrome", "Epiphany"}
+
+
+def check_typing_target(run, spec) -> None:
+    """Refuse to type into a browser window whose focus is not in a text field: a click that
+    missed its field (the layout moved) would otherwise turn the text into page shortcuts."""
+    if spec.family != "linux":
+        return
+    try:
+        f = focused_field(run)
+    except DeskError:
+        return  # where the focus is cannot be told; typing never depended on it before
+    # Only a focused element that was found and takes no text: a walk that ran out of time or
+    # missed an element Firefox does not mark as showing proves nothing.
+    if f.get("app") not in BROWSERS or not f.get("role") or f.get("editable"):
+        return
+    where = f"{f['role']} {f['name']!r}" if f.get("role") else "nothing"
+    raise DeskError(f"the keyboard focus in {f.get('window')!r} is on {where}, not in a text field, so the page "
+                    "would take the keys as shortcuts; click into the field first (desk type --anywhere to "
+                    "type there anyway)")
+
+
+def focused_field(run) -> dict:
+    """The element with the keyboard focus in the focused window (Linux guests)."""
+    return _helper(run, "focused", "{}")

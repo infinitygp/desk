@@ -593,6 +593,65 @@ def read(spec: dict) -> dict:
     return {"text": text_of(acc) if "Text" in acc.get_interfaces() else ""}
 
 
+def front_toplevel():
+    """The application and top-level accessible of the focused window, if any."""
+    front = next((w for w in shell_windows() if w["focus"]), None)
+    if front is None:
+        return None, None, None
+    for _, app in app_children(Atspi.get_desktop(0)):
+        try:
+            if app.get_process_id() != front["pid"]:
+                continue
+            for i in range(app.get_child_count()):
+                top = app.get_child_at_index(i)
+                if top is not None and ((top.get_name() or "") == front["title"] or "active" in states(top)):
+                    return front, app, top
+        except GLib.Error:
+            continue
+    return front, None, None
+
+
+def showing_walk(acc, visit, deadline, depth=0) -> None:
+    """Depth first through what is showing, until `visit` returns True or time runs out."""
+    if depth > 80 or time.monotonic() > deadline:
+        return
+    try:
+        n = acc.get_child_count()
+    except GLib.Error:
+        return
+    for i in range(n):
+        try:
+            ch = acc.get_child_at_index(i)
+            if ch is None or "showing" not in states(ch):
+                continue
+        except GLib.Error:
+            continue
+        if visit(ch) or showing_walk(ch, visit, deadline, depth + 1):
+            return True
+    return None
+
+
+def focused(_opts) -> dict:
+    """The element with the keyboard focus in the focused window."""
+    front, app, top = front_toplevel()
+    if top is None:
+        return {"window": front["title"] if front else None}
+    found = []
+
+    def visit(a):
+        st = states(a)
+        if "focused" in st:
+            found.append((a, st))
+
+    showing_walk(top, visit, time.monotonic() + 5)
+    out = {"window": front["title"], "app": app.get_name() or ""}
+    if found:
+        a, st = found[-1]
+        out.update(role=a.get_role_name(), name=(a.get_name() or "").strip(),
+                   editable="editable" in st and "EditableText" in a.get_interfaces())
+    return out
+
+
 def main() -> None:
     cmd, arg = sys.argv[1], json.loads(sys.argv[2])
     extra = sys.argv[3] if len(sys.argv) > 3 else None
@@ -613,6 +672,8 @@ def main() -> None:
             out = edit(arg)
         elif cmd == "read":
             out = read(arg)
+        elif cmd == "focused":
+            out = focused(arg)
         elif cmd == "clipboard":
             out = clipboard(arg)
         else:

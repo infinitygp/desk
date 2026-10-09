@@ -94,7 +94,9 @@ class Steps:
         display.wait_stable(self.target.dom(), timeout=5)
         return title
 
-    def type(self, text: str) -> None:
+    def type(self, text: str, anywhere: bool = False) -> None:
+        if not anywhere:
+            a11y.check_typing_target(self.target, self.spec)
         display.type_text(self.target.dom(), text, layout=self.spec.layout)
 
     def key(self, *combos: str) -> None:
