@@ -78,6 +78,8 @@ def load(path: Path) -> dict:
         if len(actions) != 1 or set(step) - ACTIONS - OPTIONS:
             raise DeskError(f"{path}: step {i} needs exactly one of {sorted(ACTIONS)}, "
                             f"plus any of {sorted(OPTIONS)} (got {sorted(step)})")
+        if "until" in step and not actions & {"exec", "root"}:
+            raise DeskError(f"{path}: step {i}: until goes with exec or root")
     return data
 
 
@@ -108,16 +110,44 @@ def _build(data: dict, repo: Path) -> list[Path]:
     return files
 
 
+def tail(text: str, lines: int = 15, chars: int = 1500) -> str:
+    """The end of a command's output, where the cause of a failure usually is."""
+    return "\n".join(text.strip().splitlines()[-lines:])[-chars:]
+
+
 def _shell(run, spec, step: dict, as_root: bool) -> str:
     command = step["root" if as_root else "exec"]
     user = spec.root_user if as_root else run.user
-    r = guest.ssh_run(run.ssh_port, user, spec.cmd(command), capture=True, timeout=step.get("timeout", 600))
-    out = r.stdout.decode(errors="replace")
-    if r.returncode != step.get("rc", 0):
-        raise StepFailed(f"exit {r.returncode}: {r.stderr.decode(errors='replace').strip()[-300:] or out.strip()[-300:]}")
-    if "output" in step and step["output"] not in out:
-        raise StepFailed(f"output lacks {step['output']!r}: {out.strip()[-300:]}")
-    return out.strip().splitlines()[-1][:120] if out.strip() else ""
+    # until: the same command every 2 s until it does what the step expects, e.g. a service is up.
+    limit = step.get("timeout", 120 if step.get("until") else 600)
+    deadline = time.monotonic() + limit
+    while True:
+        try:
+            r = guest.ssh_run(run.ssh_port, user, spec.cmd(command), capture=True,
+                              timeout=max(5, deadline - time.monotonic()) if step.get("until") else limit)
+        except subprocess.TimeoutExpired:
+            if not step.get("until"):
+                raise
+            r = subprocess.CompletedProcess([], 124, b"", b"(the command itself did not finish)")
+        out, err = r.stdout.decode(errors="replace"), r.stderr.decode(errors="replace")
+        problem = None
+        if r.returncode != step.get("rc", 0):
+            problem = f"exit {r.returncode}"
+        elif "output" in step and step["output"] not in out:
+            problem = f"output lacks {step['output']!r}"
+        if problem is None:
+            return out.strip().splitlines()[-1][:120] if out.strip() else ""
+        if not step.get("until") or time.monotonic() + 2 > deadline:
+            break
+        time.sleep(2)
+    if step.get("until"):
+        problem += f" (still, after {limit:.0f}s)"
+    shown = [problem]
+    if out.strip():
+        shown.append("stdout:\n" + tail(out))
+    if err.strip():
+        shown.append("stderr:\n" + tail(err))
+    raise StepFailed("\n".join(shown))
 
 
 def _step(run, spec, steps: Steps, step: dict) -> str:
@@ -232,8 +262,12 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None) -> bo
             except (StepFailed, DeskError, subprocess.TimeoutExpired) as e:
                 detail, passed = str(e), False
             run.log_event(step=i, action=label, ok=passed, detail=detail, seconds=round(time.monotonic() - t0, 1))
+            first, *rest = detail.splitlines() or [""]
             print(f"{'PASS' if passed else 'FAIL'}  {i:>2}. {label[:60]:<60} {time.monotonic() - t0:5.1f}s  "
-                  f"{detail[:100]}", flush=True)
+                  f"{first[:100]}", flush=True)
+            if not passed and rest:
+                # A command's error is usually at the end of its output.
+                print("\n".join(f"        {line}" for line in rest), flush=True)
             if not passed:
                 ok = False
                 try:

@@ -62,6 +62,17 @@ console_errors = 0
         self.assertEqual(scenario.describe(data["step"][0]), ("disk_rm", "data"))
 
 
+    def test_until_only_for_commands(self):
+        data = scenario.load(write('image = "a"\n[[step]]\nexec = "systemctl is-active foo"\nuntil = true\n'))
+        self.assertTrue(data["step"][0]["until"])
+        with self.assertRaises(DeskError):
+            scenario.load(write('image = "a"\n[[step]]\nclick = "x"\nuntil = true\n'))
+
+    def test_failure_shows_the_end_of_the_output(self):
+        out = "\n".join(f"line {i}" for i in range(40))
+        self.assertEqual(scenario.tail(out).splitlines(), [f"line {i}" for i in range(25, 40)])
+
+
 class SplitWindows(unittest.TestCase):
     def test_paths_keep_their_backslashes(self):
         self.assertEqual(scenario.split_windows(r'C:\desk\app.exe --dir C:\Users\tester'),

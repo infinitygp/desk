@@ -295,7 +295,9 @@ def collect(run, diff: bool = False) -> Path:
                f"- result: {'FAILED' if failed or len(stepped) < total else 'passed'}, "
                f"{len(stepped) - len(failed)} of {total} steps passed"]
         for ev in failed:
-            md.append(f"- failed at step {ev['step']} ({ev['action']}): {ev['detail']}")
+            first, _, rest = ev["detail"].partition("\n")
+            md.append(f"- failed at step {ev['step']} ({ev['action']}): {first}"
+                      + (f"\n\n```\n{rest}\n```\n" if rest else ""))
         md.append("")
     md.append("## Found automatically")
     md.append("")
@@ -349,8 +351,9 @@ def collect(run, diff: bool = False) -> Path:
                 md[-1] += f" → exit {ev['rc']}"
         elif "step" in ev and "ok" in ev:
             mark = "ok" if ev["ok"] else "FAILED"
+            detail = ev["detail"].split("\n", 1)[0]
             md.append(f"- {stamp} step {ev['step']} {mark}: {ev['action']} ({ev['seconds']} s)"
-                      + (f" → {ev['detail']}" if ev["detail"] else ""))
+                      + (f" → {detail}" if detail else ""))
         elif "clock" in ev:
             step = ev.get("clock_step") or (ev.get("step") if "ok" not in ev else None)
             md.append(f"- {stamp} clock {ev['clock']}" + (f" in steps of {step}" if step else ""))

@@ -48,6 +48,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk focus NAME` | Bring a window to the front by application or title (keys go to the focused window) |
 | `desk scenario run FILE [--keep]`, `desk scenario check FILE` | Run a repeatable test from a TOML file (see below) |
 | `desk wait [--change] [--timeout S]` | Until the screen is still; `--change` first waits for it to change at all |
+| `desk wait --until-exec CMD [--root] [--timeout S]` | Run CMD in the guest every 2 s until it exits 0 (a service up, a file written; default 120 s), instead of a polling loop |
 | `desk reboot [--shot] [--prepare]` | Reboot and return when the new session is ready; reports apps that blocked shutdown; `--prepare` then redoes the image's preparation (Cockpit logged in again) |
 | `desk exec [--root] [--timeout S] -- CMD` | Run in the guest over SSH as the desktop user (`--root`: as root); stopped in the guest after 600 s by default (exit 124; `--timeout 0`: no limit) |
 | `desk exec --gui -- APP ARGS` | Start a program detached inside the graphical session |
@@ -268,7 +269,9 @@ Other steps: `type`, `gui = "firefox https://..."` (with `env = {NAME = "value"}
 string splits like a Windows command line, so `C:\path` stays as it is and paths with spaces
 need quotes, or give a list), `expect_absent` (after a reload, first
 `expect` something that is always there, or the check passes on a half-loaded page), `reboot = true`,
-`wait = true` (screen still) or `wait = 2` (seconds), `clock = "+1d"` (or `"reset"`),
+`wait = true` (screen still) or `wait = 2` (seconds), `until = true` on an `exec`/`root` step
+(repeat it every 2 s until it gives the expected `rc`/`output`, `timeout` 120 s by default: a
+service coming up), `clock = "+1d"` (or `"reset"`),
 `disk_add = "8G:data"`, `disk_rm = "data"` (top-level `disks = ["8G:data"]` plugs them in before
 the first step), `console_errors = 0` (at most that many new errors in Firefox's web console since
 the start or the previous such step; end a UI scenario with one). In a scenario's report every

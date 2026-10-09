@@ -234,8 +234,42 @@ def _window_box(run: runs.Run, query: str) -> tuple[int, int, int, int]:
     raise DeskError(f"no window with {query!r} in its title or application name")
 
 
+def _wait_exec(run: runs.Run, args) -> None:
+    """Run a command in the guest every 2 s until it succeeds: a service up, a file written."""
+    spec = runs.spec_for(run)
+    timeout = args.timeout if args.timeout is not None else 120
+    deadline = time.monotonic() + timeout
+    start, out = time.monotonic(), b""
+    while True:
+        try:
+            r = guest.ssh_run(run.ssh_port, spec.root_user if args.root else run.user, spec.cmd(args.until_exec),
+                              capture=True, timeout=max(5, min(60, deadline - time.monotonic())))
+            out = r.stdout + r.stderr
+            if r.returncode == 0:
+                run.log_event(rc=0)
+                last = out.decode(errors="replace").strip().splitlines()
+                print(f"succeeded after {time.monotonic() - start:.0f}s" + (f": {last[-1][:200]}" if last else ""))
+                return
+        except subprocess.TimeoutExpired:
+            out = b"(the command itself did not finish)"
+        if time.monotonic() + 2 > deadline:
+            break
+        time.sleep(2)
+    run.log_event(rc=1)
+    tail = out.decode(errors="replace").strip()[-500:]
+    print(f"still failing after {timeout:.0f}s" + (f"; last output:\n{tail}" if tail else ""))
+    sys.exit(1)
+
+
 def cmd_wait(args) -> None:
     run = runs.resolve(args.run)
+    if args.until_exec:
+        _wait_exec(run, args)
+        return
+    if args.root:
+        raise DeskError("--root goes with --until-exec")
+    if args.timeout is None:
+        args.timeout = 15.0
     if args.ready:
         guest.wait_ssh(run.ssh_port, run.user, timeout=args.timeout)
         spec = runs.spec_for(run)
@@ -764,10 +798,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--zoom", type=float, default=1.0, help="enlarge by this factor, e.g. 2, to see details")
     p.set_defaults(func=cmd_shot)
 
-    p = sub.add_parser("wait", help="wait until the screen stops changing")
+    p = sub.add_parser("wait", help="wait until the screen stops changing, or until a command in the guest succeeds")
     p.add_argument("--change", action="store_true", help="first wait for the screen to change at all")
     p.add_argument("--ready", action="store_true", help="first wait for SSH and the desktop session (after a reboot)")
-    p.add_argument("--timeout", type=float, default=15.0, help="seconds per phase")
+    p.add_argument("--until-exec", metavar="CMD",
+                   help="instead run CMD in the guest every 2 s until it exits 0, e.g. 'systemctl is-active foo'")
+    p.add_argument("--root", action="store_true", help="with --until-exec: as root")
+    p.add_argument("--timeout", type=float, default=None,
+                   help="seconds per phase (default 15; --until-exec: in all, default 120)")
     p.set_defaults(func=cmd_wait)
 
     p = sub.add_parser("click", help="click at X Y, an @ref from `desk a11y`, or --name TEXT")
