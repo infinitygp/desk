@@ -18,7 +18,7 @@ ACTIONS = {"root", "exec", "gui", "focus", "click", "type", "key", "expect", "ex
            "reboot", "wait", "clock", "disk_add", "disk_rm", "console_errors", "prepare"}
 OPTIONS = {"role", "exact", "timeout", "output", "rc", "name", "soft", "env", "step", "until", "anywhere"}
 # Where build artifacts land in the guest.
-GUEST_IN = {"linux": "/tmp/desk", "windows": "C:/Users/tester/desk"}
+GUEST_IN = {"linux": "/tmp/desk", "openwrt": "/tmp/desk", "windows": "C:/Users/tester/desk"}
 
 
 class StepFailed(Exception):
@@ -243,7 +243,7 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None) -> bo
         run.log_event(scenario=str(path.resolve()), steps=len(data.get("step", [])))
         if artifacts:
             dest = GUEST_IN[spec.family]
-            guest.ssh_run(run.ssh_port, run.user, spec.cmd(f"mkdir -p {dest}" if spec.family == "linux"
+            guest.ssh_run(run.ssh_port, run.user, spec.cmd(f"mkdir -p {dest}" if spec.family != "windows"
                           else f"New-Item -ItemType Directory -Force {dest} | Out-Null"), capture=True)
             for f in artifacts:
                 if guest.scp(run.ssh_port, str(f), f"{run.user}@127.0.0.1:{dest}/{f.name}") != 0:

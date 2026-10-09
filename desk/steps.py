@@ -35,6 +35,7 @@ class Steps:
 
     def gui(self, *argv: str, env: dict[str, str] | None = None) -> None:
         """Start a program in the desktop session and wait until the screen has changed."""
+        self.spec.need_desktop("starting a program in the session (gui)")
         dom = self.target.dom()
         before = display.screen_hash(dom)
         if self.spec.family == "windows":

@@ -62,7 +62,7 @@ def current(link: Path) -> Path | None:
 INSTALL_KEYS = ("installer", "location", "kickstart", "iso", "iso_url", "iso_sha256", "kernel", "initrd",
                 "extra_args", "user_data", "cloud_image_url", "secure_boot", "release", "unattend",
                 "unattend_files", "image_index", "virtio_win_iso", "openssh_msi", "os_variant", "memory_mib",
-                "vcpus", "disk_gb")
+                "vcpus", "disk_gb", "disk_image_url", "disk_files")
 
 
 # Image settings that do not change what ends up in the guest.
@@ -91,7 +91,7 @@ def install_fingerprint(spec: ImageSpec) -> str:
     # Install files that provisioning copies again at every warm-up (Windows' agent) do not
     # need a new install when they change.
     refreshed = {(spec.dir / f).resolve() for f in spec.files or []}
-    _hash_files(h, spec.dir, [f for f in (spec.kickstart, spec.user_data, spec.unattend) if f]
+    _hash_files(h, spec.dir, [f for f in (spec.kickstart, spec.user_data, spec.unattend, spec.disk_files) if f]
                 + [f for f in spec.unattend_files or [] if (spec.dir / f).resolve() not in refreshed])
     return h.hexdigest()
 
@@ -203,9 +203,37 @@ def _fetch_cloud_image(spec: ImageSpec) -> Path:
     return target
 
 
+def checksum_for(sums: str, name: str) -> str:
+    """The SHA-256 of `name` in a sha256sums file (`<hex> *<name>` or `<hex>  <name>` lines)."""
+    for line in sums.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[1].lstrip("*") == name:
+            return parts[0].lower()
+    raise DeskError(f"{name} is not listed in the published sha256sums")
+
+
+def _fetch_disk_image(spec: ImageSpec) -> Path:
+    url = spec.disk_image_url
+    folder, name = url.rsplit("/", 1)
+    sums = subprocess.run(["curl", "-fsSL", "--retry", "3", "--max-time", "60", f"{folder}/sha256sums"],
+                          capture_output=True, text=True, check=True).stdout
+    want = checksum_for(sums, name)
+    target = CACHE / name
+    if not target.exists() or _sha256(target) != want:
+        _download(url, target)
+        if _sha256(target) != want:
+            raise DeskError(f"{target} does not match {folder}/sha256sums")
+    return target
+
+
 def _render(spec: ImageSpec, template: str) -> str:
+    return _fill(spec, (spec.dir / template).read_text(), template)
+
+
+def _fill(spec: ImageSpec, text: str, template: str) -> str:
     pubkey = SSH_KEY.with_suffix(".pub").read_text().strip()
-    text = (spec.dir / template).read_text().replace("@SSH_PUBKEY@", pubkey)
+    # The password of every image's user is its name.
+    text = text.replace("@SSH_PUBKEY@", pubkey).replace("@PASSWORD@", spec.user)
     if spec.release:
         text = text.replace("@RELEASE@", spec.release)
     if "@RELEASE@" in text:
@@ -255,6 +283,14 @@ def _virt_install(spec: ImageSpec, name: str, deadline: float) -> None:
             "--import",
             "--cloud-init", f"user-data={work / 'user-data'},meta-data={work / 'meta-data'}",
         ]
+    elif spec.installer == "disk":
+        _prepare_disk(spec, work)
+        disk = f"path={spec.base_disk},format=qcow2,bus=virtio,discard=unmap"
+        common = [disk if a.startswith(f"path={spec.base_disk},") else a for a in common]
+        # --noreboot would only define the domain: an import has no install phase to end. The
+        # first boot powers off by itself, which ends the wait.
+        common.remove("--noreboot")
+        extra = ["--import"]
     elif spec.installer == "windows":
         _windows_install(spec, name, common, work, deadline)
         return
@@ -263,6 +299,66 @@ def _virt_install(spec: ImageSpec, name: str, deadline: float) -> None:
     # The desktop installers are graphical; `desk image shot` shows their screen meanwhile.
     _log(f"installing {spec.name} ({spec.installer}); serial console in {log}")
     subprocess.run(common + extra, check=True)
+
+
+def last_partition(parted_machine: str) -> int:
+    """The number of the partition that ends last in `parted -sm ... print` output: the one that
+    can grow (OpenWrt numbers its BIOS boot partition 128, at the start of the disk)."""
+    rows = [line.rstrip(";").split(":") for line in parted_machine.splitlines()]
+    parts = [(float(r[2].rstrip("s")), int(r[0])) for r in rows if len(r) >= 3 and r[0].isdigit()]
+    if not parts:
+        raise DeskError("the disk image has no partitions")
+    return max(parts)[1]
+
+
+def _disk_files_tar(spec: ImageSpec, out: Path) -> None:
+    """`disk_files` as a tar of files owned by root, 0644 or 0755 whatever the checkout's umask
+    (dropbear refuses keys in a group-writable /etc/dropbear), text files filled in like the other
+    templates. No directory entries: directories already in the image keep their modes."""
+    src = (spec.dir / spec.disk_files).resolve()
+    with tarfile.open(out, "w") as tar:
+        for f in sorted(src.rglob("*")):
+            if f.is_dir() and not f.is_symlink():
+                continue
+            if f.is_symlink() or not f.is_file():
+                raise DeskError(f"{f}: disk_files holds regular files and directories only")
+            data = f.read_bytes()
+            try:
+                data = _fill(spec, data.decode(), str(f.relative_to(spec.dir))).encode()
+            except UnicodeDecodeError:
+                pass
+            info = tarfile.TarInfo(str(f.relative_to(src)))
+            info.size, info.mtime = len(data), int(f.stat().st_mtime)
+            info.mode = 0o755 if f.stat().st_mode & 0o111 else 0o644
+            info.uname = info.gname = "root"
+            tar.addfile(info, io.BytesIO(data))
+
+
+def _prepare_disk(spec: ImageSpec, work: Path) -> None:
+    """The prebuilt image as the base disk: decompressed, grown to `disk_gb`, `disk_files` added."""
+    image = _fetch_disk_image(spec)
+    raw = work / "disk.img"
+    with raw.open("wb") as out:
+        # 2: gzip's warning about trailing data (some images carry a signature after the stream).
+        r = subprocess.run(["gzip", "-dc", str(image)], stdout=out, stderr=subprocess.PIPE, check=False)
+    if r.returncode not in (0, 2):
+        raise DeskError(f"decompressing {image} failed: {r.stderr.decode(errors='replace').strip()}")
+    subprocess.run(["qemu-img", "resize", "-q", "-f", "raw", str(raw), f"{spec.disk_gb}G"], check=True)
+    # The GPT's backup header sits where the image ended; move it to the new end first.
+    subprocess.run(["sgdisk", "-e", str(raw)], check=True, capture_output=True)
+    table = subprocess.run(["parted", "-sm", str(raw), "unit", "s", "print"], capture_output=True, text=True,
+                           check=True).stdout
+    part = last_partition(table)
+    subprocess.run(["parted", "-s", str(raw), "resizepart", str(part), "100%"], check=True)
+    commands = [f"e2fsck-f /dev/sda{part}", f"resize2fs /dev/sda{part}"]
+    if spec.disk_files:
+        _disk_files_tar(spec, work / "disk-files.tar")
+        commands += [f"mount /dev/sda{part} /", f"tar-in {work / 'disk-files.tar'} /"]
+    _log(f"preparing {raw.name}: partition {part} grown to {spec.disk_gb} GB"
+         + (f", {spec.disk_files} added" if spec.disk_files else ""))
+    subprocess.run(["guestfish", "-a", str(raw)], input="run\n" + "\n".join(commands) + "\n", text=True, check=True)
+    subprocess.run(["qemu-img", "convert", "-q", "-f", "raw", "-O", "qcow2", str(raw), str(spec.base_disk)], check=True)
+    raw.unlink()
 
 
 def _unattend_iso(spec: ImageSpec, work: Path) -> Path:
@@ -391,7 +487,7 @@ def provision(spec: ImageSpec, port: int) -> None:
                     r = guest.ssh_run(port, spec.root_user, "powershell.exe -NoProfile -ExecutionPolicy Bypass "
                                       "-File C:\\desk\\provision.ps1", capture=True, timeout=PROVISION_TIMEOUT)
             else:
-                r = guest.ssh_run(port, spec.root_user, "bash -s", input=(spec.dir / script).read_bytes(), capture=True,
+                r = guest.ssh_run(port, spec.root_user, f"{spec.shell} -s", input=(spec.dir / script).read_bytes(), capture=True,
                                   timeout=PROVISION_TIMEOUT)
             # 255: the connection itself broke. Windows does that now and then during its first
             # boot after setup; provisioning scripts are idempotent, so run it again.

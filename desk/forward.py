@@ -110,6 +110,21 @@ def kill(run) -> None:
     stop(run)
 
 
+def _target(run) -> str | None:
+    """Where in the guest the tunnel leads: its loopback, or on OpenWrt the LAN address, where
+    router services listen (ttyd on @lan; uhttpd listens everywhere). None while the guest does
+    not answer (rebooting)."""
+    from . import guest, runs
+
+    try:
+        if runs.spec_for(run).family != "openwrt":
+            return "127.0.0.1"
+        r = guest.ssh_run(run.ssh_port, run.user, "echo $SSH_CONNECTION", capture=True, timeout=15)
+        return r.stdout.decode().split()[2]
+    except (DeskError, subprocess.TimeoutExpired, IndexError):
+        return None
+
+
 def _tunnel(run_id: str, port: int, local: int) -> None:
     """Keep the tunnel up while the run exists: SSH drops with every reboot or snapshot restore."""
     from . import runs
@@ -136,11 +151,15 @@ def _tunnel(run_id: str, port: int, local: int) -> None:
         time.sleep(0.1)  # desk writes the file right after starting this process
     while wanted():
         run = runs.load(run_id)
+        target = _target(run)
+        if target is None:
+            time.sleep(2)
+            continue
         child = subprocess.Popen(["ssh", "-i", str(SSH_KEY), "-o", "StrictHostKeyChecking=no",
                                   "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR",
                                   "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "ServerAliveInterval=15",
                                   "-o", "ServerAliveCountMax=3", "-o", "ExitOnForwardFailure=yes", "-N",
-                                  "-L", f"127.0.0.1:{local}:127.0.0.1:{port}", "-p", str(run.ssh_port),
+                                  "-L", f"127.0.0.1:{local}:{target}:{port}", "-p", str(run.ssh_port),
                                   f"{run.user}@127.0.0.1"], stdin=subprocess.DEVNULL)
         child.wait()
         time.sleep(2)

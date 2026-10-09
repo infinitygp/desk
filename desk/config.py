@@ -34,7 +34,9 @@ class ImageSpec:
     ready: str
     # "kickstart": network install from `location` with `kickstart`;
     # "cloudimg": import the cloud image at `cloud_image_url`, whose first boot (cloud-init
-    # NoCloud seed from `user_data`) sets the system up and powers off.
+    # NoCloud seed from `user_data`) sets the system up and powers off;
+    # "disk": the prebuilt disk image at `disk_image_url` (OpenWrt), its last partition grown to
+    # `disk_gb` and `disk_files` copied onto it; its first boot must power off by itself.
     installer: str = "kickstart"
     location: str | None = None
     kickstart: str | None = None
@@ -49,6 +51,11 @@ class ImageSpec:
     user_data: str | None = None
     # Always the latest build; checked against the .SHA256 file published next to it.
     cloud_image_url: str | None = None
+    # A gzipped raw disk image, checked against the sha256sums file published next to it.
+    disk_image_url: str | None = None
+    # Directory (relative to the image) whose tree is written onto the disk image's root file
+    # system before its first boot; @SSH_PUBKEY@ and @PASSWORD@ in its files are filled in.
+    disk_files: str | None = None
     # Off for systems whose boot loader is not signed for UEFI Secure Boot (Arch).
     secure_boot: bool = True
     # One script or several, run in order as root.
@@ -74,8 +81,12 @@ class ImageSpec:
     agent_port: int | None = None
     # Emulated sound card model (e.g. "ich9") for guests that have none.
     sound: str | None = None
-    # How the harness talks to this kind of guest.
+    # How the harness talks to this kind of guest: "linux" (systemd, bash), "windows" or
+    # "openwrt" (BusyBox ash, procd, apk).
     family: str = "linux"
+    # A graphical session to drive (a11y, browser, programs started in it). Without one the
+    # screen is a text console: screenshots, keys and typing still work.
+    desktop: bool = True
     # Account for `exec --root` and system work: Linux has its own root key, a Windows
     # administrator gets a full token over SSH anyway.
     root_user: str = "root"
@@ -139,6 +150,16 @@ class ImageSpec:
         encoded = base64.b64encode(script.encode("utf-16-le")).decode()
         return (f"powershell.exe -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand {encoded}; "
                 "exit $LASTEXITCODE")
+
+    @property
+    def shell(self) -> str:
+        """The shell that runs scripts piped to the guest (`SHELL -s`)."""
+        return "sh" if self.family == "openwrt" else "bash"
+
+    def need_desktop(self, what: str) -> None:
+        if not self.desktop:
+            raise DeskError(f"{what} needs a desktop session, and {self.name} has none (its screen is a text "
+                            "console); use desk exec, desk forward PORT for a web interface, desk shot, key, type")
 
     @property
     def provision_scripts(self) -> list[str]:

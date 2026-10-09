@@ -38,6 +38,9 @@ def _sync(run, on: bool) -> None:
         script = ("Set-Service w32time -StartupType Manual; Start-Service w32time; w32tm /resync /force | Out-Null"
                   if on else "Stop-Service w32time -Force; Set-Service w32time -StartupType Disabled")
         command = spec.cmd(script)
+    elif spec.family == "openwrt":
+        command = ("/etc/init.d/sysntpd enable && /etc/init.d/sysntpd restart" if on
+                   else "/etc/init.d/sysntpd stop; /etc/init.d/sysntpd disable")
     else:
         command = f"timedatectl set-ntp {'true' if on else 'false'}"
     r = guest.ssh_run(run.ssh_port, spec.root_user, command, capture=True, timeout=60)
@@ -122,6 +125,8 @@ def _cursor(run, spec) -> str:
 
 
 def _busy(run, spec) -> set[str]:
+    if spec.family == "openwrt":
+        return set()  # cron has no notion of a job still running
     return _lines(run, spec, WINDOWS_TASKS if spec.family == "windows" else LINUX_BUSY)
 
 
@@ -150,10 +155,11 @@ def advance(run, value: str, step: str, timeout: float = 600):
     t = current
     while t < target:
         t = min(t + size, target)
-        cursor = "" if spec.family == "windows" else _cursor(run, spec)
+        timers = spec.family == "linux"
+        cursor = _cursor(run, spec) if timers else ""
         _jump(run, t)
         _settle(run, spec, before, timeout)
-        started = [] if spec.family == "windows" else sorted(_lines(run, spec, LINUX_STARTED, cursor))
+        started = sorted(_lines(run, spec, LINUX_STARTED, cursor)) if timers else []
         yield t, started
     run.log_event(clock=value, clock_step=step, offset=round(run.clock_offset))
 

@@ -154,7 +154,7 @@ def _print_forward(run: runs.Run, port: int, local: int | None = None) -> None:
     from . import forward
 
     local = forward.start(run, port, local)
-    scheme = "https://" if port in (443, 8443, 9090) else ""
+    scheme = "https://" if port in (443, 8443, 9090) else "http://" if port in (80, 8080) else ""
     print(f"guest port {port} -> {scheme}127.0.0.1:{local}{'/' if scheme else ''} on the host, until the run goes down "
           f"(desk forward --stop {port})")
 
@@ -431,6 +431,8 @@ def cmd_exec(args) -> None:
         sys.exit(code)
     if args.root and args.gui:
         raise DeskError("--gui starts programs in the desktop user's session; drop --root")
+    if args.gui:
+        runs.spec_for(run).need_desktop("desk exec --gui")
     if args.wait and not args.gui:
         raise DeskError("--wait goes with --gui (plain exec waits anyway)")
     env = {}
@@ -499,7 +501,7 @@ def cmd_exec(args) -> None:
                       f"try {{ {script}\n}} finally {{ Stop-Process -Id $deskWatch.Id -Force -ErrorAction Ignore }}")
         command = spec.cmd(script)
     else:
-        command = guest.remote_command(argv, env=env, limit=limit)
+        command = guest.remote_command(argv, env=env, limit=limit, shell=spec.shell)
     start = time.monotonic()
     try:
         # The guest stops the command first; SSH's timeout is the fallback.

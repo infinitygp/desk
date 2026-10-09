@@ -78,6 +78,7 @@ def console(run, everything: bool = False) -> list[str]:
     spec = load_image(run.image)
     if spec.family == "windows":
         raise DeskError("desk browser console reads Firefox on Linux guests")
+    spec.need_desktop("desk browser")
     r = guest.ssh_run(run.ssh_port, spec.root_user, f"S={int(run.since)} bash -s", input=JOURNAL.encode(),
                       capture=True, timeout=60)
     return parse(r.stdout.decode(errors="replace"), everything)
@@ -87,6 +88,7 @@ def _linux(run):
     spec = load_image(run.image)
     if spec.family == "windows":
         raise DeskError("desk browser drives Firefox on Linux guests")
+    spec.need_desktop("desk browser")
     return spec
 
 

@@ -27,14 +27,22 @@ def ssh_argv(port: int, user: str, tty: bool = False) -> list[str]:
 
 
 def remote_command(argv: list[str], gui: bool = False, wait: bool = False,
-                   env: dict[str, str] | None = None, limit: float | None = None) -> str:
+                   env: dict[str, str] | None = None, limit: float | None = None, shell: str = "bash") -> str:
     # A single argument is a shell snippet (`a && b | c`); wrap it whole so that the
     # session scope applies to all of it, not just the first command.
     cmd = shlex.join(argv) if len(argv) > 1 else argv[0]
     setenv = "".join(f" -E {shlex.quote(f'{k}={v}')}" for k, v in (env or {}).items())
     if env and not gui:
-        cmd = "env " + " ".join(shlex.quote(f"{k}={v}") for k, v in env.items()) + " bash -c " + shlex.quote(cmd)
-    if limit and not gui:
+        cmd = "env " + " ".join(shlex.quote(f"{k}={v}") for k, v in env.items()) + f" {shell} -c " + shlex.quote(cmd)
+    if limit and not gui and shell != "bash":
+        # BusyBox without `timeout` (OpenWrt): the command in a session of its own, which a
+        # watchdog (in another one, holding no output open) stops whole; stdin kept on fd 3
+        # first, as a background job reads /dev/null.
+        watchdog = 'sleep "$1"; kill -TERM -"$2"; sleep 5; kill -KILL -"$2"'
+        cmd = (f"exec 3<&0; setsid sh -c {shlex.quote(cmd)} <&3 3<&- & p=$!; exec 3<&-; "
+               f"setsid sh -c {shlex.quote(watchdog)} _ {max(1, round(limit))} $p </dev/null >/dev/null 2>&1 & w=$!; "
+               "wait $p; rc=$?; kill -TERM -$w $w 2>/dev/null; exit $rc")
+    elif limit and not gui:
         # Stopped in the guest too: closing SSH would leave a hung command running there.
         cmd = f"timeout -k 5 {limit:.0f} bash -c {shlex.quote(cmd)}"
     if limit and gui:

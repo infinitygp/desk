@@ -27,6 +27,8 @@ NOISE = (
     "/var/lib/flatpak/", "/var/lib/colord/", "/var/lib/lastlog/", "/var/lib/plymouth/", "/var/lib/abrt/",
     "/var/lib/rasdaemon/", "/var/lib/sddm/", "/usr/lib/sysimage/libdnf5/", "/boot/grub2/grubenv",
     "/boot/grub/grubenv", "/etc/cups/subscriptions.conf", "/etc/systemd/system.control/",
+    # OpenWrt: desk's own log and package list (images/openwrt-*), apk's database
+    "/desk/", "/lib/apk/db/",
     # Windows
     "/Windows/Prefetch/", "/Windows/System32/winevt/Logs/", "/Windows/Logs/", "/Windows/SoftwareDistribution/",
     "/Windows/ServiceProfiles/", "/Windows/System32/sru/", "/Windows/System32/Tasks/Microsoft/Windows/",
@@ -79,6 +81,25 @@ if command -v dnf >/dev/null; then
         'NR > 1 && match($0, /[0-9-]{10} [0-9:]{8}/) && substr($0, RSTART, RLENGTH) >= s'
 fi
 """ + "section browser\n" + browser.JOURNAL
+
+
+# OpenWrt (BusyBox ash): procd's services, the system log (kept in a file across reboots by the
+# image, else logd's buffer since the boot) and the packages compared with the list provisioning
+# saved; turned into the Linux sections by openwrt_sections().
+OPENWRT_LOG = "/desk/syslog"
+OPENWRT_PACKAGES = "/desk/packages"
+OPENWRT_SCRIPT = rf"""
+section() {{ echo "=== $1"; }}
+section services; ubus call service list </dev/null 2>/dev/null
+section log
+if [ -s {OPENWRT_LOG} ]; then cat {OPENWRT_LOG}; else logread </dev/null; fi
+section packages
+if [ -s {OPENWRT_PACKAGES} ]; then
+    apk list -I </dev/null 2>/dev/null | cut -d' ' -f1 | sort > /tmp/desk-packages
+    grep -vxF -f {OPENWRT_PACKAGES} /tmp/desk-packages | sed 's/^/installed /'
+    grep -vxF -f /tmp/desk-packages {OPENWRT_PACKAGES} | sed 's/^/removed /'
+fi
+"""
 
 
 # Windows: the same sections from the event log. Passed as one PowerShell command line.
@@ -205,6 +226,9 @@ def guest_problems(run) -> dict[str, str]:
     if spec.family == "windows":
         r = guest.ssh_run(run.ssh_port, spec.root_user, spec.cmd(WINDOWS_SCRIPT.replace("@S@", str(int(run.since)))),
                           capture=True, timeout=180)
+    elif spec.family == "openwrt":
+        r = guest.ssh_run(run.ssh_port, spec.root_user, "sh -s", input=OPENWRT_SCRIPT.encode(), capture=True,
+                          timeout=120)
     else:
         r = guest.ssh_run(run.ssh_port, spec.root_user, f"bash -s -- {int(run.since)}",
                           input=GUEST_SCRIPT.encode(), capture=True, timeout=120)
@@ -215,7 +239,59 @@ def guest_problems(run) -> dict[str, str]:
             sections[current] = []
         elif current:
             sections[current].append(line)
-    return {k: "\n".join(v).strip() for k, v in sections.items()}
+    out = {k: "\n".join(v).strip() for k, v in sections.items()}
+    return openwrt_sections(out, run.since) if spec.family == "openwrt" else out
+
+
+# Sat Oct 10 00:54:12 2026 daemon.warn odhcpd[2081]: text (logd, in the guest's local time)
+SYSLOG = re.compile(r"^\w{3} (\w{3}) +(\d+) (\d\d:\d\d:\d\d) (\d{4}) ([a-z0-9]+)\.([a-z]+) (.*)$")
+SEVERE = {"emerg", "alert", "crit", "err", "warn"}
+# What every boot of the image in this VM logs (CPU features QEMU does not offer, no Wi-Fi, the
+# LAN as a DHCP client) and procd at every `reboot`; a reboot during the run would otherwise fill
+# the report with it.
+OPENWRT_NOISE = re.compile(
+    r"kernel: \[ *[\d.]+\] (Speculative Return Stack Overflow|intel_powerclamp: CPU does not support MWAIT|"
+    r"amd_pstate: |Please enable it if your BIOS has the CPPC option|button_hotplug: loading out-of-tree module|"
+    r"urandom-seed: Seeding with)|dnsmasq\[\d+\]: no servers found in /tmp/resolv\.conf\.d/|"
+    r"netifd: Wireless module not found|netifd: You have delegated IPv6-prefixes but haven't assigned them|"
+    r"procd: Got unexpected signal 1$")
+
+
+def openwrt_sections(raw: dict[str, str], since: float) -> dict[str, str]:
+    """OpenWrt's sections in the Linux ones' terms: services procd keeps that are not running
+    (failed), crash loops (unitfailures, before reboots too), warnings and errors of the log
+    since `since` (journal, ISO times), segfaults (coredumps) and package changes."""
+    from .clock import GUEST_TZ
+
+    failed = []
+    try:
+        services = json.loads(raw.get("services") or "{}")
+    except ValueError:
+        services = {}
+    for name, info in sorted(services.items()):
+        for inst, state in sorted((info.get("instances") or {}).items()):
+            # One-shot services (urandom_seed) end with 0.
+            if not state.get("running") and state.get("exit_code", 1) != 0:
+                failed.append(f"{name}/{inst}: not running" + (f" (exit {state['exit_code']})" if "exit_code" in state
+                                                                 else ""))
+    journal, loops, crashes = [], [], []
+    for line in (raw.get("log") or "").splitlines():
+        m = SYSLOG.match(line)
+        if not m:
+            continue
+        month, day, clock, year, facility, level, text = m.groups()
+        when = datetime.strptime(f"{year} {month} {day} {clock}", "%Y %b %d %H:%M:%S").replace(tzinfo=GUEST_TZ)
+        if when.timestamp() < since:
+            continue
+        stamped = f"{when.isoformat()} {facility}.{level} {text}"
+        if level in SEVERE and not OPENWRT_NOISE.search(text):
+            journal.append(stamped)
+        if "in a crash loop" in text:
+            loops.append(stamped)
+        if "segfault at" in text:
+            crashes.append(stamped)
+    return {"failed": "\n".join(failed), "unitfailures": "\n".join(loops), "journal": "\n".join(journal[-400:]),
+            "coredumps": "\n".join(crashes), "packages": raw.get("packages", "")}
 
 
 # 2026-10-08T21:30:00+02:00 desk-fedora systemd[1]: foo.service: Failed with result 'exit-code'.
@@ -290,13 +366,14 @@ def collect(run, diff: bool = False) -> Path:
             shutil.copy(run.dir / name, out / name)
 
     problems: dict[str, str] = {}
+    family = load_image(run.image).family
     live = run.live_domain() is not None
     if live:
         try:
             problems = guest_problems(run)
         except (DeskError, subprocess.TimeoutExpired) as e:
             problems = {"error": str(e)}
-        if load_image(run.image).family != "windows" and problems.get("packages"):
+        if family == "linux" and problems.get("packages"):
             problems["packages"] = local_dnf_times(problems["packages"])
         for key in ("journal", "avc", "packages"):
             if problems.get(key):
@@ -341,16 +418,21 @@ def collect(run, diff: bool = False) -> Path:
         md.append("- the VM was not running, so no guest logs were collected")
     else:
         failed = problems.get("failed", "")
-        md.append(f"- failed units: {_count(failed)}" + (f"\n\n```\n{failed}\n```\n" if failed else ""))
-        history = unit_failures(problems.get("unitfailures", ""))
+        openwrt = family == "openwrt"
+        md.append(f"- {'services not running (procd)' if openwrt else 'failed units'}: {_count(failed)}"
+                  + (f"\n\n```\n{failed}\n```\n" if failed else ""))
+        history = (problems.get("unitfailures", "").splitlines() if openwrt
+                   else unit_failures(problems.get("unitfailures", "")))
         if history:
-            md.append(f"- unit failures during the run, before reboots too: {len(history)}\n\n```\n"
+            what = "service crash loops" if openwrt else "unit failures"
+            md.append(f"- {what} during the run, before reboots too: {len(history)}\n\n```\n"
                       + "\n".join(history[-30:]) + "\n```\n")
-        if load_image(run.image).family != "windows":
+        if family == "linux":
             denials = _count(problems.get("avc", ""), r"type=(AVC|USER_AVC|SELINUX_ERR)")
             md.append(f"- SELinux denials since start: {denials}" + (" (see avc.txt)" if problems.get("avc") else ""))
         cores = problems.get("coredumps", "")
-        md.append(f"- crashes (coredumps): {_count(cores)}" + (f"\n\n```\n{cores}\n```\n" if cores else ""))
+        md.append(f"- crashes ({'segfaults in the log' if openwrt else 'coredumps'}): {_count(cores)}"
+                  + (f"\n\n```\n{cores}\n```\n" if cores else ""))
         md.append(f"- warnings and errors in the system log: {_count(problems.get('journal', ''), r'^[0-9]{4}-')}"
                   + (" (see journal.txt)" if problems.get("journal") else ""))
         entries = browser.stamped(problems.get("browser", ""))

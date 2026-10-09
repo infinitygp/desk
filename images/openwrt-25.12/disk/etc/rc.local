@@ -1,0 +1,9 @@
+# Put your custom commands here that should be executed once
+# the system init finished. By default this file does nothing.
+
+# desk: a blinking cursor would keep the console screen from ever settling (desk wait, reboot).
+echo 0 > /sys/class/graphics/fbcon/cursor_blink 2>/dev/null
+# desk: the first boot (host keys made, uci-defaults applied) ends the image's install.
+if [ -e /etc/desk-firstboot ]; then rm -f /etc/desk-firstboot; sync; poweroff; fi
+
+exit 0

@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 
 from . import display, guest, winagent
-from .config import DeskError
+from .config import DeskError, load_image
 
 HELPER = Path(__file__).with_name("guest_a11y.py")
 SESSION_ENV = "env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus"
@@ -17,6 +17,8 @@ def _helper(run, *args: str) -> dict:
         # Windows: UI Automation through the in-session agent, same protocol as guest_a11y.py.
         op, arg, *rest = args
         return winagent.request(run, cmd="uia", op=op, arg=json.loads(arg), text=rest[0] if rest else None)
+    if getattr(run, "image", None):
+        load_image(run.image).need_desktop("the accessibility tree (a11y, find, clicks by name, focus)")
     cmd = f"{SESSION_ENV} python3 - " + " ".join(shlex.quote(a) for a in args)
     try:
         r = guest.ssh_run(run.ssh_port, run.user, cmd, input=HELPER.read_bytes(), capture=True, timeout=60)

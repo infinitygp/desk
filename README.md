@@ -36,6 +36,7 @@ images/<name>/       image.toml, kickstart, provision.sh
 | `fedora-44-cockpit` | variant of `fedora-44-gnome` | Cockpit, Firefox logged in with administrative access |
 | `arch-gnome` | official cloud image, GNOME installed by cloud-init (NoCloud seed) | rolling; no Secure Boot |
 | `windows-11` | evaluation ISO + autounattend.xml on a second CD | 90-day evaluation, reinstalled by `desk maintain` |
+| `openwrt-25.12` | the release's disk image (x86-64 ext4 combined, EFI), grown and preconfigured offline | no desktop: BusyBox ash, procd, apk, LuCI |
 
 Windows specifics: no TPM (LabConfig bypass), virtio disk with the viostor driver loaded by Setup
 (QEMU 10.2's AHCI emulation crashes under Windows), e1000e NIC (inbox driver),
@@ -48,6 +49,17 @@ Provisioning opts in to early feature updates and enables the taskbar position a
 features (59213768, 61090762) with ViVeTool v0.3.4 (GPL-3.0, downloaded and checked against a
 pinned SHA-256), so `desk win taskbar --edge/--size` work on every build; `desk/winsettings.py`
 writes theme and taskbar settings where the Settings app writes them.
+
+OpenWrt specifics (`installer = "disk"`, `family = "openwrt"`, `desktop = false`): the image
+from `disk_image_url` is checked against the `sha256sums` next to it, its last partition and ext4
+grown to `disk_gb` (parted, guestfish) and `disk_files` written onto it: the SSH key, a
+uci-defaults script (LAN as a DHCP client on passt, so SSH and LuCI come in through the LAN zone;
+the Warsaw time zone; root's password) and an `rc.local` that powers the first boot off, which ends
+the install (~30 s). Provisioning (`sh -s`, no bash) adds qemu-ga and the SFTP server (scp) and keeps
+the system log in `/desk/syslog`. Without a desktop, commands that need one refuse
+(`ImageSpec.need_desktop`); screenshots show the text console. `desk exec`'s time limit is a
+`setsid` watchdog (BusyBox has no `timeout`), and `desk forward` leads to the LAN address, where
+router services listen.
 
 ```bash
 bin/desk image build fedora-44-gnome   # unattended install, ~10 min, needs network

@@ -16,6 +16,7 @@ def apply(run, spec: ImageSpec, resolution: tuple[int, int] | None = None, scale
     if spec.family == "windows":
         _windows(run, spec, resolution, scale)
     else:
+        spec.need_desktop("desk display")
         _gnome(run, resolution, scale)
     if scale is not None:
         run.scale = scale

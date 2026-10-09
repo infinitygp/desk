@@ -1,8 +1,12 @@
 """End-to-end check of an image and the harness: run it after rebuilding images or changing desk."""
 
 import hashlib
+import re
 import secrets
+import tempfile
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from . import a11y, display, guest, runs
@@ -22,6 +26,12 @@ SCENARIOS = {
         "editor": "gnome-text-editor", "editor_window": "gnome-text-editor", "editor_role": "text",
         "agent_check": ["id", "-u"], "agent_expect": b"0",
     },
+    # Headless: the checks of a desktop that apply, plus what OpenWrt is tested for (packages
+    # installed from a file, LuCI).
+    "openwrt": {
+        "agent_check": ["id", "-u"], "agent_expect": b"0",
+        "package": "htop", "web_port": 80,
+    },
     "windows": {
         "calc": "calc.exe", "calc_window": "Calculator",
         "buttons": ["Seven", "Multiply by", "Six", "Equals"], "result": ("label", "name", "Display is 42"),
@@ -29,6 +39,11 @@ SCENARIOS = {
         "agent_check": ["cmd.exe", "/c", "whoami"], "agent_expect": b"nt authority\\system",
     },
 }
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
 
 
 def _check(cond: bool, msg: str) -> None:
@@ -165,17 +180,65 @@ def run_selftest(image: str, reboot: bool = False, keep: bool = False, spec: Ima
 
     def do_reboot():
         took, inhibitors = guest.reboot(run.ssh_port, spec)
+        if not spec.desktop:
+            agent()
+            return f"new boot ready in {took:.0f}s, guest agent answers"
         _launch(run, sc["calc"], sc["calc_window"])
         note = f" (overrode {len(inhibitors)} shutdown inhibitor(s))" if inhibitors else ""
         return f"new boot ready in {took:.0f}s, a11y works{note}"
+
+    def package():
+        # A package file through the host, the way a project tests its own build: fetched from
+        # the feed in the guest, pulled, pushed back and installed from the file.
+        pkg = sc["package"]
+        _ssh(run, f"cd /tmp && apk fetch {pkg} >/dev/null")
+        name = _ssh(run, f"cd /tmp && ls {pkg}-*.apk").split()[0]
+        with tempfile.TemporaryDirectory() as tmp:
+            _check(guest.scp(run.ssh_port, f"{run.user}@127.0.0.1:/tmp/{name}", tmp) == 0, "pulling the package failed")
+            _ssh(run, f"rm /tmp/{name}")
+            _check(guest.scp(run.ssh_port, str(Path(tmp) / name), f"{run.user}@127.0.0.1:/tmp/") == 0,
+                   "pushing the package failed")
+        _ssh(run, f"apk add --allow-untrusted /tmp/{name} >/dev/null && command -v {pkg}")
+        return f"{name} pulled, pushed and installed"
+
+    def web():
+        from . import forward
+
+        local = forward.start(run, sc["web_port"])
+        try:
+            return _web(local)
+        finally:
+            forward.stop(run, sc["web_port"])
+
+    def _web(local: int) -> str:
+        try:
+            page = urllib.request.urlopen(f"http://127.0.0.1:{local}/cgi-bin/luci/", timeout=30)
+        except urllib.error.HTTPError as e:
+            page = e  # the login form comes with 403
+        title = re.search(rb"<title>([^<]*)", page.read())
+        _check(title is not None, f"no LuCI page on guest port {sc['web_port']} (HTTP {page.status})")
+        login = urllib.request.Request(f"http://127.0.0.1:{local}/cgi-bin/luci/",
+                                       data=f"luci_username={spec.user}&luci_password={spec.user}".encode())
+        try:
+            urllib.request.build_opener(_NoRedirect).open(login, timeout=30)
+            answer = None
+        except urllib.error.HTTPError as e:
+            answer = e
+        _check(answer is not None and answer.status == 302 and "sysauth" in (answer.headers.get("Set-Cookie") or ""),
+               "logging in to LuCI failed")
+        return f"{title.group(1).decode(errors='replace')!r} through desk forward, logged in"
 
     try:
         if step("up (warm restore)", start):
             step("screenshot", screen)
             step("exec over SSH", ssh)
             step("exec through guest agent", agent)
-            step("a11y + click by name", calculator)
-            step("type (incl. Polish letters)", typing)
+            if spec.desktop:
+                step("a11y + click by name", calculator)
+                step("type (incl. Polish letters)", typing)
+            else:
+                step("package from a file (push/pull)", package)
+                step("web interface (desk forward)", web)
             if reboot:
                 step("reboot", do_reboot)
     finally:
