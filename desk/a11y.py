@@ -30,7 +30,7 @@ def _helper(run, *args: str) -> dict:
     if getattr(run, "scale", None) and run.scale != 100:
         # GNOME's logical layout: toolkits and the shell speak logical pixels; the screen has more.
         f = run.scale / 100
-        for box in [n.get("bbox") for n in out.get("nodes", [])] + [out.get("bbox")]:
+        for box in [n.get("bbox") for n in out.get("nodes", [])] + [out.get("bbox"), out.get("point")]:
             if box:
                 box[:] = [round(v * f) for v in box]
     return out
@@ -71,12 +71,15 @@ def format_node(node: dict, indent: bool = True) -> str:
         parts.append(f"value={json.dumps(node['value'], ensure_ascii=False)}")
     if node.get("text"):
         parts.append(f"text={json.dumps(node['text'], ensure_ascii=False)}")
-    states = node["states"] + (["offscreen"] if node.get("offscreen") else [])
+    states = node["states"] + (["offscreen"] if node.get("offscreen") else []) + \
+        (["covered"] if node.get("covered") else [])
     if states:
         parts.append("[" + ",".join(states) + "]")
     if not node.get("offscreen"):
         cx, cy = center(node["bbox"])
         parts.append(f"({cx},{cy})")
+    if node.get("covered"):
+        parts.append(f"under {node['covered']}")
     return " ".join(parts)
 
 
@@ -100,7 +103,9 @@ def format_snapshot(snap: dict, offscreen: bool = False) -> str:
     if hidden:
         lines.append(f"... {hidden} more outside the visible area (desk a11y --offscreen); "
                      "clicking their @ref scrolls them into view")
-    if snap["truncated"]:
+    if snap["truncated"] == "time":
+        lines.append("... cut short: the application took too long to answer; narrow with --app")
+    elif snap["truncated"]:
         lines.append("... truncated; narrow with --app or raise --max")
     return "\n".join(lines)
 
@@ -116,27 +121,61 @@ def _spec(run, ref: str) -> dict:
     return {k: node[k] for k in ("pid", "path", "role", "name")}
 
 
+def _point(run, spec: dict, size: tuple[int, int]) -> tuple[tuple[int, int] | None, str | None]:
+    res = _helper(run, "resolve", json.dumps(spec))
+    # The guest finds a point where a click reaches the element (hit tests); Windows' agent only
+    # says whether it is showing.
+    point = res["point"] if "point" in res else (center(res["bbox"]) if res["showing"] else None)
+    if point and not _on_screen([*point, 1, 1], size):
+        point = None
+    return (tuple(point) if point else None), res.get("covered")
+
+
 def _visible_point(run, spec: dict) -> tuple[int, int]:
-    """Fresh screen position (layouts move); scrolls the element into view first if needed."""
+    """Fresh screen position (layouts move) where a click reaches the element itself, not a sticky
+    bar or toast over it; scrolls it into view first if needed."""
+    # A page still building moves what it has already drawn; wait for it, briefly.
+    display.wait_stable(run.dom(), timeout=2, frames=2)
     size = display.png_size(display.screenshot(run.dom()))
-    res = _helper(run, "resolve", json.dumps(spec))
-    if res["showing"] and _on_screen(res["bbox"], size):
-        return center(res["bbox"])
-    _helper(run, "scroll", json.dumps(spec))
-    display.wait_stable(run.dom(), timeout=3)
-    res = _helper(run, "resolve", json.dumps(spec))
-    if not (res["showing"] and _on_screen(res["bbox"], size)):
-        raise DeskError(f"{spec['role']} {spec['name']!r} is outside the visible area and could not be "
-                        "scrolled into view; scroll with `desk scroll` and look again")
-    return center(res["bbox"])
+    point, covered = _point(run, spec, size)
+    # Scrolled away: the toolkit scrolls it into view. Covered by a sticky bar: to the top, then
+    # the bottom edge of the view, away from it.
+    for how in ("anywhere", "top", "bottom"):
+        if point or (how != "anywhere" and not covered):
+            break
+        _helper(run, "scroll", json.dumps(spec), *([] if how == "anywhere" else [how]))
+        display.wait_stable(run.dom(), timeout=3)
+        point, covered = _point(run, spec, size)
+    if point:
+        return point
+    if covered:
+        raise DeskError(f"{spec['role']} {spec['name']!r} is covered by {covered}, also after scrolling; "
+                        "close or move what is in the way, or click by pixels from a screenshot")
+    raise DeskError(f"{spec['role']} {spec['name']!r} is outside the visible area and could not be "
+                    "scrolled into view; scroll with `desk scroll` and look again")
 
 
 def locate_ref(run, ref: str) -> tuple[int, int]:
     return _visible_point(run, _spec(run, ref))
 
 
+# ARIA's names for roles, which agents testing web pages think in, for AT-SPI's.
+ROLE_ALIASES = {
+    "tab": "page tab", "tablist": "page tab list", "tabpanel": "panel", "checkbox": "check box",
+    "radio": "radio button", "textbox": "entry", "searchbox": "entry", "combobox": "combo box",
+    "menuitem": "menu item", "listitem": "list item", "treeitem": "tree item", "spinbutton": "spin button",
+    "img": "image", "row": "table row", "cell": "table cell", "gridcell": "table cell",
+    "columnheader": "column header", "rowheader": "row header",
+}
+
+
+def role_name(role: str | None) -> str | None:
+    return ROLE_ALIASES.get(role, role) if role else role
+
+
 def _matches(snap: dict, query: str, role: str | None, exact: bool) -> list[dict]:
     q = query.casefold()
+    role = role_name(role)
 
     def match(n: dict) -> bool:
         if role and n["role"] != role:
@@ -162,10 +201,10 @@ def _ranker(snap: dict):
     def in_dialog(n: dict) -> bool:
         return any(n["pid"] == pid and n["path"][:len(path)] == path and n["path"] != path for pid, path in dialogs)
 
-    def rank(n: dict) -> tuple[bool, bool, bool]:
-        # Visible first, then inside an open dialog (its "Close" over the browser window's),
-        # then controls over the text describing them.
-        return (bool(n.get("offscreen")), not in_dialog(n),
+    def rank(n: dict) -> tuple[bool, bool, bool, bool]:
+        # Visible first, then not covered by something else, then inside an open dialog (its
+        # "Close" over the browser window's), then controls over the text describing them.
+        return (bool(n.get("offscreen")), bool(n.get("covered")), not in_dialog(n),
                 n["role"] in ("label", "heading", "paragraph", "static", "section"))
 
     return rank
@@ -193,6 +232,15 @@ def pick(snap: dict, hits: list[dict], query: str) -> dict:
     return top[0] if len(top) == 1 else best_match(snap, top)
 
 
+def role_hint(snap: dict, query: str, role: str | None, exact: bool) -> str:
+    """When nothing of a role matches: what the name belongs to instead."""
+    if not role:
+        return ""
+    others = sorted({f"{n['role']} {n['name'] or n.get('text') or n.get('value')!r}"
+                     for n in _matches(snap, query, None, exact)})
+    return f" with role {role!r}; there is: {', '.join(others[:6])}" if others else ""
+
+
 def locate_name(run, query: str, role: str | None = None, exact: bool = False) -> tuple[int, int]:
     snap = snapshot(run, limit=2000, save=False)
     hits = _matches(snap, query, role, exact)
@@ -200,7 +248,8 @@ def locate_name(run, query: str, role: str | None = None, exact: bool = False) -
         snap = snapshot(run, all_windows=True, limit=2000, save=False)
         hits = _matches(snap, query, role, exact)
     if not hits:
-        raise DeskError(f"nothing named {query!r} on screen")
+        cut = " (the listing was cut short: the application answers slowly)" if snap["truncated"] == "time" else ""
+        raise DeskError(f"nothing named {query!r}{role_hint(snap, query, role, exact)} on screen{cut}")
     best = pick(snap, hits, query)
     return _visible_point(run, {k: best[k] for k in ("pid", "path", "role", "name")})
 

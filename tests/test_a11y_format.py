@@ -1,6 +1,14 @@
 import unittest
 
-from desk.a11y import _on_screen, center, format_node, format_snapshot
+from desk.a11y import (
+    _matches,
+    _on_screen,
+    center,
+    format_node,
+    format_snapshot,
+    pick,
+    role_hint,
+)
 from desk.guest import remote_command
 
 
@@ -36,6 +44,14 @@ class Format(unittest.TestCase):
         full = format_snapshot(snap, offscreen=True)
         self.assertIn('@e2 button "Proceed" [offscreen]', full)
         self.assertNotIn("(60,40)", full.splitlines()[-1])
+
+    def test_covered_says_by_what(self):
+        n = node("e4", 0, "button", "Ports", covered='section "Create and start Create Cancel"')
+        self.assertEqual(format_node(n), '@e4 button "Ports" [covered] (60,40) under section "Create and start Create Cancel"')
+
+    def test_time_cut_is_explained(self):
+        snap = {"tops": [{"title": "A", "app": "a", "focus": True, "start": 0}], "nodes": [], "truncated": "time"}
+        self.assertIn("took too long", format_snapshot(snap))
 
     def test_geometry(self):
         self.assertEqual(center([10, 20, 100, 40]), (60, 40))
@@ -110,6 +126,23 @@ class Pick(unittest.TestCase):
         shown = {"pid": 1, "path": [0, 1], "role": "button", "name": "Delete task"}
         hidden = {"pid": 1, "path": [0, 2], "role": "button", "name": "Delete all", "offscreen": True}
         self.assertIs(pick({"nodes": [shown, hidden]}, [shown, hidden], "Delete"), shown)
+
+
+class Roles(unittest.TestCase):
+    def setUp(self):
+        self.snap = {"nodes": [node("e1", 0, "page tab", "Source"), node("e2", 0, "toggle button", "Form"),
+                               node("e3", 0, "push button", "Save", covered="alert"),
+                               node("e4", 0, "push button", "Save")]}
+
+    def test_aria_names_work(self):
+        self.assertEqual([n["ref"] for n in _matches(self.snap, "Source", "tab", True)], ["e1"])
+
+    def test_hint_names_what_the_name_belongs_to(self):
+        self.assertIn("there is: page tab 'Source'", role_hint(self.snap, "Source", "button", True))
+        self.assertEqual(role_hint(self.snap, "Source", None, True), "")
+
+    def test_uncovered_preferred(self):
+        self.assertEqual(pick(self.snap, _matches(self.snap, "Save", None, True), "Save")["ref"], "e4")
 
 
 if __name__ == "__main__":

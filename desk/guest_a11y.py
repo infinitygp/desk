@@ -6,6 +6,7 @@ Prints one JSON document. Needs DBUS_SESSION_BUS_ADDRESS of the graphical sessio
 
 import json
 import sys
+import time
 
 import gi
 
@@ -29,6 +30,13 @@ HIDDEN_ROOTS = {"document web", "frame", "window", "dialog", "internal frame", "
 MAX_VISIT = 8000
 MAX_OFFSCREEN = 300
 OBJ = "￼"
+# A large web page answers slowly enough that two walks of it took minutes; past this a listing
+# is cut short (and says so) rather than leaving the caller waiting.
+WALK_SECONDS = 20
+# Looking a node up again after the tree changed searches the application's whole tree.
+SEARCH_SECONDS = 10
+# Hit tests (what is really at a point) per listing; Firefox answers each in about a millisecond.
+HIT_SECONDS = 3
 
 
 def shell_windows() -> list[dict]:
@@ -183,6 +191,101 @@ def describe(acc, base, pid, path, depth):
     return node, st
 
 
+def contains(box, point) -> bool:
+    x, y, w, h = box
+    return x <= point[0] < x + w and y <= point[1] < y + h
+
+
+def center(box) -> tuple[int, int]:
+    x, y, w, h = box
+    return x + w // 2, y + h // 2
+
+
+def hit_at(root, base, point):
+    """The deepest element the application itself says is at a screen point: what a click there
+    reaches. `root` is the top of the process's tree, `base` its coordinate base. None when the
+    toolkit cannot tell."""
+    kind, ox, oy = base
+    coord = Atspi.CoordType.SCREEN if kind == "screen" else Atspi.CoordType.WINDOW
+    proc = process_of(root)
+    acc, hit = root, None
+    for _ in range(40):
+        try:
+            ch = Atspi.Component.get_accessible_at_point(acc, point[0] - ox, point[1] - oy, coord)
+            # Another process (an embedded web view) has coordinates of its own. Toolkits without
+            # a hit test of their own answer with the first child whose box contains the point,
+            # hidden ones too (an unmapped GtkStack page): stop at what is showing.
+            if ch is None or ch == acc or process_of(ch) != proc or "showing" not in states(ch):
+                break
+        except (GLib.Error, AttributeError, TypeError):
+            break
+        acc = hit = ch
+    return hit
+
+
+def placement(acc, hit, chain, point) -> str | None:
+    """Where `hit`, the element at `point`, is relative to `acc`: "self", "inside" (a descendant,
+    such as the text inside a button), "around" (an ancestor, and every element between them
+    contains the point: `acc` itself is not hit-testable there; Firefox leaves out the buttons of
+    sticky footers that way), "other" (something else covers `acc` there) or None (unknown).
+    `chain` holds the ancestors of `acc` with their boxes, the top-level first."""
+    if hit is None:
+        return None
+    if hit == acc:
+        return "self"
+    for i, (anc, _) in enumerate(chain):
+        if anc == hit:
+            # An ancestor is what is there also when `acc` is scrolled out of a list or pane in
+            # between, which then does not contain the point.
+            return "around" if all(b is None or contains(b, point) for _, b in chain[i + 1:]) else "other"
+    a = hit
+    for _ in range(60):
+        try:
+            a = a.get_parent()
+        except GLib.Error:
+            break
+        if a is None:
+            break
+        if a == acc:
+            return "inside"
+        if any(a == anc for anc, _ in chain):
+            break
+    return "other"
+
+
+def label_of(acc) -> str:
+    try:
+        name = (acc.get_name() or "").strip()
+        text = name or text_of(acc)
+        return f"{acc.get_role_name()} {json.dumps(text[:60], ensure_ascii=False)}" if text else acc.get_role_name()
+    except GLib.Error:
+        return "another element"
+
+
+def clickable_point(acc, bbox, chain, root, showing: bool):
+    """A point of `bbox` where a click reaches `acc` (the middle if possible), or None and what
+    covers it. When the toolkit cannot hit-test, the middle of what it reports as showing."""
+    racc, rbase, rbox = root
+    x, y, w, h = bbox
+    cover, tested = None, False
+    for fx, fy in ((2, 2), (1, 2), (3, 2), (2, 1), (2, 3), (1, 1), (3, 1), (1, 3), (3, 3)):
+        p = (x + w * fx // 4, y + h * fy // 4)
+        if rbox is not None and not contains(rbox, p):
+            continue
+        tested = True
+        hit = hit_at(racc, rbase, p)
+        where = placement(acc, hit, chain, p)
+        if where is None:
+            return (center(bbox) if showing else None), None
+        if where != "other":
+            return p, None
+        cover = cover or label_of(hit)
+    if not tested:
+        # Outside its window's box (a menu hanging below a small window): nothing to ask.
+        return (center(bbox) if showing else None), None
+    return None, cover
+
+
 def wanted(node, st, parent_name) -> bool:
     if node["bbox"] is None:
         return False
@@ -203,14 +306,40 @@ def snapshot(opts: dict) -> dict:
     scope_app = opts.get("app")
     want_all = opts.get("all", False)
     limit = opts.get("max", 300)
+    hits = opts.get("hits", True)
     desktop = Atspi.get_desktop(0)
     nodes, tops, visited, offscreen = [], [], 0, 0
     truncated = False
+    start = time.monotonic()
 
-    def walk(acc, base, pid, path, depth, parent_name, proc, gtk4, parent_box):
+    def probe(node, acc, chain, root):
+        """What a click on the node would reach: Firefox does not mark the buttons of sticky
+        footers as showing although they are on screen, and a toast or sticky bar can cover what
+        it marks as showing."""
+        if node["bbox"] is None or probe.spent > HIT_SECONDS:
+            return
+        point = center(node["bbox"])
+        if root[2] is None or not contains(root[2], point):
+            return
+        t = time.monotonic()
+        hit = hit_at(root[0], root[1], point)
+        where = placement(acc, hit, chain, point)
+        probe.spent += time.monotonic() - t
+        if node.get("offscreen"):
+            if where in ("self", "inside", "around"):
+                del node["offscreen"]
+        elif where == "other":
+            node["covered"] = label_of(hit)
+
+    probe.spent = 0.0
+
+    def walk(acc, base, pid, path, depth, parent_name, proc, gtk4, parent_box, chain, root):
         nonlocal visited, truncated, offscreen
         if visited >= MAX_VISIT or len(nodes) - offscreen >= limit:
-            truncated = True
+            truncated = truncated or "count"
+            return
+        if time.monotonic() - start > WALK_SECONDS:
+            truncated = "time"
             return
         visited += 1
         try:
@@ -221,6 +350,8 @@ def snapshot(opts: dict) -> dict:
             fixed = stacked_base(parent_box, node["bbox"], base)
             if fixed != base:
                 base, node["bbox"] = fixed, list(parent_box)
+        if root is None:
+            root = (acc, base, node["bbox"])
         # Not "showing" covers content scrolled out of view or clipped by a scrolling list,
         # which the agent can bring into view, but also background tabs and hidden windows,
         # which are pruned. Structural containers can lack "showing" while their children are
@@ -230,6 +361,8 @@ def snapshot(opts: dict) -> dict:
                 return
             node["offscreen"] = True
         emit = wanted(node, st, parent_name)
+        if emit and hits:
+            probe(node, acc, chain, root)
         if emit and node.get("offscreen"):
             emit = offscreen < MAX_OFFSCREEN
             offscreen += emit
@@ -241,6 +374,7 @@ def snapshot(opts: dict) -> dict:
             n = acc.get_child_count()
         except GLib.Error:
             return
+        below = chain + [(acc, node["bbox"])]
         for i in range(n):
             try:
                 ch = acc.get_child_at_index(i)
@@ -250,7 +384,8 @@ def snapshot(opts: dict) -> dict:
                 continue
             ch_proc = process_of(ch)
             ch_base = embedded_base(acc, base, ch) if ch_proc != proc else base
-            walk(ch, ch_base, pid, path + [i], child_depth, pname, ch_proc, gtk4, node["bbox"])
+            walk(ch, ch_base, pid, path + [i], child_depth, pname, ch_proc, gtk4, node["bbox"], below,
+                 root if ch_proc == proc else None)
 
     for _, app in app_children(desktop):
         # An application that is exiting or not answering must not break the whole listing.
@@ -284,7 +419,7 @@ def snapshot(opts: dict) -> dict:
                     continue
             tops.append({"app": app_name, "pid": pid, "title": top.get_name() or "",
                          "focus": bool(is_focus), "start": len(nodes)})
-            walk(top, base, pid, [ti], 0, "", process_of(top), toolkit_major(app) == ("gtk", 4), None)
+            walk(top, base, pid, [ti], 0, "", process_of(top), toolkit_major(app) == ("gtk", 4), None, [], None)
     return {"windows": windows, "tops": tops, "nodes": nodes, "truncated": truncated}
 
 
@@ -308,8 +443,11 @@ def find_node(spec: dict):
     if acc is not None and acc.get_role_name() == spec["role"] and (acc.get_name() or "").strip() == spec["name"]:
         return app, path, acc
 
+    # The tree changed (a web page builds it lazily and re-renders): search the window for it.
+    deadline = time.monotonic() + SEARCH_SECONDS
+
     def search(a, at, depth=0):
-        if depth > 60:
+        if depth > 60 or time.monotonic() > deadline:
             return None
         for i in range(a.get_child_count()):
             ch = a.get_child_at_index(i)
@@ -325,55 +463,72 @@ def find_node(spec: dict):
     top = app.get_child_at_index(path[0]) if path[0] < app.get_child_count() else None
     hit = search(top, [path[0]]) if top is not None else None
     if hit is None:
+        if time.monotonic() > deadline:
+            raise LookupError(f"{spec['role']} {spec['name']!r} not found again within {SEARCH_SECONDS}s "
+                              "(the page changed); look again")
         raise LookupError(f"{spec['role']} {spec['name']!r} no longer exists")
     return app, hit[0], hit[1]
 
 
-def base_along(app, path):
-    """Coordinate base for the node at `path`, following embedded processes on the way down."""
+def along(app, path):
+    """Coordinate base for the node at `path`, following embedded processes on the way down; its
+    ancestors with their boxes; and the top of its process's tree for hit tests."""
     acc = app.get_child_at_index(path[0])
     base = Mapper(shell_windows()).for_toplevel(app.get_name() or "", app.get_process_id(), acc, app)
     if base is None:
-        return None
+        return None, [], None
     proc = process_of(acc)
     gtk4 = toolkit_major(app) == ("gtk", 4)
-    box = Mapper.place(acc, base) if gtk4 else None
+    box = Mapper.place(acc, base)
+    root = (acc, base, box)
+    chain = []
     for i in path[1:]:
+        chain.append((acc, box))
         ch = acc.get_child_at_index(i)
         ch_proc = process_of(ch)
-        if ch_proc != proc:
+        embedded = ch_proc != proc
+        if embedded:
             base, proc = embedded_base(acc, base, ch), ch_proc
+        ch_box = Mapper.place(ch, base)
         if gtk4:
-            ch_box = Mapper.place(ch, base)
             fixed = stacked_base(box, ch_box, base)
             if fixed != base:
                 base, ch_box = fixed, box
-            box = ch_box
-        acc = ch
-    return base
+        if embedded:
+            root = (ch, base, ch_box)
+        acc, box = ch, ch_box
+    return base, chain, root
 
 
 def resolve(spec: dict) -> dict:
+    """Where the element is now and a point where a click reaches it (None: scrolled away or
+    covered, with what covers it)."""
     app, path, acc = find_node(spec)
-    base = base_along(app, path)
+    base, chain, root = along(app, path)
     if base is None:
         raise LookupError("window position unknown")
     bbox = Mapper.place(acc, base)
     if bbox is None:
         raise LookupError("element has no on-screen extents")
-    return {"bbox": bbox, "showing": "showing" in states(acc)}
+    showing = "showing" in states(acc)
+    point, cover = clickable_point(acc, bbox, chain, root, showing)
+    return {"bbox": bbox, "showing": showing, "point": list(point) if point else None, "covered": cover}
 
 
-def scroll(spec: dict) -> dict:
+SCROLL = {"anywhere": Atspi.ScrollType.ANYWHERE, "top": Atspi.ScrollType.TOP_EDGE,
+          "bottom": Atspi.ScrollType.BOTTOM_EDGE}
+
+
+def scroll(spec: dict, how: str = "anywhere") -> dict:
     """Bring an element into view the way the toolkit itself would (scrollIntoView and kin)."""
     _, _, acc = find_node(spec)
     done = False
     if "Component" in acc.get_interfaces():
         try:
-            done = Atspi.Component.scroll_to(acc, Atspi.ScrollType.ANYWHERE)
+            done = Atspi.Component.scroll_to(acc, SCROLL[how])
         except (GLib.Error, AttributeError, TypeError):
             done = False
-    if not done:
+    if not done and how == "anywhere":
         try:
             done = Atspi.Component.grab_focus(acc)
         except (GLib.Error, AttributeError, TypeError):
@@ -405,6 +560,7 @@ def set_text(spec: dict, text: str) -> dict:
 
 def main() -> None:
     cmd, arg = sys.argv[1], json.loads(sys.argv[2])
+    extra = sys.argv[3] if len(sys.argv) > 3 else None
     try:
         if cmd == "snapshot":
             out = snapshot(arg)
@@ -413,11 +569,11 @@ def main() -> None:
         elif cmd == "resolve":
             out = resolve(arg)
         elif cmd == "scroll":
-            out = scroll(arg)
+            out = scroll(arg, extra or "anywhere")
         elif cmd == "action":
-            out = action(arg, sys.argv[3] if len(sys.argv) > 3 else None)
+            out = action(arg, extra)
         elif cmd == "set-text":
-            out = set_text(arg, sys.argv[3])
+            out = set_text(arg, extra)
         else:
             out = {"error": f"unknown command {cmd}"}
     except (LookupError, GLib.Error) as e:
