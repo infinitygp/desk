@@ -27,6 +27,8 @@ def _alive(pid: int) -> bool:
 
 def _free(port: int) -> bool:
     with socket.socket() as s:
+        # Like ssh: a port whose last connections are in TIME_WAIT can be listened on again.
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             s.bind(("127.0.0.1", port))
         except OSError:
@@ -83,7 +85,7 @@ def start(run, port: int, local: int | None = None) -> int:
 
 
 def stop(run, port: int | None = None) -> list[int]:
-    stopped = []
+    stopped, held = [], []
     for f in listing(run):
         if port is not None and f["port"] != port:
             continue
@@ -92,9 +94,14 @@ def stop(run, port: int | None = None) -> list[int]:
             try:
                 # The tunnel process leads a session of its own, with its ssh.
                 os.killpg(f["pid"], signal.SIGTERM)
+                held.append(f["local"])
             except ProcessLookupError:
                 pass  # gone meanwhile
         stopped.append(f["port"])
+    # Until the local ports are free again, so that forwarding them anew gets the same numbers.
+    deadline = time.monotonic() + 5
+    while not all(_free(local) for local in held) and time.monotonic() < deadline:
+        time.sleep(0.1)
     return stopped
 
 
