@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 
 from . import browser, guest
@@ -47,6 +48,11 @@ GUEST_SCRIPT = r"""
 S="$1"
 section() { echo "=== $1"; }
 section failed;    systemctl --failed --no-legend --plain </dev/null 2>&1
+# Units that failed at any time since the start, also before a reboot (the journal is persistent),
+# system and user units alike: systemd's "unit failed" message.
+section unitfailures
+journalctl --since "@$S" --no-pager -o short-iso MESSAGE_ID=d9b373ed55a64feb8242e02dbe79a49c </dev/null 2>/dev/null \
+    | grep -v '^-- ' | tail -n 200
 # chronyd complains about the clock jump `desk up` makes when it restores a saved state.
 section journal;   journalctl --since "@$S" -p warning --no-pager -o short-iso </dev/null 2>&1 \
     | grep -v -E 'chronyd\[[0-9]+\]: (Forward time jump|Backward time jump|Can.t synchronise)' | tail -n 400
@@ -212,6 +218,34 @@ def guest_problems(run) -> dict[str, str]:
     return {k: "\n".join(v).strip() for k, v in sections.items()}
 
 
+# 2026-10-08T21:30:00+02:00 desk-fedora systemd[1]: foo.service: Failed with result 'exit-code'.
+UNIT_FAILED = re.compile(r"^(\S+) \S+ systemd\[(\d+)\]: (\S+): Failed with result '([^']*)'")
+
+
+def unit_failures(text: str) -> list[str]:
+    """`TIME UNIT (result)` for each time a unit failed, user units marked as such."""
+    out = []
+    for line in text.splitlines():
+        m = UNIT_FAILED.match(line)
+        if m:
+            stamp, pid, unit, result = m.groups()
+            out.append(f"{stamp[11:19]} {unit}{' (user)' if pid != '1' else ''}: {result}")
+    return out
+
+
+# dnf5 prints its transaction times in UTC; the report's times are local.
+DNF_TIME = re.compile(r"(?<!\d)(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(?!\d)")
+
+
+def local_dnf_times(text: str) -> str:
+    def local(m: re.Match) -> str:
+        utc = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
+        return utc.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
+    return "\n".join(DNF_TIME.sub(local, line) if not line.startswith("installed ") else line
+                     for line in text.splitlines())
+
+
 def _count(text: str, pattern: str | None = None) -> int:
     lines = [ln for ln in text.splitlines() if ln.strip()]
     return len([ln for ln in lines if re.search(pattern, ln)]) if pattern else len(lines)
@@ -262,6 +296,8 @@ def collect(run, diff: bool = False) -> Path:
             problems = guest_problems(run)
         except (DeskError, subprocess.TimeoutExpired) as e:
             problems = {"error": str(e)}
+        if load_image(run.image).family != "windows" and problems.get("packages"):
+            problems["packages"] = local_dnf_times(problems["packages"])
         for key in ("journal", "avc", "packages"):
             if problems.get(key):
                 (out / f"{key}.txt").write_text(problems[key] + "\n")
@@ -306,6 +342,10 @@ def collect(run, diff: bool = False) -> Path:
     else:
         failed = problems.get("failed", "")
         md.append(f"- failed units: {_count(failed)}" + (f"\n\n```\n{failed}\n```\n" if failed else ""))
+        history = unit_failures(problems.get("unitfailures", ""))
+        if history:
+            md.append(f"- unit failures during the run, before reboots too: {len(history)}\n\n```\n"
+                      + "\n".join(history[-30:]) + "\n```\n")
         if load_image(run.image).family != "windows":
             denials = _count(problems.get("avc", ""), r"type=(AVC|USER_AVC|SELINUX_ERR)")
             md.append(f"- SELinux denials since start: {denials}" + (" (see avc.txt)" if problems.get("avc") else ""))

@@ -1,6 +1,11 @@
 import unittest
 
-from desk.evidence import format_changes, parse_virt_diff
+from desk.evidence import (
+    format_changes,
+    local_dnf_times,
+    parse_virt_diff,
+    unit_failures,
+)
 
 # Trimmed real virt-diff output (Fedora guest, warm image vs run overlay).
 SAMPLE = """\
@@ -108,3 +113,22 @@ class StepLabels(unittest.TestCase):
         self.assertEqual(_step_labels([50.0, 105.0, 119.0, 123.0 + 86400], events),
                          ["before the first step", "step 1: root dnf install", "step 2: click Example",
                           "step 3: clock +1d"])
+
+
+class UnitFailures(unittest.TestCase):
+    def test_system_and_user_units(self):
+        text = ("2026-10-09T15:17:58+02:00 desk-fedora systemd[1]: deskfail.service: Failed with result 'exit-code'.\n"
+                "2026-10-09T15:17:59+02:00 desk-fedora systemd[1318]: app.service: Failed with result 'timeout'.\n"
+                "2026-10-09T15:18:00+02:00 desk-fedora systemd[1]: Started foo.service.\n")
+        self.assertEqual(unit_failures(text), ["15:17:58 deskfail.service: exit-code",
+                                               "15:17:59 app.service (user): timeout"])
+
+
+class DnfTimes(unittest.TestCase):
+    def test_utc_becomes_local(self):
+        from datetime import UTC, datetime
+
+        local = datetime(2026, 10, 8, 21, 30, tzinfo=UTC).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        text = "installed foo-1.0-1.noarch\n 3 dnf install -y /tmp/foo.rpm 2026-10-08 21:30:00     1"
+        self.assertEqual(local_dnf_times(text).splitlines(),
+                         ["installed foo-1.0-1.noarch", f" 3 dnf install -y /tmp/foo.rpm {local}     1"])

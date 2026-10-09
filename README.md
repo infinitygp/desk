@@ -153,8 +153,9 @@ Projects keep theirs in `test/desk/`.
 
 ## Evidence
 
-`desk down` writes `reports/<run>/report.md` (failed units, SELinux denials, coredumps, journal
-warnings, package changes, timeline with screenshots); `--diff` adds the files the run changed,
+`desk down` writes `reports/<run>/report.md` (failed units, unit failures from the journal since
+the start across reboots, SELinux denials, coredumps, journal warnings, package changes with dnf's
+UTC times made local, timeline with screenshots); `--diff` adds the files the run changed,
 from `virt-diff` against the image the run started from. Reports are pruned after 14 days.
 
 `desk record start|stop` (or `desk up --record`) takes screenshots at a steady rate (4 fps) in a

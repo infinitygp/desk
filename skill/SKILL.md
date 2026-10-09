@@ -117,8 +117,8 @@ guest shell; `--root` and `--gui` apply to the whole snippet.
 ## Evidence report
 
 `desk down` first writes `/var/lib/vmlab/reports/<run>/report.md` and prints its path: failed
-units, SELinux denials, crashes, journal warnings, package changes and Firefox console errors since
-the run started, plus a
+units (now, and every unit failure since the start, before reboots too), SELinux denials, crashes,
+journal warnings, package changes and Firefox console errors since the run started, plus a
 timeline of every desk command with its exit code and the screenshots taken. `desk down --diff`
 adds the files the run changed. Without `--keep`, `desk down` deletes the run's directory (disk,
 snapshots, extra disks); screenshots and logs stay in the report. Point the user to the report
