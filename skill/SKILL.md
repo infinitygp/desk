@@ -59,6 +59,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk report [--diff]` | Write the evidence report now (see below) |
 | `desk ls`, `desk down [ID] [--all] [--keep] [--diff] [--no-report]`, `desk gc` | List (with who holds each run), destroy (writing the report first), clean up idle runs |
 | `desk view` | Tell the user how to watch the run live (VNC through an SSH tunnel) |
+| `desk forward PORT[:LOCAL]`, `desk forward`, `desk forward --stop PORT\|all`, `desk up IMAGE --forward PORT` | Reach a guest port from the host (127.0.0.1, the same number when free, else printed) for as long as the run exists, across reboots and snapshot restores |
 | `desk browser open URL\|/PATH` | Open an address in Firefox's current tab, as a link from another program would; a path is opened on the site shown now (`/podman`, `/system/services`) |
 | `desk browser viewport WxH\|reset` | Pages at WxH CSS pixels (a phone: `390x700`) through Firefox's responsive design mode; prints the `desk shot --region` of the page area |
 | `desk browser console [--errors] [--all]` | Web console of every page since the run started (see Pitfalls) |
@@ -326,6 +327,22 @@ types the password again when sudo answers "Sorry, try again". Test packaging an
 instead, where Cockpit is not installed, as on a fresh Workstation: a plugin that depends only on
 `cockpit-bridge` installs there without the web console a user needs to reach it.
 
+### Cockpit on phones
+
+- `desk browser viewport 390x700` gives pages 390x700 CSS pixels through Firefox's responsive
+  design mode (Firefox's window cannot get that narrow) and prints the `desk shot --region` of the
+  page area; `desk browser viewport reset` closes the mode. Cockpit collapses its menu at that
+  width, so the plugin's iframe gets the whole width. The screen is 800 pixels high: taller
+  viewports run past its bottom (`desk display --resolution` to a taller mode the monitor offers).
+- The plugin's iframe is same-origin, so the web console (`desk key ctrl+shift+k`) can measure it:
+  `[...document.querySelectorAll('iframe')].find(i => i.src.includes('<plugin>')).contentDocument`.
+- Desktop regression check: the same crop before and after a change, compared on the host with
+  `magick compare -fuzz 2%`.
+- A browser on the host: `desk forward 9090` prints the local address of the guest's Cockpit (its
+  certificate comes from the image's own CA, so accept it). Clicking "Turn on administrative access"
+  does nothing in a headless browser; set localStorage `superuser:tester`=`sudo` and
+  `superuser-key`=`superuser:tester` on the login page before logging in.
+
 ## Judging screenshots
 
 - Describe what is actually on the screen before concluding; check text, layout, clipping,
@@ -344,7 +361,7 @@ instead, where Cockpit is not installed, as on a fresh Workstation: a plugin tha
   keyboard layout = US plus AltGr letters,
   animations and screen lock off, session starts on the desktop rather than the overview.
 - Guest clocks are synced on restore; network goes through user-mode networking (outbound
-  works, inbound only SSH).
+  works, inbound only SSH; `desk forward PORT` makes a guest service reachable from the host).
 - Several runs can exist at once; pass `-r ID` or set `DESK_RUN`. `desk ls` shows who holds each:
   the scenario, `desk up --label TEXT` (or `$DESK_LABEL`), or by default the coding agent and its
   directory ("claude @ cockpit-example", "(agent gone)" once it has exited). Leave other agents'

@@ -136,6 +136,9 @@ field, selects all and types (or pastes through the shell extension's `SetClipbo
 AT-SPI's text replacement leaves web pages' input events out. `desk type` into a browser window
 whose focus is not in a text field is refused. Walks of the tree stop after 20 s.
 
+`desk forward` keeps an SSH tunnel per guest port in a background process
+(`python -m desk.forward`), restarted when SSH drops, stopped by `desk down`.
+
 ## Scenarios
 
 `desk scenario run FILE` runs a repeatable end-to-end test described in TOML (format in

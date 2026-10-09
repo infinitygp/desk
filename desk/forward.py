@@ -1,0 +1,143 @@
+"""Guest ports reachable from the host (desk forward 9090): an SSH tunnel per port, kept up by a
+background process for as long as the run exists, so that a browser or a test on the host can use
+a service in the guest. passt forwards only SSH into the guest, and only from the domain's start."""
+
+import json
+import os
+import signal
+import socket
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+from .config import PROJECT, RUNS, SSH_KEY, DeskError
+
+
+def _dir(run) -> Path:
+    return run.dir / "forward"
+
+
+def _alive(pid: int) -> bool:
+    try:
+        return b"desk.forward" in Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return False
+
+
+def _free(port: int) -> bool:
+    with socket.socket() as s:
+        try:
+            s.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+    return True
+
+
+def _listening(port: int) -> bool:
+    with socket.socket() as s:
+        s.settimeout(1)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+def listing(run) -> list[dict]:
+    out = []
+    d = _dir(run)
+    for f in sorted(d.glob("*.json")) if d.exists() else []:
+        try:
+            info = json.loads(f.read_text())
+        except (OSError, ValueError):
+            continue
+        out.append({**info, "alive": _alive(info["pid"])})
+    return out
+
+
+def start(run, port: int, local: int | None = None) -> int:
+    """Forward the guest's `port` to `local` on the host's 127.0.0.1 (the same number when it is
+    free, else any free port); returns the local port."""
+    from .virt import free_port
+
+    for f in listing(run):
+        if f["port"] == port and f["alive"]:
+            return f["local"]
+    if local is None:
+        local = port if _free(port) else free_port()
+    elif not _free(local):
+        raise DeskError(f"port {local} on the host is in use")
+    d = _dir(run)
+    d.mkdir(exist_ok=True)
+    log_path = d / f"{port}.log"
+    with open(log_path, "w") as log:
+        p = subprocess.Popen([sys.executable, "-m", "desk.forward", run.id, str(port), str(local)],
+                             cwd=PROJECT, stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
+    (d / f"{port}.json").write_text(json.dumps({"port": port, "local": local, "pid": p.pid}))
+    deadline = time.monotonic() + 15
+    while not _listening(local):
+        if p.poll() is not None or time.monotonic() > deadline:
+            stop(run, port)
+            tail = log_path.read_text(errors="replace").strip()[-300:]
+            raise DeskError(f"forwarding guest port {port} failed" + (f": {tail}" if tail else ""))
+        time.sleep(0.2)
+    run.log_event(forward=port, local=local)
+    return local
+
+
+def stop(run, port: int | None = None) -> list[int]:
+    stopped = []
+    for f in listing(run):
+        if port is not None and f["port"] != port:
+            continue
+        (_dir(run) / f"{f['port']}.json").unlink(missing_ok=True)
+        if f["alive"]:
+            try:
+                # The tunnel process leads a session of its own, with its ssh.
+                os.killpg(f["pid"], signal.SIGTERM)
+            except ProcessLookupError:
+                pass  # gone meanwhile
+        stopped.append(f["port"])
+    return stopped
+
+
+def kill(run) -> None:
+    """When the run goes down: no tunnels to a VM that is gone."""
+    stop(run)
+
+
+def _tunnel(run_id: str, port: int, local: int) -> None:
+    """Keep the tunnel up while the run exists: SSH drops with every reboot or snapshot restore."""
+    from . import runs
+
+    child = None
+
+    def end(*_):
+        if child is not None and child.poll() is None:
+            child.terminate()
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, end)
+    mine = RUNS / run_id / "forward" / f"{port}.json"
+
+    def wanted() -> bool:
+        # Until the run is gone or desk no longer counts this process as the port's tunnel.
+        try:
+            return json.loads(mine.read_text()).get("pid") == os.getpid()
+        except (OSError, ValueError):
+            return False
+
+    deadline = time.monotonic() + 10
+    while not mine.exists() and time.monotonic() < deadline:
+        time.sleep(0.1)  # desk writes the file right after starting this process
+    while wanted():
+        run = runs.load(run_id)
+        child = subprocess.Popen(["ssh", "-i", str(SSH_KEY), "-o", "StrictHostKeyChecking=no",
+                                  "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR",
+                                  "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "ServerAliveInterval=15",
+                                  "-o", "ServerAliveCountMax=3", "-o", "ExitOnForwardFailure=yes", "-N",
+                                  "-L", f"127.0.0.1:{local}:127.0.0.1:{port}", "-p", str(run.ssh_port),
+                                  f"{run.user}@127.0.0.1"], stdin=subprocess.DEVNULL)
+        child.wait()
+        time.sleep(2)
+
+
+if __name__ == "__main__":
+    _tunnel(sys.argv[1], int(sys.argv[2]), int(sys.argv[3]))

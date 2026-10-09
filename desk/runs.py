@@ -441,10 +441,14 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
 
 
 def down(run: Run, keep: bool = False) -> None:
-    from . import record
+    from . import forward, record
 
     if not keep:
         record.kill(run)
+    try:
+        forward.kill(run)
+    except OSError as e:
+        print(f"[desk] warning: stopping port forwards of {run.id}: {e}", file=sys.stderr)
     dom = run.live_domain()
     if dom is not None:
         dom.destroy()

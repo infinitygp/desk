@@ -114,6 +114,8 @@ def cmd_up(args) -> None:
     if args.record:
         record.start(run)
     print(f"run {run.id} up (image {run.image}, ssh port {run.ssh_port})" + (", recording" if args.record else ""))
+    for port in args.forward or []:
+        _print_forward(run, port)
     print(f"export DESK_RUN={run.id}  # fish: set -x DESK_RUN {run.id}")
 
 
@@ -129,6 +131,48 @@ def cmd_down(args) -> None:
                 print(f"report: {report / 'report.md'}")
             for v in videos:
                 print(f"video: {v}")
+
+
+def _print_forward(run: runs.Run, port: int, local: int | None = None) -> None:
+    from . import forward
+
+    local = forward.start(run, port, local)
+    scheme = "https://" if port in (443, 8443, 9090) else ""
+    print(f"guest port {port} -> {scheme}127.0.0.1:{local}{'/' if scheme else ''} on the host, until the run goes down "
+          f"(desk forward --stop {port})")
+
+
+def cmd_forward(args) -> None:
+    from . import forward
+
+    run = runs.resolve(args.run)
+    if args.stop is not None:
+        stopped = forward.stop(run, None if args.stop == "all" else _port(args.stop))
+        print("stopped " + (", ".join(map(str, stopped)) if stopped else "nothing"))
+        return
+    if not args.port:
+        rows = forward.listing(run)
+        for f in rows:
+            print(f"{f['port']}\t127.0.0.1:{f['local']}\t" + ("up" if f["alive"] else "gone"))
+        if not rows:
+            print("no ports forwarded (desk forward PORT)")
+        return
+    port, _, local = args.port.partition(":")
+    run.dom()
+    _print_forward(run, _port(port), _port(local) if local else None)
+
+
+def _port_arg(text: str) -> int:
+    try:
+        return _port(text)
+    except DeskError as e:
+        raise argparse.ArgumentTypeError(str(e)) from None
+
+
+def _port(text: str) -> int:
+    if not text.isdigit() or not 0 < int(text) < 65536:
+        raise DeskError(f"not a port number: {text!r}")
+    return int(text)
 
 
 def cmd_report(args) -> None:
@@ -673,6 +717,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--scale", type=int, help="scaling in percent, e.g. 150 (Windows: signs in again)")
     p.add_argument("--disk", action="append", metavar="SIZE[:NAME]", help="extra empty disk, e.g. 10G:backup "
                    "(repeatable; desk disk)")
+    p.add_argument("--forward", action="append", type=_port_arg, metavar="PORT",
+                   help="reach this guest port from the host (repeatable; desk forward)")
     p.set_defaults(func=cmd_up)
 
     p = sub.add_parser("down", help="destroy a run and delete its files")
@@ -889,6 +935,12 @@ def build_parser() -> argparse.ArgumentParser:
     bp.add_argument("size", metavar="WxH|reset")
     _action_opts(bp)
     p.set_defaults(func=cmd_browser)
+
+    p = sub.add_parser("forward", help="reach a guest port from the host (an SSH tunnel for as long as the run "
+                       "exists); without PORT: list")
+    p.add_argument("port", nargs="?", metavar="PORT[:LOCAL]")
+    p.add_argument("--stop", metavar="PORT|all", help="stop forwarding")
+    p.set_defaults(func=cmd_forward)
 
     p = sub.add_parser("snapshot", help="save the running guest and go back to it later")
     p.add_argument("action", choices=["save", "restore", "list", "delete"])
