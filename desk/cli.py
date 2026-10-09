@@ -474,6 +474,19 @@ def cmd_reboot(args) -> None:
     dom = run.dom()
     png, _ = display.wait_stable(dom, timeout=30)
     print(f"rebooted in {took:.0f}s")
+    spec = runs.spec_for(run)
+    if args.prepare:
+        from . import steps
+
+        if not spec.prepare:
+            raise DeskError(f"{spec.name} has no prepare step")
+        steps.run_prepare(spec, run)
+        run.log_event(prepare="prepare")
+        png, _ = display.wait_stable(dom, timeout=10)
+        print(f"prepared again ({spec.prepare})")
+    elif spec.prepare:
+        print(f"note: programs open before the reboot are gone; `desk prepare` sets up again what {spec.name} "
+              "prepares (fedora-44-cockpit: Firefox logged in to Cockpit), or reboot with --prepare")
     if args.shot:
         _emit_shot(run, png, None, "reboot")
 
@@ -857,6 +870,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--shot", action="store_true")
     p.add_argument("--timeout", type=float, default=300, help="seconds until the new session must be up")
     p.add_argument("--command", help="reboot with this (as root), e.g. 'dnf offline reboot -y' for an upgrade")
+    p.add_argument("--prepare", action="store_true",
+                   help="then redo the image's preparation (fedora-44-cockpit: Firefox logged in to Cockpit)")
     p.set_defaults(func=cmd_reboot)
 
     p = sub.add_parser("selftest", help="end-to-end check of an image and the harness")

@@ -48,7 +48,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk focus NAME` | Bring a window to the front by application or title (keys go to the focused window) |
 | `desk scenario run FILE [--keep]`, `desk scenario check FILE` | Run a repeatable test from a TOML file (see below) |
 | `desk wait [--change] [--timeout S]` | Until the screen is still; `--change` first waits for it to change at all |
-| `desk reboot [--shot]` | Reboot and return when the new session is ready; reports apps that blocked shutdown |
+| `desk reboot [--shot] [--prepare]` | Reboot and return when the new session is ready; reports apps that blocked shutdown; `--prepare` then redoes the image's preparation (Cockpit logged in again) |
 | `desk exec [--root] [--timeout S] -- CMD` | Run in the guest over SSH as the desktop user (`--root`: as root); stopped in the guest after 600 s by default (exit 124; `--timeout 0`: no limit) |
 | `desk exec --gui -- APP ARGS` | Start a program detached inside the graphical session |
 | `desk exec --gui --wait -- CMD` | Run inside the session and return its output and exit code: what only the desktop session sees (windows, FindWindow, UI Automation, the session's environment) |
@@ -323,7 +323,10 @@ again) run `desk prepare`, in a scenario `prepare = true`: it opens Firefox at C
 turns on administrative access, whichever of that is missing. To get administrative access back
 in the middle of a test (after limiting it, or on a page that asks for it) without leaving the page:
 `desk prepare admin`, in a scenario `prepare = "admin"`; it waits for sudo's password prompt and
-types the password again when sudo answers "Sorry, try again". Test packaging and dependencies on `fedora-44-gnome`
+types the password again when sudo answers "Sorry, try again"; a sudo dialog the plugin itself
+opened is used as it is. `desk browser open /podman` opens a Cockpit page (a path is taken on the
+site shown now; a whole address needs `https://`) without typing into the address bar.
+`desk reboot --prepare` reboots and logs in again in one go. Test packaging and dependencies on `fedora-44-gnome`
 instead, where Cockpit is not installed, as on a fresh Workstation: a plugin that depends only on
 `cockpit-bridge` installs there without the web console a user needs to reach it.
 

@@ -25,9 +25,13 @@ def prepare(s):
 
 
 def admin(s):
-    if s.first(ADMIN, ("Limited access", "button"), ("Turn on administrative access", "button")) == 0:
+    # The dialog may be open already: a page asks for administrative access with a button of its own.
+    state = s.first(ADMIN, ("Limited access", "button"), ("Turn on administrative access", "button"),
+                    ("Authenticate", "button"))
+    if state == 0:
         return
-    s.click("Limited access", role="button")
+    if state < 3:
+        s.click(("Limited access", "Turn on administrative access")[state - 1], role="button")
     for _ in range(3):
         # The field is named after sudo's prompt once sudo asks; typing earlier is lost when sudo
         # starts over with "Sorry, try again".
