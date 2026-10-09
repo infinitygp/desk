@@ -25,3 +25,23 @@ class Parse(unittest.TestCase):
 
     def test_everything(self):
         self.assertEqual(len(browser.parse(JOURNAL, everything=True)), 6)
+
+
+DETAILED = """\
+2026-10-06T09:58:01+02:00 desk-fedora firefox[4612]: JavaScript error: , line 0: uncaught exception: Object
+2026-10-06T09:58:01+02:00 desk-fedora firefox[4612]: JavaScript error: https://localhost:9090/cockpit/@localhost/podman/index.js, line 2: uncaught exception: Object
+2026-10-06T09:58:01+02:00 desk-fedora firefox[4612]: JavaScript error detail: {"message":"uncaught exception: Object","value":"{\\"problem\\":\\"not-found\\"}","stack":["load@https://localhost:9090/cockpit/@localhost/podman/index.js:2:41","(anonymous)@https://localhost:9090/cockpit/@localhost/podman/index.js:3:20"]}
+2026-10-06T09:58:02+02:00 desk-fedora firefox[4612]: JavaScript error detail: {"message":"TypeError: x is null","value":null,"stack":[]}
+"""
+
+
+class Detail(unittest.TestCase):
+    def test_attached_to_the_latest_matching_error(self):
+        lines = browser.parse(DETAILED)
+        self.assertEqual(len(lines), 2)
+        self.assertEqual(lines[0], "09:58:01 JavaScript error: , line 0: uncaught exception: Object")
+        self.assertEqual(lines[1], '09:58:01 JavaScript error: https://localhost:9090/cockpit/@localhost/podman/index.js, '
+                         'line 2: uncaught exception: Object = {"problem":"not-found"} '
+                         "(at load@https://localhost:9090/cockpit/@localhost/podman/index.js:2:41 < "
+                         "(anonymous)@https://localhost:9090/cockpit/@localhost/podman/index.js:3:20)")
+        self.assertEqual(len(browser.errors(lines)), 2)

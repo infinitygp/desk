@@ -91,7 +91,11 @@ guest shell; `--root` and `--gui` apply to the whole snippet.
 - Web pages' console: `desk browser console` (`--errors`: console.error, uncaught exceptions and
   rejected promises only) prints what every page in Firefox logged since the run started, iframes
   included (Cockpit plugins run in one). Firefox's own messages are left out (`--all` shows them).
-  Reading only; to evaluate JavaScript open the devtools (`desk key ctrl+shift+k`) and type.
+  An uncaught exception or rejected promise names the file and line it came from and, after
+  `= `, the thrown value and its stack (`uncaught exception: Object = {"problem":"not-found"} (at
+  load@https://localhost:9090/cockpit/@localhost/foo/index.js:2:41 < ...)`): the URL tells the
+  plugin's code from Cockpit's. Reading only; to evaluate JavaScript open the devtools
+  (`desk key ctrl+shift+k`) and type.
 - `desk type` only knows ASCII and Polish letters; for anything else use `desk set-text`.
 - In a GTK file chooser, `ctrl+l`, type the path, then click "Open": Enter may only accept the
   path completion.

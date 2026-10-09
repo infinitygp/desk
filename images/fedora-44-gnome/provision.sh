@@ -9,6 +9,9 @@ install -m 0644 "$FILES"/desk-helper@desk.local/* /usr/share/gnome-shell/extensi
 
 # Pages' web console into the journal (desk browser console); also for a Firefox installed later.
 install -D -m 0644 "$FILES"/desk-firefox.js /usr/lib64/firefox/browser/defaults/preferences/desk-firefox.js
+# The thrown object and stack of uncaught exceptions as well (desk.cfg, Firefox's autoconfig).
+install -D -m 0644 "$FILES"/desk-autoconfig.js /usr/lib64/firefox/defaults/pref/desk-autoconfig.js
+install -D -m 0644 "$FILES"/desk.cfg /usr/lib64/firefox/desk.cfg
 
 # A blinking text cursor would keep the screen from ever settling.
 cat > /etc/dconf/db/local.d/01-desk-provision <<'CONF'
