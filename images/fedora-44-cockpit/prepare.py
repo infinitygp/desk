@@ -4,18 +4,18 @@ admin() alone turns on administrative access on whatever Cockpit page is open (d
 
 URL = "https://localhost:9090/"
 ADMIN = ("Administrative access", "button")
+# A cold boot starts Firefox and Cockpit for the first time, with the host busy with other runs.
+FIRST_PAGE = 180
 
 
 def prepare(s):
-    if s.running("firefox"):
+    # A running Firefox opens the address in its current tab (desk-firefox.js), like a link from
+    # another program; typing it into the address bar raced with the page taking the focus.
+    running = s.running("firefox")
+    s.gui("firefox", URL)
+    if running:
         s.focus("Firefox")
-        s.key("ctrl+l")
-        s.type(URL)
-        s.key("ret")
-        s.settle()
-    else:
-        s.gui("firefox", URL)
-    if s.first(("User name", "entry"), ADMIN, ("Limited access", "button")) == 0:
+    if s.first(("User name", "entry"), ADMIN, ("Limited access", "button"), timeout=FIRST_PAGE) == 0:
         s.click("User name", role="entry")
         s.type("tester")
         s.click("Password", role="password text")

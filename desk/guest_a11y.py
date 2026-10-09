@@ -652,6 +652,30 @@ def focused(_opts) -> dict:
     return out
 
 
+def page(_opts) -> dict:
+    """Address of the page shown in the focused browser window."""
+    front, app, top = front_toplevel()
+    if top is None:
+        return {"url": None}
+    docs = []
+
+    def visit(a):
+        if a.get_role_name() == "document web":
+            docs.append(a)
+            return True
+        return None
+
+    showing_walk(top, visit, time.monotonic() + 5)
+    url = None
+    if docs:
+        getter = getattr(Atspi.Document, "get_attribute_value", None) or Atspi.Document.get_document_attribute_value
+        try:
+            url = getter(docs[0], "DocURL")
+        except GLib.Error:
+            url = None
+    return {"url": url or None, "app": app.get_name() or "", "window": front["title"]}
+
+
 def main() -> None:
     cmd, arg = sys.argv[1], json.loads(sys.argv[2])
     extra = sys.argv[3] if len(sys.argv) > 3 else None
@@ -674,6 +698,8 @@ def main() -> None:
             out = read(arg)
         elif cmd == "focused":
             out = focused(arg)
+        elif cmd == "page":
+            out = page(arg)
         elif cmd == "clipboard":
             out = clipboard(arg)
         else:

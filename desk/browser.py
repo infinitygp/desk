@@ -3,9 +3,11 @@ console.* calls, uncaught exceptions and rejected promises of every page."""
 
 import json
 import re
+import time
 from datetime import datetime
+from urllib.parse import urlsplit
 
-from . import guest
+from . import a11y, display, guest
 from .config import DeskError, load_image
 
 MESSAGE = re.compile(r"(console\.[a-z]+|JavaScript (?:error|warning)): .*")
@@ -77,3 +79,52 @@ def console(run, everything: bool = False) -> list[str]:
     r = guest.ssh_run(run.ssh_port, spec.root_user, f"S={int(run.since)} bash -s", input=JOURNAL.encode(),
                       capture=True, timeout=60)
     return parse(r.stdout.decode(errors="replace"), everything)
+
+
+def _linux(run):
+    spec = load_image(run.image)
+    if spec.family == "windows":
+        raise DeskError("desk browser drives Firefox on Linux guests")
+    return spec
+
+
+def open_url(run, target: str, timeout: float = 30) -> str:
+    """Open an address in the guest's Firefox the way another program would (`firefox URL`),
+    which replaces the page in the current tab (desk-firefox.js); a path (/system/services) is
+    taken relative to the page shown now. Returns the address the page ended up at."""
+    _linux(run)
+    before = a11y.page_url(run).get("url") if not target.startswith(("http://", "https://", "file:")) else None
+    if target.startswith("/"):
+        if not before:
+            raise DeskError(f"no page in a focused Firefox window to open {target} on; give the whole address")
+        parts = urlsplit(before)
+        url = f"{parts.scheme}://{parts.netloc}{target}"
+    elif "://" in target or target.startswith(("about:", "file:", "data:")):
+        url = target
+    else:
+        raise DeskError(f"give a whole address (https://{target}) or a path starting with /: "
+                        "Firefox would guess the scheme, http:// for most hosts")
+    dom = run.dom()
+    r = guest.ssh_run(run.ssh_port, run.user, guest.remote_command(["firefox", url], gui=True),
+                      capture=True, timeout=60)
+    if r.returncode != 0:
+        raise DeskError(f"starting firefox failed: {r.stderr.decode(errors='replace').strip()[-300:]}")
+    # A link opened from another program does not take the focus on Wayland.
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            a11y.focus(run, "Firefox")
+            break
+        except DeskError:
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(1)
+    want = url.split("#")[0].rstrip("/")
+    current = None
+    while time.monotonic() < deadline:
+        current = a11y.page_url(run).get("url")
+        if current and current.split("#")[0].rstrip("/").startswith(want):
+            break
+        time.sleep(0.5)
+    display.wait_stable(dom, timeout=10)
+    return a11y.page_url(run).get("url") or current or url

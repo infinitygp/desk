@@ -569,6 +569,10 @@ def cmd_browser(args) -> None:
     from . import browser
 
     run = runs.resolve(args.run)
+    if args.browser_cmd == "open":
+        print(f"showing {browser.open_url(run, args.url)}")
+        _after_action(run, run.dom(), args)
+        return
     lines = browser.console(run, everything=args.all)
     if args.errors:
         lines = browser.errors(lines)
@@ -872,6 +876,10 @@ def build_parser() -> argparse.ArgumentParser:
                          "page since the run started")
     bp.add_argument("--errors", action="store_true", help="only errors (console.error, uncaught exceptions)")
     bp.add_argument("--all", action="store_true", help="also Firefox's own components")
+    bp = bsub.add_parser("open", help="open an address in the current tab, or a path (/system/services) on the "
+                         "site shown now")
+    bp.add_argument("url")
+    _action_opts(bp)
     p.set_defaults(func=cmd_browser)
 
     p = sub.add_parser("snapshot", help="save the running guest and go back to it later")

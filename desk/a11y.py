@@ -341,3 +341,8 @@ def check_typing_target(run, spec) -> None:
 def focused_field(run) -> dict:
     """The element with the keyboard focus in the focused window (Linux guests)."""
     return _helper(run, "focused", "{}")
+
+
+def page_url(run) -> dict:
+    """The address of the page in the focused browser window (Linux guests)."""
+    return _helper(run, "page", "{}")
