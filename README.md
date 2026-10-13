@@ -38,7 +38,9 @@ images/<name>/       image.toml, kickstart, provision.sh
 | `windows-11` | evaluation ISO + autounattend.xml on a second CD | 90-day evaluation, reinstalled by `desk maintain` |
 | `openwrt-25.12` | the release's disk image (x86-64 ext4 combined, EFI), grown and preconfigured offline | no desktop: BusyBox ash, procd, apk, LuCI |
 
-Windows specifics: no TPM (LabConfig bypass), virtio disk with the viostor driver loaded by Setup
+Windows specifics: the ISO, the virtio-win ISO and the Win32-OpenSSH MSI are downloaded into
+`cache/` when missing and checked against the SHA-256 pinned in `image.toml`;
+no TPM (LabConfig bypass), virtio disk with the viostor driver loaded by Setup
 (QEMU 10.2's AHCI emulation crashes under Windows), e1000e NIC (inbox driver),
 OpenSSH from the Win32-OpenSSH MSI with PowerShell as the shell, virtio-win guest tools for the
 display driver and qemu-guest-agent, and an agent in the logged-in session

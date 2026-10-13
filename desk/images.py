@@ -66,8 +66,10 @@ INSTALL_KEYS = ("installer", "location", "kickstart", "iso", "iso_url", "iso_sha
                 "vcpus", "disk_gb", "disk_image_url", "disk_files")
 
 
-# Image settings that do not change what ends up in the guest.
-NOT_IN_GUEST = ("name", "dir", "base_version", "warm_version", "rebuild_days", "expiry")
+# Image settings that do not change what ends up in the guest (the files the URLs lead to are
+# named, version included, by virtio_win_iso and openssh_msi).
+NOT_IN_GUEST = ("name", "dir", "base_version", "warm_version", "rebuild_days", "expiry",
+                "virtio_win_url", "virtio_win_sha256", "openssh_msi_url", "openssh_msi_sha256")
 
 
 def _settings(spec: ImageSpec, keys) -> str:
@@ -179,15 +181,23 @@ def _download(url: str, target: Path) -> None:
     Path(f"{target}.part").rename(target)
 
 
+def _fetch(spec: ImageSpec, file: str, source: str) -> Path:
+    """The cached file the setting `file` names, downloaded from `<source>_url` when it is missing
+    and checked against `<source>_sha256`."""
+    target = CACHE / getattr(spec, file)
+    url, sha256 = getattr(spec, f"{source}_url"), getattr(spec, f"{source}_sha256")
+    if not target.exists():
+        if not url:
+            raise DeskError(f"{target} missing and no {source}_url to fetch it from")
+        CACHE.mkdir(parents=True, exist_ok=True)
+        _download(url, target)
+    if sha256 and _sha256(target) != sha256:
+        raise DeskError(f"{target} does not match {source}_sha256; delete it to download again")
+    return target
+
+
 def _fetch_iso(spec: ImageSpec) -> Path:
-    iso = CACHE / spec.iso
-    if not iso.exists():
-        if not spec.iso_url:
-            raise DeskError(f"{iso} missing and no iso_url to fetch it from")
-        _download(spec.iso_url, iso)
-    if spec.iso_sha256 and _sha256(iso) != spec.iso_sha256:
-        raise DeskError(f"{iso} does not match iso_sha256; delete it to download again")
-    return iso
+    return _fetch(spec, "iso", "iso")
 
 
 def _fetch_cloud_image(spec: ImageSpec) -> Path:
@@ -395,11 +405,12 @@ def _unattend_iso(spec: ImageSpec, work: Path) -> Path:
         for f in ([src] if src.is_file() else sorted(src.iterdir())):
             shutil.copy(f, root / f.name)
     (root / "authorized_keys").write_text(_pubkey())
-    shutil.copy(CACHE / spec.openssh_msi, root / "openssh.msi")
-    subprocess.run(["7z", "e", "-y", f"-o{root}", str(CACHE / spec.virtio_win_iso), "virtio-win-guest-tools.exe"],
+    shutil.copy(_fetch(spec, "openssh_msi", "openssh_msi"), root / "openssh.msi")
+    virtio_win = _fetch(spec, "virtio_win_iso", "virtio_win")
+    subprocess.run(["7z", "e", "-y", f"-o{root}", str(virtio_win), "virtio-win-guest-tools.exe"],
                    check=True, capture_output=True)
     # The virtio disk driver for Setup (DriverPaths in autounattend.xml).
-    subprocess.run(["7z", "e", "-y", f"-o{root / 'drivers' / 'viostor'}", str(CACHE / spec.virtio_win_iso),
+    subprocess.run(["7z", "e", "-y", f"-o{root / 'drivers' / 'viostor'}", str(virtio_win),
                     "viostor/w11/amd64/*"], check=True, capture_output=True)
     iso = work / "unattend.iso"
     subprocess.run(["xorriso", "-as", "mkisofs", "-quiet", "-J", "-r", "-V", "DESKUNATTEND", "-o", str(iso),

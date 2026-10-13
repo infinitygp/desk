@@ -70,6 +70,47 @@ class Fingerprints(unittest.TestCase):
         self.assertNotIn("../_shared/windows", rels)
 
 
+class Fetch(unittest.TestCase):
+    SHA = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"  # of b"hello"
+
+    def spec(self, **changes):
+        return replace(load_image("windows-11"), openssh_msi="ssh.msi", openssh_msi_sha256=self.SHA, **changes)
+
+    def test_a_cached_file_is_checked_and_not_downloaded(self):
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "ssh.msi").write_bytes(b"hello")
+            with mock.patch.object(images, "CACHE", Path(tmp)), mock.patch.object(images, "_download") as download:
+                self.assertEqual(images._fetch(self.spec(), "openssh_msi", "openssh_msi"), Path(tmp) / "ssh.msi")
+                download.assert_not_called()
+                (Path(tmp) / "ssh.msi").write_bytes(b"other")
+                with self.assertRaisesRegex(images.DeskError, "openssh_msi_sha256"):
+                    images._fetch(self.spec(), "openssh_msi", "openssh_msi")
+
+    def test_a_missing_file_is_downloaded_into_a_new_cache(self):
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp) / "cache"
+            with mock.patch.object(images, "CACHE", cache), \
+                    mock.patch.object(images, "_download", side_effect=lambda url, to: to.write_bytes(b"hello")) as download:
+                images._fetch(self.spec(openssh_msi_url="https://example.org/ssh.msi"), "openssh_msi", "openssh_msi")
+                download.assert_called_once_with("https://example.org/ssh.msi", cache / "ssh.msi")
+                with self.assertRaisesRegex(images.DeskError, "no virtio_win_url"):
+                    images._fetch(self.spec(virtio_win_url=None), "virtio_win_iso", "virtio_win")
+
+    def test_windows_names_where_its_files_come_from(self):
+        spec = load_image("windows-11")
+        for source in ("iso", "virtio_win", "openssh_msi"):
+            self.assertTrue(getattr(spec, f"{source}_url").startswith("https://"), source)
+            self.assertRegex(getattr(spec, f"{source}_sha256"), r"^[0-9a-f]{64}$")
+        # Naming the source of the same files is no reason to install or warm up again.
+        bare = replace(spec, virtio_win_url=None, virtio_win_sha256=None, openssh_msi_url=None, openssh_msi_sha256=None)
+        self.assertEqual(images.install_fingerprint(spec), images.install_fingerprint(bare))
+        self.assertEqual(images.warm_fingerprint(spec), images.warm_fingerprint(bare))
+
+
 class Key(unittest.TestCase):
     def test_a_new_home_gets_its_key_pair(self):
         from unittest import mock

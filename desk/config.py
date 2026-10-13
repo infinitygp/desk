@@ -77,6 +77,11 @@ class ImageSpec:
     image_index: int = 1
     virtio_win_iso: str | None = None
     openssh_msi: str | None = None
+    # Where the two files above come from when the cache has none, and what they must hash to.
+    virtio_win_url: str | None = None
+    virtio_win_sha256: str | None = None
+    openssh_msi_url: str | None = None
+    openssh_msi_sha256: str | None = None
     # Guest port of an in-session agent, forwarded from the host like SSH (Windows).
     agent_port: int | None = None
     # Emulated sound card model (e.g. "ich9") for guests that have none.
