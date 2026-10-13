@@ -69,5 +69,33 @@ class Fingerprints(unittest.TestCase):
         self.assertIn("firstboot.ps1", rels)
         self.assertNotIn("../_shared/windows", rels)
 
+
+class Key(unittest.TestCase):
+    def test_a_new_home_gets_its_key_pair(self):
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            key = Path(tmp) / "vmlab" / "keys" / "id_ed25519"
+            with mock.patch.object(images, "SSH_KEY", key):
+                pub = images._pubkey()
+                self.assertTrue(pub.startswith("ssh-ed25519 "))
+                self.assertEqual(key.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(key.parent.stat().st_mode & 0o777, 0o700)
+                self.assertEqual(sorted(p.name for p in key.parent.parent.iterdir()), ["keys"])
+                # The key guests were installed with stays.
+                self.assertEqual(images._pubkey(), pub)
+
+    def test_an_existing_key_is_kept(self):
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            key = Path(tmp) / "keys" / "id_ed25519"
+            key.parent.mkdir()
+            key.with_suffix(".pub").write_text("ssh-ed25519 AAAA desk\n")
+            with mock.patch.object(images, "SSH_KEY", key):
+                self.assertEqual(images._pubkey(), "ssh-ed25519 AAAA desk\n")
+            self.assertEqual(sorted(p.name for p in key.parent.iterdir()), ["id_ed25519.pub"])
+
+
 if __name__ == "__main__":
     unittest.main()

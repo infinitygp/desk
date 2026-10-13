@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import tarfile
+import tempfile
 import subprocess
 import time
 import xml.etree.ElementTree as ET
@@ -230,8 +231,28 @@ def _render(spec: ImageSpec, template: str) -> str:
     return _fill(spec, (spec.dir / template).read_text(), template)
 
 
+def _pubkey() -> str:
+    """The public half of the key desk logs in to guests with; a new DESK_HOME gets its pair here."""
+    pub = SSH_KEY.with_suffix(".pub")
+    if not pub.exists():
+        keys = SSH_KEY.parent
+        keys.parent.mkdir(parents=True, exist_ok=True)
+        # Made aside and renamed into place, so two first builds at once end up with one key.
+        tmp = Path(tempfile.mkdtemp(prefix=f"{keys.name}.", dir=keys.parent))
+        try:
+            subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "desk",
+                            "-f", str(tmp / SSH_KEY.name)], check=True, stdin=subprocess.DEVNULL)
+            try:
+                tmp.rename(keys)
+            except OSError:
+                pass  # the other build's key is in place
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+    return pub.read_text()
+
+
 def _fill(spec: ImageSpec, text: str, template: str) -> str:
-    pubkey = SSH_KEY.with_suffix(".pub").read_text().strip()
+    pubkey = _pubkey().strip()
     # The password of every image's user is its name.
     text = text.replace("@SSH_PUBKEY@", pubkey).replace("@PASSWORD@", spec.user)
     if spec.release:
@@ -248,6 +269,7 @@ def _fill(spec: ImageSpec, text: str, template: str) -> str:
 def _virt_install(spec: ImageSpec, name: str, deadline: float) -> None:
     work = CACHE / spec.name
     work.mkdir(parents=True, exist_ok=True)
+    LOGS.mkdir(parents=True, exist_ok=True)
     log = LOGS / f"{name}.log"
     common = [
         "virt-install", "--connect", conn().getURI(), "--name", name,
@@ -372,7 +394,7 @@ def _unattend_iso(spec: ImageSpec, work: Path) -> Path:
         src = (spec.dir / item).resolve()
         for f in ([src] if src.is_file() else sorted(src.iterdir())):
             shutil.copy(f, root / f.name)
-    (root / "authorized_keys").write_text(SSH_KEY.with_suffix(".pub").read_text())
+    (root / "authorized_keys").write_text(_pubkey())
     shutil.copy(CACHE / spec.openssh_msi, root / "openssh.msi")
     subprocess.run(["7z", "e", "-y", f"-o{root}", str(CACHE / spec.virtio_win_iso), "virtio-win-guest-tools.exe"],
                    check=True, capture_output=True)
