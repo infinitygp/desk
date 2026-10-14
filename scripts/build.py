@@ -34,16 +34,22 @@ def repo_slug() -> str:
     return m.group(1)
 
 
+def build_id(root: Path, files: list[str]) -> str:
+    """What desk update compares: the contents of the release, its entry point included (a release
+    that changes only how it starts is a new one), not its name."""
+    digest = hashlib.sha256()
+    for f in [*files, "scripts/pyz_main.py"]:
+        digest.update(f.encode() + b"\0" + (root / f).read_bytes() + b"\0")
+    return digest.hexdigest()[:16]
+
+
 def build(version: str | None, output: Path) -> dict:
     # Untracked files too (not ignored ones): a trial build before the commit has them.
     files = sorted(f for f in git("ls-files", "-co", "--exclude-standard", *PARTS).splitlines() if (ROOT / f).is_file())
-    digest = hashlib.sha256()
-    for f in files:
-        digest.update(f.encode() + b"\0" + (ROOT / f).read_bytes() + b"\0")
     info = {
         "version": version or git("describe", "--tags", "--always", "--dirty"),
         "commit": git("rev-parse", "--short", "HEAD"),
-        "id": digest.hexdigest()[:16],
+        "id": build_id(ROOT, files),
         "repo": repo_slug(),
         "built": time.strftime("%Y-%m-%d %H:%M:%S %Z"),
     }

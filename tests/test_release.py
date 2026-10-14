@@ -64,6 +64,21 @@ class Release(unittest.TestCase):
         self.assertTrue(provision.external_attr >> 16 & 0o111)  # a script keeps its mode
         self.assertTrue(self.pyz.read_bytes().startswith(b"#!/usr/bin/python3\n"))
 
+    def test_the_build_id_covers_the_entry_point(self):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("build", ROOT / "scripts" / "build.py")
+        build = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(build)
+        tree = self.dir / "tree"
+        (tree / "scripts").mkdir(parents=True)
+        (tree / "desk").mkdir()
+        (tree / "desk" / "cli.py").write_text("code\n")
+        (tree / "scripts" / "pyz_main.py").write_text("entry\n")
+        before = build.build_id(tree, ["desk/cli.py"])
+        (tree / "scripts" / "pyz_main.py").write_text("entry, changed\n")
+        self.assertNotEqual(build.build_id(tree, ["desk/cli.py"]), before)
+
     def test_runs_unpacked_with_the_files_modes(self):
         home = self.home()
         r = self.desk(self.pyz, "--version", home=home)
