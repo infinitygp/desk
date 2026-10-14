@@ -675,7 +675,14 @@ def cmd_browser(args) -> None:
 
     run = runs.resolve(args.run)
     if args.browser_cmd == "open":
-        print(f"showing {browser.open_url(run, args.url)}")
+        try:
+            print(f"showing {browser.open_url(run, args.url)}")
+        except browser.NotLoaded as e:
+            # What the page did, not what desk could not do: exit 1, with the screenshot asked for.
+            print(f"desk: {e}", file=sys.stderr)
+            _after_action(run, run.dom(), args)
+            run.log_event(rc=1)
+            sys.exit(1)
         _after_action(run, run.dom(), args)
         return
     if args.browser_cmd == "viewport":

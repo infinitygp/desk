@@ -85,6 +85,10 @@ def console(run, everything: bool = False) -> list[str]:
     return parse(r.stdout.decode(errors="replace"), everything)
 
 
+class NotLoaded(DeskError):
+    """The browser does not show the page that was to be opened."""
+
+
 def _linux(run):
     spec = load_image(run.image)
     if spec.family == "windows":
@@ -98,7 +102,7 @@ def open_url(run, target: str, timeout: float = 30) -> str:
     which replaces the page in the current tab (desk-firefox.js); a path (/system/services) is
     taken relative to the page shown now. Returns the address the page ended up at."""
     _linux(run)
-    before = a11y.page_url(run).get("url") if not target.startswith(("http://", "https://", "file:")) else None
+    before = a11y.page_url(run).get("url")
     if target.startswith("/"):
         if not before:
             raise DeskError(f"no page in a focused Firefox window to open {target} on; give the whole address")
@@ -125,14 +129,21 @@ def open_url(run, target: str, timeout: float = 30) -> str:
                 raise
             time.sleep(1)
     want = url.split("#")[0].rstrip("/")
-    current = None
-    while time.monotonic() < deadline:
+    arrived = False
+    while time.monotonic() < deadline and not arrived:
         current = a11y.page_url(run).get("url")
-        if current and current.split("#")[0].rstrip("/").startswith(want):
-            break
-        time.sleep(0.5)
+        arrived = bool(current and current.split("#")[0].rstrip("/").startswith(want))
+        if not arrived:
+            time.sleep(0.5)
     display.wait_stable(dom, timeout=10)
-    return a11y.page_url(run).get("url") or current or url
+    page = a11y.page_url(run)
+    shown = page.get("url")
+    if page.get("problem"):
+        raise NotLoaded(f"{url} did not load: Firefox shows {page['problem']!r} instead")
+    if not shown or (not arrived and shown == before):
+        raise NotLoaded(f"{url} did not load within {timeout:.0f}s: Firefox shows {shown or 'no page'}")
+    # Somewhere else than asked for is where the site sent the browser (a login, https).
+    return shown
 
 
 RDM_CLOSE = "Close Responsive Design Mode"

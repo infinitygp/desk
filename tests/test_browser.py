@@ -45,3 +45,37 @@ class Detail(unittest.TestCase):
                          "(at load@https://localhost:9090/cockpit/@localhost/podman/index.js:2:41 < "
                          "(anonymous)@https://localhost:9090/cockpit/@localhost/podman/index.js:3:20)")
         self.assertEqual(len(browser.errors(lines)), 2)
+
+
+class Open(unittest.TestCase):
+    """`desk browser open` tells a page that loaded from one that did not."""
+
+    def open(self, pages: list[dict], target: str = "https://app.test/") -> str:
+        from types import SimpleNamespace
+        from unittest import mock
+
+        run = SimpleNamespace(image="fedora-44-gnome", ssh_port=1, user="tester", dom=lambda: None)
+        answers = iter(pages)
+        last = pages[-1]
+        started = SimpleNamespace(returncode=0, stderr=b"")
+        with mock.patch("desk.browser.a11y.page_url", side_effect=lambda run: next(answers, last)), \
+                mock.patch("desk.browser.a11y.focus"), mock.patch("desk.browser.guest.ssh_run", return_value=started), \
+                mock.patch("desk.browser.display.wait_stable"), mock.patch("desk.browser.time.sleep"):
+            return browser.open_url(run, target, timeout=0.05)
+
+    def test_loaded(self):
+        self.assertEqual(self.open([{"url": "about:home"}, {"url": "https://app.test/"}]), "https://app.test/")
+
+    def test_sent_elsewhere_by_the_site(self):
+        self.assertEqual(self.open([{"url": "about:home"}, {"url": "https://app.test/login"}], "https://app.test/x"),
+                         "https://app.test/login")
+
+    def test_the_browsers_own_error_page(self):
+        with self.assertRaisesRegex(browser.NotLoaded, "did not load: Firefox shows 'Server Not Found'"):
+            self.open([{"url": "about:home"}, {"url": "https://app.test/", "problem": "Server Not Found"}])
+
+    def test_still_the_page_from_before(self):
+        with self.assertRaisesRegex(browser.NotLoaded, "did not load within 0s: Firefox shows about:home"):
+            self.open([{"url": "about:home"}])
+        with self.assertRaisesRegex(browser.NotLoaded, "Firefox shows no page"):
+            self.open([{"url": None}])
