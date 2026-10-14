@@ -390,7 +390,9 @@ function Invoke-Uia($op, $arg, $text) {
             $p = $null
             if (-not $el.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern, [ref]$p)) { throw 'element is not editable' }
             $p.SetValue($text)
-            return @{ done = $true }
+            # What the field holds now, for desk to compare (a password box does not tell).
+            $now = try { $p.Current.Value } catch { $null }
+            return @{ done = $true; text = $now }
         }
         'action' {
             $el = Find-Node $spec

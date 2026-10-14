@@ -32,5 +32,24 @@ class Focus(unittest.TestCase):
             self.focus({"title": "Notepad", "focused": False}, {"title": "Notepad", "focused": False})
 
 
+class SetText(unittest.TestCase):
+    SPEC = {"pid": 1, "path": [0], "role": "document", "name": "Text editor"}
+
+    def replace(self, answer: dict, text: str, role: str = "document") -> str:
+        with mock.patch("desk.a11y._helper", return_value=answer):
+            return a11y.replace_text(RUN, {**self.SPEC, "role": role}, text)
+
+    def test_the_field_holds_the_text(self):
+        self.assertEqual(self.replace({"done": True, "text": "line one\rline two"}, "line one\nline two"), "")
+
+    def test_the_field_holds_something_else(self):
+        self.assertEqual(self.replace({"done": True, "text": "12345"}, "1234567890"),
+                         "the field shows '12345' afterwards")
+
+    def test_a_field_that_does_not_tell(self):
+        self.assertEqual(self.replace({"done": True, "text": None}, "secret"), "")
+        self.assertEqual(self.replace({"done": True, "text": "••••"}, "secret", role="password text"), "")
+
+
 if __name__ == "__main__":
     unittest.main()

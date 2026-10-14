@@ -291,10 +291,17 @@ def set_text(run, ref: str, text: str, layout: str = "us") -> str:
     return replace_text(run, _spec(run, ref), text, layout)
 
 
+def _shown(text: str) -> str:
+    """Text as the guests read it back: whitespace runs as one space, at most 400 characters."""
+    return " ".join(text.replace("\ufffc", " ").split())[:400]
+
+
 def replace_text(run, spec: dict, text: str, layout: str = "us") -> str:
     if run.agent_port:
-        _helper(run, "set-text", json.dumps(spec), text)
-        return ""
+        shown = _helper(run, "set-text", json.dumps(spec), text).get("text")
+        if shown is None or spec["role"] == "password text" or _shown(shown) == _shown(text):
+            return ""
+        return f"the field shows {_shown(shown)!r} afterwards"
     if not _helper(run, "edit", json.dumps(spec))["focused"]:
         _helper(run, "set-text", json.dumps(spec), text)
         return ("the field did not take the keyboard focus, so its text was replaced through AT-SPI only, "
@@ -322,8 +329,7 @@ def replace_text(run, spec: dict, text: str, layout: str = "us") -> str:
     if spec["role"] == "password text":
         return ""  # it shows bullets, not the text
     shown = _helper(run, "read", json.dumps(spec))["text"]
-    wanted = " ".join(text.replace("\ufffc", " ").split())[:400]
-    return "" if shown == wanted else f"the field shows {shown!r} afterwards"
+    return "" if shown == _shown(text) else f"the field shows {shown!r} afterwards"
 
 
 # Web browsers as AT-SPI names them: their pages take keys pressed outside a text field as
