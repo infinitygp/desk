@@ -47,3 +47,6 @@ class Failures(unittest.TestCase):
         self.assertEqual(self.run_main(subprocess.CalledProcessError(1, ["cp"])), 2)
         self.assertEqual(self.run_main(KeyError("a bug")), 2)
         self.assertEqual(self.run_main(KeyboardInterrupt()), 130)
+        # What a command decides itself goes through: a failed scenario, a guest command's code.
+        self.assertEqual(self.run_main(SystemExit(1)), 1)
+        self.assertEqual(self.run_main(SystemExit(124)), 124)
