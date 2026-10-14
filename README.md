@@ -12,13 +12,35 @@ mouse/keyboard input, for testing desktop apps and system packages end to end.
 - Golden image -> warm state (saved RAM of a logged-in desktop) -> per-run qcow2 overlay.
   `desk up` restores in seconds, `desk down` discards everything.
 
-Agent instructions: [skill/SKILL.md](skill/SKILL.md), linked as `~/.agents/skills/desk` and
-`~/.claude/skills/desk`; `bin/desk` is linked into `~/.local/bin`.
+Agent instructions: [skill/SKILL.md](skill/SKILL.md).
+
+## Installing
+
+A host that only uses desk needs no checkout: a release is one file, `desk.pyz`, which runs on
+the system's `python3` with the distribution's libvirt bindings (see Host setup). In fish:
+
+```fish
+gh release download --repo infinitygp/desk --pattern desk.pyz --output ~/.local/bin/desk
+chmod +x ~/.local/bin/desk
+desk install      # the skill into ~/.agents/skills/desk (and ~/.claude/skills/desk), then desk doctor
+desk update       # later: the newest release, skill included
+```
+
+On its first start a release unpacks itself into `~/.cache/desk/<build>/` and runs from there,
+so the image definitions and the helpers it starts or copies into guests are ordinary files;
+builds unpacked earlier go after a week unused. `desk --version` says which release runs and
+from where.
+
+To work on desk, clone the repository instead; `bin/desk install` links `bin/desk` into
+`~/.local/bin` and the skill directory into `~/.agents/skills/desk`, so edits show at once, and
+leaves a desk that is already there alone. A checkout and a release of the same commit see the
+same image definitions, so switching between them rebuilds nothing.
 
 ## Layout
 
 ```text
-bin/desk             entry point (the system's python3 with the distribution's libvirt bindings)
+bin/desk             entry point of a checkout (the system's python3 with the distribution's libvirt bindings)
+scripts/             build.py makes desk.pyz, the release; pyz_main.py is its entry point
 skill/SKILL.md       agent skill
 desk/                harness code (guest_a11y.py runs inside the guest)
 tests/               unit tests

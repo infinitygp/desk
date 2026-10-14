@@ -89,6 +89,27 @@ bin/desk -r host exec -- 'mkdir -p ~/desk && tar -xzf /tmp/desk-tree.tgz -C ~/de
 bin/desk -r host exec --timeout 3000 -- 'cd ~/desk && bin/desk maintain --only openwrt-25.12'
 ```
 
+## Releases
+
+A release is the single file `desk.pyz`; hosts that only use desk install and update it with
+`gh` (README, "Installing"). The chain, run whole when a release is asked for:
+
+1. Choose the version from what changed since the last tag (`git log $(git describe --tags --abbrev=0)..`):
+   `vX.Y.Z`, minor for new commands or behaviour, patch for fixes. The tag is the only place the
+   version lives.
+2. On this host: the unit tests, then the build as the workflow runs it,
+   `/usr/bin/python3 scripts/build.py --version vX.Y.Z --output ~/.cache/desk-release/desk.pyz`,
+   and `~/.cache/desk-release/desk.pyz --version`.
+3. Try that file where no checkout is: push it into a run of `fedora-44-gnome`, put it at
+   `~/.local/bin/desk`, run `desk install` and `desk doctor` there (the procedure of "A host of
+   the other kind", with the file instead of the tree).
+4. `git tag vX.Y.Z && git push origin main vX.Y.Z`; the tag starts `.github/workflows/release.yml`
+   (Fedora 44 container: unit tests, build, `gh release create`). Watch it:
+   `gh run watch --repo infinitygp/desk $(gh run list --repo infinitygp/desk --workflow release.yml --limit 1 --json databaseId --jq '.[0].databaseId')`.
+5. Check the release: `gh release view vX.Y.Z --repo infinitygp/desk` lists `desk.pyz`, and
+   `desk update` of an installed release (a copy in `~/.cache/desk-release/`, run with its own
+   `HOME`) reaches the new version. Remove `~/.cache/desk-release` afterwards.
+
 ## Working next to others
 
 - Runs of other agents and of the user exist on the same host. Touch only runs you started
