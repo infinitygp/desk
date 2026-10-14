@@ -676,7 +676,9 @@ def cmd_browser(args) -> None:
     run = runs.resolve(args.run)
     if args.browser_cmd == "open":
         try:
-            print(f"showing {browser.open_url(run, args.url)}")
+            shown, asked = browser.open_url(run, args.url)
+            print(f"showing {shown}" + ("" if browser.under(shown, asked) else f" (opened {asked}: the site sent the "
+                                        "browser there, or back to where it was)"))
         except browser.NotLoaded as e:
             # What the page did, not what desk could not do: exit 1, with the screenshot asked for.
             print(f"desk: {e}", file=sys.stderr)

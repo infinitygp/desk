@@ -97,10 +97,11 @@ def _linux(run):
     return spec
 
 
-def open_url(run, target: str, timeout: float = 30) -> str:
+def open_url(run, target: str, timeout: float = 30) -> tuple[str, str]:
     """Open an address in the guest's Firefox the way another program would (`firefox URL`),
     which replaces the page in the current tab (desk-firefox.js); a path (/system/services) is
-    taken relative to the page shown now. Returns the address the page ended up at."""
+    taken relative to the page shown now. Returns the address the page ended up at and the one
+    that was opened."""
     _linux(run)
     before = a11y.page_url(run).get("url")
     if target.startswith("/"):
@@ -128,22 +129,37 @@ def open_url(run, target: str, timeout: float = 30) -> str:
             if time.monotonic() > deadline:
                 raise
             time.sleep(1)
-    want = url.split("#")[0].rstrip("/")
-    arrived = False
+    arrived = seen = None
     while time.monotonic() < deadline and not arrived:
         current = a11y.page_url(run).get("url")
-        arrived = bool(current and current.split("#")[0].rstrip("/").startswith(want))
+        seen = current or seen
+        arrived = bool(current) and under(current, url)
         if not arrived:
             time.sleep(0.5)
     display.wait_stable(dom, timeout=10)
     page = a11y.page_url(run)
-    shown = page.get("url")
     if page.get("problem"):
         raise NotLoaded(f"{url} did not load: Firefox shows {page['problem']!r} instead")
-    if not shown or (not arrived and shown == before):
-        raise NotLoaded(f"{url} did not load within {timeout:.0f}s: Firefox shows {shown or 'no page'}")
-    # Somewhere else than asked for is where the site sent the browser (a login, https).
-    return shown
+    if not page.get("url") and not arrived:
+        # While it waits for a server that does not answer, Firefox shows no page at all.
+        raise NotLoaded(f"{url} did not load within {timeout:.0f}s: Firefox shows no page (still waiting for the "
+                        "server?)")
+    # Somewhere else than asked for is where the site sent the browser (a login, https, back to
+    # the page from before); the caller sees both addresses.
+    return page.get("url") or seen, url
+
+
+def _address(url: str) -> tuple[str, str, str]:
+    parts = urlsplit(url.split("#")[0])
+    scheme = "http" if parts.scheme.lower() in ("http", "https") else parts.scheme.lower()
+    return scheme, parts.netloc.lower(), parts.path.rstrip("/") + ("?" + parts.query if parts.query else "")
+
+
+def under(shown: str, asked: str) -> bool:
+    """`shown` is the page `asked` for or one below it, as Firefox writes addresses: the host in
+    lower case, https where the site upgrades http, file:/x as file:///x."""
+    (scheme, host, path), (wanted_scheme, wanted_host, wanted_path) = _address(shown), _address(asked)
+    return (scheme, host) == (wanted_scheme, wanted_host) and path.startswith(wanted_path)
 
 
 RDM_CLOSE = "Close Responsive Design Mode"

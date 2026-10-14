@@ -64,18 +64,36 @@ class Open(unittest.TestCase):
             return browser.open_url(run, target, timeout=0.05)
 
     def test_loaded(self):
-        self.assertEqual(self.open([{"url": "about:home"}, {"url": "https://app.test/"}]), "https://app.test/")
+        self.assertEqual(self.open([{"url": "about:home"}, {"url": "https://app.test/"}]),
+                         ("https://app.test/", "https://app.test/"))
 
     def test_sent_elsewhere_by_the_site(self):
         self.assertEqual(self.open([{"url": "about:home"}, {"url": "https://app.test/login"}], "https://app.test/x"),
+                         ("https://app.test/login", "https://app.test/x"))
+        # Back to the page it was on: a redirect to the login it came from is not a failed load.
+        self.assertEqual(self.open([{"url": "https://app.test/login"}], "https://app.test/dashboard")[0],
                          "https://app.test/login")
 
     def test_the_browsers_own_error_page(self):
         with self.assertRaisesRegex(browser.NotLoaded, "did not load: Firefox shows 'Server Not Found'"):
             self.open([{"url": "about:home"}, {"url": "https://app.test/", "problem": "Server Not Found"}])
 
-    def test_still_the_page_from_before(self):
-        with self.assertRaisesRegex(browser.NotLoaded, "did not load within 0s: Firefox shows about:home"):
-            self.open([{"url": "about:home"}])
-        with self.assertRaisesRegex(browser.NotLoaded, "Firefox shows no page"):
-            self.open([{"url": None}])
+    def test_no_page_while_the_server_does_not_answer(self):
+        with self.assertRaisesRegex(browser.NotLoaded, "did not load within 0s: Firefox shows no page"):
+            self.open([{"url": "about:home"}, {"url": None}])
+
+    def test_a_page_that_arrived_and_cannot_be_read_a_moment_later_has_loaded(self):
+        self.assertEqual(self.open([{"url": "about:home"}, {"url": "https://app.test/"}, {"url": None}])[0],
+                         "https://app.test/")
+
+    def test_addresses_as_firefox_writes_them(self):
+        for shown, asked in (("https://app.test/", "https://App.Test"), ("https://app.test/", "http://app.test/"),
+                             ("file:///home/tester/x.html", "file:/home/tester/x.html"),
+                             ("https://app.test/system/services#/x", "https://app.test/system"),
+                             ("https://app.test/a?b=1", "https://app.test/a?b=1")):
+            with self.subTest(shown=shown, asked=asked):
+                self.assertTrue(browser.under(shown, asked))
+        for shown, asked in (("https://app.test/login", "https://app.test/dashboard"),
+                             ("https://other.test/", "https://app.test/"), ("about:home", "https://app.test/")):
+            with self.subTest(shown=shown, asked=asked):
+                self.assertFalse(browser.under(shown, asked))

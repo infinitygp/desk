@@ -680,32 +680,40 @@ def page(_opts) -> dict:
         getter = getattr(Atspi.Document, "get_attribute_value", None) or Atspi.Document.get_document_attribute_value
         try:
             url = getter(docs[0], "DocURL")
-            error = browser_error(docs[0])
         except GLib.Error:
             url = None
+        error = browser_error(docs[0])
     return {"url": url or None, "problem": error, "app": app.get_name() or "", "window": front["title"]}
 
 
 def browser_error(doc) -> str | None:
     """The heading of Firefox's own page shown instead of the one asked for (server not found,
     connection refused, a certificate it does not trust), which carries the address of the page
-    that did not load. Told by the ids of its elements, the same in every language."""
-    found, budget = {}, [300]
+    that did not load. Told by what only its pages are made of, the same in every language: a
+    heading with the id error-title, next to its introduction, one of Firefox's own buttons
+    (moz-button) or on its error pages' body. A page that changes while it is read is none."""
+    title, signs, budget = [], set(), [300]
 
     def visit(a, depth):
-        if budget[0] <= 0 or depth > 8 or len(found) == 2:
+        if budget[0] <= 0 or depth > 8:
             return
         budget[0] -= 1
-        ident = (a.get_attributes() or {}).get("id")
-        if ident in ("error-title", "error-intro"):
-            found[ident] = a.get_name() or ""
+        attrs = a.get_attributes() or {}
+        if attrs.get("id") == "error-title":
+            title.append(a.get_name() or "")
+        if attrs.get("id") == "error-intro" or attrs.get("tag") == "moz-button" \
+                or "felt-privacy-body" in (attrs.get("class") or ""):
+            signs.add(True)
         for i in range(a.get_child_count()):
             child = a.get_child_at_index(i)
             if child is not None:
                 visit(child, depth + 1)
 
-    visit(doc, 0)
-    return (found["error-title"] or "an error page") if len(found) == 2 else None
+    try:
+        visit(doc, 0)
+    except GLib.Error:
+        return None
+    return (title[0] or "an error page") if title and signs else None
 
 
 RDM_TOOLBAR = "chrome://devtools/content/responsive/toolbar"
