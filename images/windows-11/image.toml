@@ -10,6 +10,8 @@ iso_sha256 = "bc3f24086ebadc94489066b5ad78089e2cf5c3491e90e790bb81a2b199c10e38"
 unattend = "autounattend.xml"
 # Copied to the answer-file CD next to autounattend.xml; firstboot.ps1 runs at the first logon.
 unattend_files = ["firstboot.ps1", "../_shared/windows"]
+# firstboot.ps1 ends with this line on the serial console, or with what failed.
+install_marker = "desk-firstboot: ok"
 virtio_win_iso = "virtio-win-0.1.302.iso"
 virtio_win_url = "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.302-1/virtio-win-0.1.302.iso"
 virtio_win_sha256 = "303f7ae40dad495d6ae474fdc571df58958a4dbc5c37a522d80f9a203867949d"

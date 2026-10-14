@@ -1,5 +1,6 @@
 # First logon of the Windows golden image, started by autounattend.xml from the answer-file CD.
-# Sets up everything the harness needs, then powers off; `desk image build` waits for that.
+# Sets up everything the harness needs, reports the outcome on the serial console and powers off;
+# `desk image build` waits for that and keeps the install only when the report says "ok".
 $ErrorActionPreference = 'Continue'
 $cd = Split-Path -Parent $MyInvocation.MyCommand.Path
 New-Item -ItemType Directory -Force C:\desk | Out-Null
@@ -10,12 +11,20 @@ function Reg($path, $name, $value, $type = 'DWord') {
     New-ItemProperty -Path $path -Name $name -Value $value -PropertyType $type -Force | Out-Null
 }
 
+$problems = @()
+function Installed($what, $process) {
+    # 3010: installed, a restart is needed (the build ends with one anyway).
+    if ($process.ExitCode -notin 0, 3010) { $script:problems += "$what exited $($process.ExitCode)" }
+}
+
 # virtio-win guest tools: virtio-gpu display driver, virtio-serial and qemu-guest-agent.
-Start-Process -Wait "$cd\virtio-win-guest-tools.exe" -ArgumentList '/install', '/quiet', '/norestart'
+Installed 'the virtio-win guest tools' (Start-Process -Wait -PassThru "$cd\virtio-win-guest-tools.exe" `
+    -ArgumentList '/install', '/quiet', '/norestart')
 
 # OpenSSH server from the MSI on this CD (no Windows Update needed), PowerShell as its shell and
 # the harness key for the administrator account.
-Start-Process -Wait msiexec.exe -ArgumentList '/i', "`"$cd\openssh.msi`"", '/qn', '/norestart'
+Installed 'the OpenSSH MSI' (Start-Process -Wait -PassThru msiexec.exe `
+    -ArgumentList '/i', "`"$cd\openssh.msi`"", '/qn', '/norestart')
 Set-Service sshd -StartupType Automatic
 Reg 'HKLM:\SOFTWARE\OpenSSH' DefaultShell "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" String
 Copy-Item "$cd\authorized_keys" C:\ProgramData\ssh\administrators_authorized_keys -Force
@@ -64,5 +73,22 @@ Reg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' NoAutoRebootWit
 Reg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' ExcludeWUDriversInQualityUpdate 1
 
 Get-Service sshd, QEMU-GA -ErrorAction SilentlyContinue | Format-Table -AutoSize
+# What every later step of the harness depends on; without these the image only fails later, as
+# "SSH not reachable", with nothing pointing back at the install.
+if ((Get-Service sshd -ErrorAction SilentlyContinue).Status -ne 'Running') { $problems += 'sshd is not running' }
+if (-not (Test-Path C:\ProgramData\ssh\administrators_authorized_keys)) { $problems += 'the SSH key is missing' }
+if (-not (Get-Service QEMU-GA -ErrorAction SilentlyContinue)) { $problems += 'qemu-guest-agent is not installed' }
+if (-not (Test-Path C:\desk\agent.ps1)) { $problems += 'the in-session agent is missing' }
+$report = if ($problems) { 'desk-firstboot: FAILED ' + ($problems -join '; ') } else { 'desk-firstboot: ok' }
+$report
+try {
+    $serial = New-Object System.IO.Ports.SerialPort 'COM1', 115200
+    $serial.WriteTimeout = 5000
+    $serial.Open()
+    $serial.WriteLine($report)
+    $serial.Close()
+} catch {
+    "no serial console to report on: $_"
+}
 Stop-Transcript
 Stop-Computer -Force

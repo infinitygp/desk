@@ -75,6 +75,10 @@ class ImageSpec:
     unattend: str | None = None
     unattend_files: list[str] | None = None
     image_index: int = 1
+    # A line the install writes to the serial console once its own setup has succeeded (Windows'
+    # firstboot.ps1; anything else it writes there starting like this line says what failed).
+    # A build whose console lacks it is not kept. None: powering off is all there is to check.
+    install_marker: str | None = None
     virtio_win_iso: str | None = None
     openssh_msi: str | None = None
     # Where the two files above come from when the cache has none, and what they must hash to.

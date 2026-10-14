@@ -138,5 +138,19 @@ class Key(unittest.TestCase):
             self.assertEqual(sorted(p.name for p in key.parent.iterdir()), ["id_ed25519.pub"])
 
 
+class InstallProblem(unittest.TestCase):
+    def test_the_console_decides(self):
+        from desk.images import install_problem
+
+        spec = load_image("windows-11")
+        boot = "BdsDxe: starting Boot0004\r\n"
+        self.assertIsNone(install_problem(spec, boot + "desk-firstboot: ok\r\n"))
+        self.assertEqual(install_problem(spec, boot + "desk-firstboot: FAILED sshd is not running\r\n"),
+                         "desk-firstboot: FAILED sshd is not running")
+        self.assertIn("did not finish", install_problem(spec, boot))
+        # Images without a marker are judged by powering off alone, as before.
+        self.assertIsNone(install_problem(load_image("fedora-44-gnome"), ""))
+
+
 if __name__ == "__main__":
     unittest.main()

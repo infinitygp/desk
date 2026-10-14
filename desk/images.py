@@ -63,7 +63,7 @@ def current(link: Path) -> Path | None:
 INSTALL_KEYS = ("installer", "location", "kickstart", "iso", "iso_url", "iso_sha256", "kernel", "initrd",
                 "extra_args", "user_data", "cloud_image_url", "secure_boot", "release", "unattend",
                 "unattend_files", "image_index", "virtio_win_iso", "openssh_msi", "os_variant", "memory_mib",
-                "vcpus", "disk_gb", "disk_image_url", "disk_files")
+                "vcpus", "disk_gb", "disk_image_url", "disk_files", "install_marker")
 
 
 # Image settings that do not change what ends up in the guest (the files the URLs lead to are
@@ -137,6 +137,10 @@ def build(spec: ImageSpec, force: bool = False, promote_it: bool = True) -> str:
             vspec.base_dir.mkdir(parents=True)
             _virt_install(vspec, name, deadline)
         _wait_shutoff(name, timeout=max(60.0, deadline - time.monotonic()))
+        log = LOGS / f"{name}.log"
+        problem = install_problem(spec, log.read_text(errors="replace") if log.exists() else "")
+        if problem:
+            raise DeskError(f"the install of {spec.name} is not usable: {problem} (serial console: {log})")
     except BaseException:
         # A stuck or failed install (boot failure, prompt, hung download) must not block the next build.
         _discard_build(name)
@@ -145,6 +149,17 @@ def build(spec: ImageSpec, force: bool = False, promote_it: bool = True) -> str:
     if promote_it:
         promote(link, vspec.base_dir)
     return vspec.base_version
+
+
+def install_problem(spec: ImageSpec, console: str) -> str | None:
+    """Why an install that powered off cannot be used, going by what it wrote to the serial
+    console; None: it finished. Powering off alone proves little: a guest that crashed, or whose
+    setup script failed on the way, powers off too."""
+    marker = spec.install_marker
+    if not marker or marker in console:
+        return None
+    said = [line.strip() for line in console.splitlines() if marker.split(":")[0] + ":" in line]
+    return said[-1][-500:] if said else f"it powered off without reporting {marker!r}, so its setup did not finish"
 
 
 def _discard_build(name: str) -> None:
