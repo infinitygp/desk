@@ -15,6 +15,7 @@ Add-Type -Namespace Desk -Name Dpi -MemberDefinition @'
 [void][Desk.Dpi]::SetProcessDpiAwarenessContext([IntPtr]-4)   # PER_MONITOR_AWARE_V2
 Add-Type -Namespace Desk -Name Win -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
 [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
 [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
 [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
@@ -53,7 +54,15 @@ function Show-Window($handle) {
     [Desk.Win]::keybd_event(0x87, 0, 0, [UIntPtr]::Zero)
     [Desk.Win]::keybd_event(0x87, 0, 2, [UIntPtr]::Zero)
     [void][Desk.Win]::ShowWindow([IntPtr][long]$handle, 9)
-    [Desk.Win]::SetForegroundWindow([IntPtr][long]$handle)
+    [void][Desk.Win]::SetForegroundWindow([IntPtr][long]$handle)
+    # Whether it is in front now, as the user would see it: SetForegroundWindow's own answer only
+    # says whether Windows accepted the request.
+    $deadline = (Get-Date).AddSeconds(2)
+    while ((Get-Date) -lt $deadline) {
+        if ([Desk.Win]::GetForegroundWindow() -eq [IntPtr][long]$handle) { return $true }
+        Start-Sleep -Milliseconds 100
+    }
+    $false
 }
 
 # The topmost window whose title or process name contains the query, brought to the front.

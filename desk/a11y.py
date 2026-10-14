@@ -264,7 +264,13 @@ def focus(run, query: str) -> str:
     """Bring the topmost window whose application or title contains `query` to the front, as a
     user clicking it would; returns its title."""
     if run.agent_port:
-        title = winagent.request(run, cmd="focus", query=query).get("title", "")
+        reply = winagent.request(run, cmd="focus", query=query)
+        if reply.get("title") and reply.get("focused") is False:
+            reply = winagent.request(run, cmd="focus", query=query)  # Windows refuses now and then
+        title = reply.get("title", "")
+        if title and reply.get("focused") is False:
+            raise DeskError(f"Windows kept {title!r} behind the window in front; keys would go to that one "
+                            "(click the window, or close what is in front)")
     else:
         title = _helper(run, "focus", json.dumps(query))["title"]
     if not title:
