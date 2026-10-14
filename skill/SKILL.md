@@ -144,8 +144,8 @@ itself after 30 minutes (`--limit`).
 
 `desk image list` shows them and which of them this host has built: a host keeps the images it
 tests on, not all of them. When the image a test needs is not built, build that one
-(`desk image build NAME`, then `desk image warm NAME`; 10-25 minutes and 5-25 GB, so not the
-others along with it); a variant (`-pl`, `-cockpit`) only needs `desk image warm NAME` once its
+(`desk maintain --only NAME` builds, warms and selftests it; or `desk image build NAME`, then
+`desk image warm NAME`; 10-25 minutes and 5-25 GB, so not the others along with it); a variant (`-pl`, `-cockpit`) only needs `desk image warm NAME` once its
 base is there, and without a warm state a run still starts, cold, in ~20 s.
 `fedora-44-gnome` is the default; `fedora-45-gnome` is the next
 Fedora release (beta until it is out); `fedora-44-gnome-pl` is the same
@@ -436,7 +436,7 @@ desk forward 80                               # LuCI: http://127.0.0.1:PORT/, lo
   dependencies is missing there, exactly as on a user's machine. Report that rather than
   silently installing it; install it afterwards only to continue the test.
 - `desk selftest <image>` checks the image and the harness end to end. `desk maintain` renews
-  the images that are built (rebuilds, selftests, switches builds) when it is run, by hand or
+  the images in use on the host, those with a warm state (rebuilds, selftests, switches builds), when it is run, by hand or
   from the weekly timer a host may have (`desk doctor` says). After changing an image definition
   in `images/<name>/` of the source repository, run `desk maintain --only <name>`: it rebuilds what
   changed and switches only after the selftest passes (`desk image build --force` /

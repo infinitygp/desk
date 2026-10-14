@@ -102,9 +102,11 @@ whole run 12 hours. An install is kept only if it powered off by itself and, whe
 names an `install_marker` (Windows: `firstboot.ps1` reports on the serial console), said that its
 setup succeeded.
 
-Maintenance is an offer, not a duty: it only touches images that are built, and it runs when
-somebody runs it. A host that should renew its images by itself gets the weekly timer; one
-without it has images as old as their last build.
+Maintenance is an offer, not a duty. It looks after the images in use on the host, which are
+those with a warm state, and installs or warms no other: `desk maintain --only NAME` is how an
+image (or a variant's warm state) that is not there yet gets built and tested in one go. And it
+runs when somebody runs it: a host that should renew its images by itself gets the weekly
+timer; one without it has images as old as their last build.
 
 Builds of images removed from `images/` are not deleted automatically.
 
@@ -195,8 +197,10 @@ Projects keep theirs in `test/desk/`.
 the start across reboots, SELinux denials, coredumps, journal warnings, package changes with dnf's
 UTC times made local, timeline with screenshots); `--diff` adds the files the run changed,
 from `virt-diff` against the image the run started from. Reports are pruned after 14 days.
-`desk gc` (and so every `desk up`) writes the report of an idle run before destroying it. When
-the guest could not be asked, the report says "NOT CHECKED" instead of counting nothing.
+`desk gc` (and so every `desk up`) writes the report of an idle run before destroying it, unless
+its owner comes back meanwhile. One command at a time takes a run down; a second `desk down` of
+it is refused. When the guest could not be asked, the report says "NOT CHECKED" instead of
+counting nothing.
 
 `desk record start|stop` (or `desk up --record`) takes screenshots at a steady rate (4 fps) in a
 background process; unchanged frames are hard links, so a still screen costs nothing. Stopping
