@@ -63,9 +63,10 @@ class PruneVersions(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             disk = Path(tmp) / "runs" / "kept" / "disk.qcow2"
             disk.parent.mkdir(parents=True)
-            disk.write_bytes(b"not a qcow2 image")
+            disk.write_bytes(b"")
+            # As when qemu-img cannot read it (half deleted, qemu-img itself failing).
             with mock.patch("desk.runs.RUNS", Path(tmp) / "runs"), mock.patch("desk.runs.conn", unreachable), \
-                    mock.patch("sys.stderr"):
+                    mock.patch("desk.virt.backing_files", return_value=[]), mock.patch("sys.stderr"):
                 self.assertEqual(runs.prune_versions(verbose=False), [])
 
 
