@@ -148,6 +148,94 @@ class ColdReason(unittest.TestCase):
                 self.assertIn("predates its base image", runs.cold_reason(spec))
 
 
+class Up(unittest.TestCase):
+    """The state lock is held until the domain runs, and not while its guest boots."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.home = Path(tmp.name)
+        self.events = []
+        base = self.home / "base" / "fedora-44-gnome"
+        base.mkdir(parents=True)
+        (base / "domain.xml").write_text("<domain/>")
+
+        def held(what):
+            return lambda *a, **k: self.events.append((what, bool(runs._locked.get(self.home / ".lock"))))
+
+        conn = mock.Mock()
+        conn.createXML.side_effect = held("domain started")
+        conn.listAllDomains.return_value = []
+        for target, value in (
+                ("desk.runs.RUNS", self.home / "runs"), ("desk.runs.HOME", self.home),
+                ("desk.config.BASE", self.home / "base"), ("desk.config.WARM", self.home / "warm"),
+                ("desk.runs.conn", lambda: conn), ("desk.runs.lookup", lambda name: None),
+                ("desk.runs.check_memory", lambda spec: None), ("desk.maintain.check_usable", lambda spec: []),
+                ("desk.runs.qemu_img_overlay", lambda backing, overlay: overlay.write_bytes(b"")),
+                ("desk.runs.reflink_copy", lambda src, dst: dst.write_bytes(b"")),
+                ("desk.runs.prepare_domain_xml", lambda *a, **k: "<domain/>"), ("desk.runs.free_port", lambda: 1),
+                ("desk.runs.guest.wait_ssh", held("waiting for the guest")),
+                ("desk.runs.guest.wait_ready", held("waiting for the session")),
+                ("desk.runs.images.provision", held("provisioning")), ("desk.steps.run_prepare", held("preparing"))):
+            patch = mock.patch(target, value)
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def test_lock_given_back_once_the_domain_runs(self):
+        from desk.config import load_image
+
+        with mock.patch("sys.stdout"):
+            run = runs.up(load_image("fedora-44-gnome"), run_id="t")
+        self.assertEqual(self.events, [("domain started", True), ("waiting for the guest", False),
+                                       ("waiting for the session", False), ("provisioning", False),
+                                       ("preparing", False)])
+        self.assertTrue(run.ready)
+        self.assertTrue(run.in_use())  # held by this process, so gc leaves it to it
+        self.assertFalse(runs._locked)
+
+    def test_a_start_that_fails_gives_the_lock_back_too(self):
+        from desk.config import load_image
+
+        with mock.patch("desk.runs.guest.wait_ssh", side_effect=runs.DeskError("SSH on port 1 not reachable")), \
+                mock.patch("sys.stdout"), self.assertRaises(runs.DeskError):
+            runs.up(load_image("fedora-44-gnome"), run_id="t")
+        self.assertFalse(runs._locked)
+        with runs.state_lock():
+            pass
+
+
+class Memory(unittest.TestCase):
+    """Guests that are still booting have not taken the memory they will take."""
+
+    def booting(self, run_id: str, domain: str, ready: float, max_mib: int, rss_mib: int):
+        dom = mock.Mock()
+        dom.maxMemory.return_value = max_mib * 1024
+        dom.memoryStats.return_value = {"rss": rss_mib * 1024}
+        return mock.Mock(id=run_id, domain=domain, ready=ready, live_domain=lambda: dom)
+
+    def test_promised(self):
+        fleet = [
+            self.booting("a", "desk-a", 0.0, 6144, 1024),                    # booting cold: 5120 to come
+            self.booting("b", "desk-b", 1.0, 4096, 2048),                    # handed over: as MemAvailable has it
+            self.booting("c", "desk-warm-fedora-44-gnome-1", 0.0, 4096, 512),  # restored: its memory is loaded
+            mock.Mock(id="d", domain="desk-d", ready=0.0, live_domain=lambda: None),  # a start that failed
+        ]
+        with mock.patch("desk.runs.all_runs", return_value=fleet):
+            self.assertEqual(runs._promised_mib(), 5120)
+
+    def test_a_second_cold_boot_does_not_count_the_firsts_memory_as_free(self):
+        from desk.config import load_image
+
+        spec = load_image("fedora-44-gnome")
+        need = spec.memory_mib + runs.HOST_RESERVE_MIB
+        first = [self.booting("a", "desk-a", 0.0, spec.memory_mib, 200)]
+        with mock.patch("desk.runs._mem_available_mib", return_value=need + 500):
+            with mock.patch("desk.runs.all_runs", return_value=[]):
+                runs.check_memory(spec)
+            with mock.patch("desk.runs.all_runs", return_value=first), self.assertRaisesRegex(runs.DeskError, "memory"):
+                runs.check_memory(spec)
+
+
 class Locks(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
