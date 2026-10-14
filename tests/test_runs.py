@@ -55,6 +55,20 @@ class Gc(unittest.TestCase):
         self.assertEqual([p.name for p in (self.home / "reports").iterdir()], ["old"])
 
 
+class PruneVersions(unittest.TestCase):
+    def test_nothing_is_deleted_while_a_run_disk_cannot_be_read(self):
+        def unreachable():
+            raise AssertionError("went on to look for builds to delete")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            disk = Path(tmp) / "runs" / "kept" / "disk.qcow2"
+            disk.parent.mkdir(parents=True)
+            disk.write_bytes(b"not a qcow2 image")
+            with mock.patch("desk.runs.RUNS", Path(tmp) / "runs"), mock.patch("desk.runs.conn", unreachable), \
+                    mock.patch("sys.stderr"):
+                self.assertEqual(runs.prune_versions(verbose=False), [])
+
+
 class AbandonedWarmup(unittest.TestCase):
     def xml(self, disk: Path) -> str:
         return f"<domain><devices><disk device='disk'><source file='{disk}'/></disk></devices></domain>"

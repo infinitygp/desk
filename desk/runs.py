@@ -318,7 +318,12 @@ def prune_versions(verbose: bool = True) -> list[str]:
 
     used: set[Path] = set()
     for disk in RUNS.glob("*/disk.qcow2"):
-        used.update(f.parent for f in backing_files(disk))
+        chain = backing_files(disk)
+        if not chain:
+            # Which builds this run stands on cannot be told, so any of them may be its.
+            print(f"[desk] gc: {disk} cannot be read; no old builds deleted this time", file=sys.stderr)
+            return []
+        used.update(f.parent for f in chain)
     names = list_images()
     keep_warm = {p for n in names for p in images.versions(WARM, n) if p in used or p == images.current(WARM / n)}
     for w in keep_warm:
