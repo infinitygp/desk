@@ -74,5 +74,15 @@ class Scale(unittest.TestCase):
             monitors._windows(RUN, load_image("windows-11"), None, 150)
 
 
+class Forward(unittest.TestCase):
+    def test_another_local_port_for_a_forwarded_one_is_refused(self):
+        live = [{"port": 22, "local": 40001, "pid": 1, "alive": True}]
+        with mock.patch("desk.forward.listing", return_value=live):
+            self.assertEqual(forward.start(RUN, 22), 40001)
+            self.assertEqual(forward.start(RUN, 22, 40001), 40001)
+            with self.assertRaisesRegex(DeskError, "forwarded to 127.0.0.1:40001 already"):
+                forward.start(RUN, 22, 40002)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -61,6 +61,9 @@ def start(run, port: int, local: int | None = None) -> int:
 
     for f in listing(run):
         if f["port"] == port and f["alive"]:
+            if local is not None and local != f["local"]:
+                raise DeskError(f"guest port {port} is forwarded to 127.0.0.1:{f['local']} already "
+                                f"(desk forward --stop {port}, then again with :{local})")
             return f["local"]
     if local is None:
         local = port if _free(port) else free_port()
