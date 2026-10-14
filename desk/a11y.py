@@ -1,6 +1,7 @@
 """Accessibility tree of the guest desktop, with refs (@e1...) that map to screen pixels."""
 
 import json
+import os
 import shlex
 import subprocess
 from pathlib import Path
@@ -54,8 +55,11 @@ def snapshot(run, app: str | None = None, all_windows: bool = False, limit: int 
         if not _on_screen(node["bbox"], size):
             node["offscreen"] = True
     if save:
-        # Refs printed to the agent must keep pointing at this snapshot.
-        (run.dir / "a11y.json").write_text(json.dumps(snap))
+        # Refs printed to the agent must keep pointing at this snapshot. Whole or not at all:
+        # another desk command may be reading the refs right now.
+        tmp = run.dir / f".a11y.json.{os.getpid()}"
+        tmp.write_text(json.dumps(snap))
+        os.replace(tmp, run.dir / "a11y.json")
     return snap
 
 
