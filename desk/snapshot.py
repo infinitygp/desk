@@ -41,37 +41,45 @@ def _resume(run, memory: Path) -> None:
 
 def save(run, name: str, force: bool = False) -> float:
     d = _dir(run, name)
-    if d.exists():
-        if not force:
-            raise DeskError(f"snapshot {name} exists (--force to replace it)")
-        shutil.rmtree(d)
+    if d.exists() and not force:
+        raise DeskError(f"snapshot {name} exists (--force to replace it)")
     dom = run.dom()
-    d.mkdir(parents=True)
+    # Made next to its place and moved there once whole, so a save that fails or is cut off
+    # leaves neither half a snapshot nor a hole where the one it was to replace used to be.
+    new = d.with_name(f".{name}.saving")
+    shutil.rmtree(new, ignore_errors=True)
+    new.mkdir(parents=True)
     t0 = time.monotonic()
     try:
-        dom.save(str(d / "memory.save"))
-        reflink_copy(run.dir / "disk.qcow2", d / "disk.qcow2")
-        reflink_copy(run.dir / "VARS.qcow2", d / "VARS.qcow2")
+        dom.save(str(new / "memory.save"))
+        reflink_copy(run.dir / "disk.qcow2", new / "disk.qcow2")
+        reflink_copy(run.dir / "VARS.qcow2", new / "VARS.qcow2")
         for f in disks.directory(run).glob("*.qcow2"):
-            (d / "disks").mkdir(exist_ok=True)
-            reflink_copy(f, d / "disks" / f.name)
+            (new / "disks").mkdir(exist_ok=True)
+            reflink_copy(f, new / "disks" / f.name)
+        took = time.monotonic() - t0
+        # Written last: a snapshot without it is not one (listing, restore).
+        (new / "meta.json").write_text(json.dumps({"created": time.time(), "seconds": round(took, 1),
+                                                   "clock_offset": run.clock_offset}))
     except BaseException:
-        if run.live_domain() is None and (d / "memory.save").exists():
-            _resume(run, d / "memory.save")
-        shutil.rmtree(d, ignore_errors=True)
+        if run.live_domain() is None and (new / "memory.save").exists():
+            _resume(run, new / "memory.save")
+        shutil.rmtree(new, ignore_errors=True)
         raise
+    if d.exists():
+        shutil.rmtree(d)
+    new.rename(d)
     _resume(run, d / "memory.save")
-    took = time.monotonic() - t0
-    (d / "meta.json").write_text(json.dumps({"created": time.time(), "seconds": round(took, 1),
-                                             "clock_offset": run.clock_offset}))
     run.log_event(snapshot="save", name=name)
-    return took
+    return time.monotonic() - t0
 
 
 def restore(run, name: str) -> float:
     d = _dir(run, name)
-    if not (d / "memory.save").exists():
+    if not (d / "meta.json").exists() or not (d / "memory.save").exists():
         raise DeskError(f"no snapshot {name} (desk snapshot list)")
+    # Everything that can fail by reading comes before the running guest is given up.
+    meta = json.loads((d / "meta.json").read_text())
     t0 = time.monotonic()
     dom = run.live_domain()
     if dom is not None:
@@ -82,7 +90,7 @@ def restore(run, name: str) -> float:
         tmp.chmod(0o644)
         os.replace(tmp, run.dir / f)
     # The clock as it was then too: whether the guest syncs its time is part of its disk.
-    run.clock_offset = json.loads((d / "meta.json").read_text()).get("clock_offset", 0.0)
+    run.clock_offset = meta.get("clock_offset", 0.0)
     run.save()
     # Extra disks as they were then: the saved guest has exactly those plugged in.
     shutil.rmtree(disks.directory(run), ignore_errors=True)
@@ -99,6 +107,8 @@ def restore(run, name: str) -> float:
 def listing(run) -> list[dict]:
     out = []
     for d in sorted(_dir(run).glob("*/meta.json")) if _dir(run).exists() else []:
+        if not NAME.fullmatch(d.parent.name):
+            continue  # a save in progress
         meta = json.loads(d.read_text())
         size = sum(f.stat().st_blocks * 512 for f in d.parent.rglob("*") if f.is_file())
         out.append({"name": d.parent.name, "created": meta["created"], "bytes": size})
