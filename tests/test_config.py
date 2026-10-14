@@ -69,7 +69,7 @@ class WindowsCommands(unittest.TestCase):
         from desk import guest
 
         self.assertEqual(guest.command(load_image("fedora-44-gnome"), ["make check"], limit=90),
-                         "timeout -k 5 90 bash -c 'make check'")
+                         "DESK_CMD='make check' timeout -k 5 90 bash -c 'c=$DESK_CMD; unset DESK_CMD; eval \"$c\"'")
         self.assertIn("setsid sh -c", guest.command(load_image("openwrt-25.12"), ["apk update"], limit=90))
         command = guest.command(load_image("windows-11"), ["msiexec /i a.msi"], env={"WHO": "o'k"}, limit=90)
         script = base64.b64decode(command.split("-EncodedCommand ")[1].split(";")[0]).decode("utf-16-le")

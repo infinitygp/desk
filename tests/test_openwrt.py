@@ -68,7 +68,7 @@ class Commands(unittest.TestCase):
         self.assertIn("env A=b sh -c", cmd)
 
     def test_bash_keeps_timeout(self):
-        self.assertTrue(remote_command(["true"], limit=3).startswith("timeout -k 5 3 bash -c"))
+        self.assertIn("timeout -k 5 3 bash -c", remote_command(["true"], limit=3))
 
     def test_scenario_artifacts_go_to_tmp(self):
         self.assertEqual(scenario.GUEST_IN["openwrt"], "/tmp/desk")

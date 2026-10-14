@@ -43,8 +43,11 @@ def remote_command(argv: list[str], gui: bool = False, wait: bool = False,
                f"setsid sh -c {shlex.quote(watchdog)} _ {max(1, round(limit))} $p </dev/null >/dev/null 2>&1 & w=$!; "
                "wait $p; rc=$?; kill -TERM -$w $w 2>/dev/null; exit $rc")
     elif limit and not gui:
-        # Stopped in the guest too: closing SSH would leave a hung command running there.
-        cmd = f"timeout -k 5 {limit:.0f} bash -c {shlex.quote(cmd)}"
+        # Stopped in the guest too: closing SSH would leave a hung command running there. The
+        # command reaches its shell through the environment, not as an argument: `pgrep -f X`
+        # would otherwise find `timeout ... bash -c 'pgrep -f X'` and count it.
+        cmd = (f"DESK_CMD={shlex.quote(cmd)} timeout -k 5 {limit:.0f} bash -c "
+               + shlex.quote('c=$DESK_CMD; unset DESK_CMD; eval "$c"'))
     if limit and gui:
         setenv += f" -p RuntimeMaxSec={limit:.0f}"
     if gui:
