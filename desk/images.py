@@ -492,7 +492,9 @@ def _wait_shutoff(name: str, timeout: float | None = None) -> None:
         if not dom.isActive():
             return
         if deadline and time.monotonic() > deadline:
-            raise DeskError(f"{name} still running after {timeout:.0f}s (desk image shot to see why)")
+            # build() ends the install on this error, keeping what its screen showed.
+            raise DeskError(f"{name} still running after {timeout:.0f}s; its last screen: {LOGS / f'{name}-stuck.png'}, "
+                            f"its serial console: {LOGS / f'{name}.log'}")
         time.sleep(10)
 
 
