@@ -51,5 +51,28 @@ class SetText(unittest.TestCase):
         self.assertEqual(self.replace({"done": True, "text": "••••"}, "secret", role="password text"), "")
 
 
+class Scale(unittest.TestCase):
+    def test_a_registry_that_refuses_costs_no_reboot(self):
+        refused = subprocess.CompletedProcess([], 1, b"", b"Set-ItemProperty : Requested registry access is not allowed.")
+        with mock.patch("desk.monitors.guest.ssh_run", return_value=refused), \
+                mock.patch("desk.monitors.guest.reboot") as reboot, mock.patch("desk.winagent.request"), \
+                self.assertRaisesRegex(DeskError, "did not take scale 150 %.*registry access"):
+            monitors._windows(RUN, load_image("windows-11"), None, 150)
+        reboot.assert_not_called()
+
+    def test_a_scale_that_did_not_stick(self):
+        done = subprocess.CompletedProcess([], 0, b"", b"")
+        with mock.patch("desk.monitors.guest.ssh_run", return_value=done), mock.patch("desk.monitors.guest.reboot"), \
+                mock.patch("desk.winagent.request", return_value={"stdout": "96\r\n", "code": 0}), \
+                self.assertRaisesRegex(DeskError, "at 100 % instead of 150 %"):
+            monitors._windows(RUN, load_image("windows-11"), None, 150)
+
+    def test_a_scale_that_stuck(self):
+        done = subprocess.CompletedProcess([], 0, b"", b"")
+        with mock.patch("desk.monitors.guest.ssh_run", return_value=done), mock.patch("desk.monitors.guest.reboot"), \
+                mock.patch("desk.winagent.request", return_value={"stdout": "144\r\n", "code": 0}):
+            monitors._windows(RUN, load_image("windows-11"), None, 150)
+
+
 if __name__ == "__main__":
     unittest.main()

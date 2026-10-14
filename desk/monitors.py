@@ -52,13 +52,36 @@ def _windows(run, spec: ImageSpec, resolution, scale) -> None:
         # One DPI for every monitor, which Windows applies when the user signs in again; desk signs
         # in again on Windows by rebooting.
         dpi = round(96 * scale / 100)
-        guest.ssh_run(run.ssh_port, spec.root_user, spec.cmd(
+        r = guest.ssh_run(run.ssh_port, spec.root_user, spec.cmd(
             "$d = 'HKCU:\\Control Panel\\Desktop'; "
             f"Set-ItemProperty $d -Name LogPixels -Value {dpi} -Type DWord; "
             f"Set-ItemProperty $d -Name Win8DpiScaling -Value {0 if scale == 100 else 1} -Type DWord"),
             capture=True, timeout=60)
+        if r.returncode != 0:
+            # Not worth the reboot: the scale would stay as it is.
+            raise DeskError(f"Windows did not take scale {scale} %: {r.stderr.decode(errors='replace').strip()[-300:]}")
         guest.reboot(run.ssh_port, spec)
         arrange()
+        got = windows_dpi(run)
+        if got != dpi:
+            raise DeskError(f"Windows signed in again at {round(got * 100 / 96)} % instead of {scale} %")
+
+
+def windows_dpi(run) -> int:
+    """The DPI the desktop session runs at, asked of a program in it (not the registry, which
+    only holds what applies at the next sign-in)."""
+    from . import winagent
+
+    script = ("Add-Type -Namespace Desk -Name Dpi -MemberDefinition '[DllImport(\"user32.dll\")] public static "
+              "extern uint GetDpiForSystem(); [DllImport(\"user32.dll\")] public static extern bool "
+              "SetProcessDpiAwarenessContext(IntPtr v);'; [void][Desk.Dpi]::SetProcessDpiAwarenessContext([IntPtr]-4); "
+              "[Desk.Dpi]::GetDpiForSystem()")
+    reply = winagent.request(run, timeout=90, cmd="run", file="powershell.exe", args=["-NoProfile", "-Command", script],
+                             wait=True, timeout_s=60)
+    try:
+        return int((reply.get("stdout") or "").strip())
+    except ValueError:
+        raise DeskError(f"could not read the session's DPI: {(reply.get('stderr') or reply.get('stdout') or '').strip()[-200:]}") from None
 
 
 def _gnome_output(run, what: str) -> str:
