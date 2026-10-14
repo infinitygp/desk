@@ -133,8 +133,16 @@ def wait_ready(port: int, user: str, ready: str, timeout: float = 300) -> None:
     raise DeskError(f"guest not ready after {timeout:.0f}s ({why}): {ready[:200]}")
 
 
-def scp(port: int, src: str, dst: str) -> int:
-    return subprocess.run(["scp", *_SSH_OPTS, "-r", "-P", str(port), src, dst]).returncode
+# Long enough for a disk image over the loopback; a copy that hangs must not hang its caller.
+COPY_TIMEOUT = 600.0
+
+
+def scp(port: int, src: str, dst: str, timeout: float | None = COPY_TIMEOUT) -> int:
+    """scp's exit code; 124 when it was stopped after `timeout` seconds (None: no limit)."""
+    try:
+        return subprocess.run(["scp", *_SSH_OPTS, "-r", "-P", str(port), src, dst], timeout=timeout).returncode
+    except subprocess.TimeoutExpired:
+        return 124
 
 
 def agent_exec(dom, argv: list[str], timeout: float = 120) -> tuple[int, bytes, bytes]:

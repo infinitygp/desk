@@ -718,9 +718,13 @@ def _copy(args, push: bool) -> None:
     run = runs.resolve(args.run)
     user = runs.spec_for(run).root_user if args.root else run.user
     remote = f"{user}@127.0.0.1:{args.remote}"
-    rc = guest.scp(run.ssh_port, args.local, remote) if push else guest.scp(run.ssh_port, remote, args.local)
+    src, dst = (args.local, remote) if push else (remote, args.local)
+    rc = guest.scp(run.ssh_port, src, dst, timeout=args.timeout or None)
     run.log_event(rc=rc)
-    if rc != 0:
+    if rc == 124:
+        print(f"desk: still copying after {args.timeout:.0f}s; stopped it (--timeout SECONDS to allow longer, "
+              "0: no limit)", file=sys.stderr)
+    elif rc != 0:
         print(f"desk: copying failed (scp exit {rc})"
               + ("" if args.root else f"; {args.remote} may be outside what {run.user} can access: --root"),
               file=sys.stderr)
@@ -910,6 +914,8 @@ def build_parser() -> argparse.ArgumentParser:
             p.add_argument("remote")
             p.add_argument("local")
         p.add_argument("--root", action="store_true", help="as root, for paths the desktop user cannot access")
+        p.add_argument("--timeout", type=float, default=guest.COPY_TIMEOUT,
+                       help=f"seconds before the copy is stopped (default {guest.COPY_TIMEOUT:.0f}, 0: no limit)")
         p.set_defaults(func=fn)
 
     sub.add_parser("ssh", help="interactive shell in the guest").set_defaults(func=cmd_ssh)
