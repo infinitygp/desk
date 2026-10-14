@@ -22,6 +22,9 @@ $Interactive = 'button', 'check box', 'radio button', 'combo box', 'entry', 'lin
     'page tab', 'tree item', 'table cell', 'slider', 'spin button', 'menu'
 $Quiet = 'panel', 'grouping', 'unknown', 'title bar', 'scroll bar', 'thumb', 'separator', 'header'
 $MaxVisit = 6000
+# A walk also ends by the clock, as on Linux guests: an application that answers slowly would
+# otherwise keep the agent, which serves one request at a time, past the host's patience.
+$WalkSeconds = 20
 
 # Some classic list views (the desktop's icons: FolderView, a SysListView32 in Explorer) show
 # up in the managed UIA client as an empty pane; their items are only reachable through MSAA.
@@ -125,6 +128,8 @@ function New-ElementCache {
 # Classic Win32 dialogs (NSIS and other installers) come through the MSAA proxy, which hands
 # back no descendants for a cached subtree. Walk those live, caching one element at a time.
 function Walk-Live($live, $path, $depth, $parentName, $hwnd, $nodes, $limit, $crEl) {
+    if ($script:truncated -eq 'time') { return }
+    if ($script:walkClock.Elapsed.TotalSeconds -gt $WalkSeconds) { $script:truncated = 'time'; return }
     if ($script:visited -ge $MaxVisit -or ($nodes.Count - $script:offscreen) -ge $limit) { $script:truncated = $true; return }
     try { $el = $live.GetUpdatedCache($crEl) } catch { return }
     $script:visited++
@@ -221,6 +226,7 @@ function Snapshot($opts) {
     $nodes = New-Object System.Collections.ArrayList
     $tops = New-Object System.Collections.ArrayList
     $script:visited = 0; $script:offscreen = 0; $script:truncated = $false
+    $script:walkClock = [Diagnostics.Stopwatch]::StartNew()
     $cr = New-Cache
     foreach ($top in (Get-TopWindows)) {
         try {
@@ -263,6 +269,8 @@ function Snapshot($opts) {
 }
 
 function Walk($el, $path, $depth, $parentName, $hwnd, $nodes, $limit) {
+    if ($script:truncated -eq 'time') { return }
+    if ($script:walkClock.Elapsed.TotalSeconds -gt $WalkSeconds) { $script:truncated = 'time'; return }
     if ($script:visited -ge $MaxVisit -or ($nodes.Count - $script:offscreen) -ge $limit) { $script:truncated = $true; return }
     $script:visited++
     $node = Describe $el $path $depth $hwnd

@@ -1,6 +1,9 @@
 # desk in-session agent. Started from the user's Run key, so it lives in the interactive desktop
 # session that SSH cannot reach: it answers UI Automation queries and starts programs there.
 # One JSON request per TCP connection, one JSON reply. The port is forwarded by the host only.
+# Requests are served one at a time, so none may hold the agent: a connection that sends nothing
+# is dropped after 5 s, a tree walk ends after 20 s (uia.ps1), and a program that is waited for
+# (exec --gui --wait) is waited for on a thread of its own, which answers when it has ended.
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 . (Join-Path $PSScriptRoot 'uia.ps1')
@@ -142,9 +145,62 @@ function Set-Displays($width, $height) {
     Get-Monitors
 }
 
+Add-Type -ReferencedAssemblies System.Web.Extensions -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using System.Net.Sockets;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Web.Script.Serialization;
+namespace Desk {
+    public static class Waiter {
+        // Programs that print UTF-8 (Rust, Python with UTF-8 mode) come through as they are;
+        // console tools write in the OEM code page when their output is redirected.
+        static string Decode(byte[] bytes) {
+            try { return new UTF8Encoding(false, true).GetString(bytes); }
+            catch (Exception) { return Encoding.GetEncoding(CultureInfo.CurrentCulture.TextInfo.OEMCodePage).GetString(bytes); }
+        }
+
+        // Waits for `p` (at most `ms` milliseconds; -1: for ever) away from the agent's loop and
+        // answers the request on `client` with its exit code and output, then closes it.
+        public static void Answer(Process p, TcpClient client, int ms) {
+            var stdout = new MemoryStream();
+            var stderr = new MemoryStream();
+            var copies = new Task[] { p.StandardOutput.BaseStream.CopyToAsync(stdout), p.StandardError.BaseStream.CopyToAsync(stderr) };
+            ThreadPool.QueueUserWorkItem(unused => {
+                var reply = new Dictionary<string, object>();
+                try {
+                    bool done = p.WaitForExit(ms);
+                    if (!done) { try { p.Kill(); } catch (Exception) { } }
+                    try { Task.WaitAll(copies, 5000); } catch (Exception) { }
+                    reply["ok"] = true;
+                    reply["pid"] = p.Id;
+                    reply["stdout"] = Decode(stdout.ToArray());
+                    reply["stderr"] = Decode(stderr.ToArray());
+                    if (done) reply["code"] = p.ExitCode; else reply["timeout"] = true;
+                } catch (Exception e) {
+                    reply.Clear();
+                    reply["error"] = e.Message;
+                }
+                try {
+                    var json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue }.Serialize(reply);
+                    var bytes = new UTF8Encoding(false).GetBytes(json);
+                    client.GetStream().Write(bytes, 0, bytes.Length);
+                } catch (Exception) { }
+                client.Close();
+            });
+        }
+    }
+}
+'@
+
 # A program in this session with extra environment variables, optionally waiting for it and
 # returning its exit code and output (desk exec --gui --wait --env), which SSH cannot see.
-function Invoke-Program($req) {
+function Invoke-Program($req, $client) {
     $psi = New-Object Diagnostics.ProcessStartInfo
     $psi.FileName = $req.file
     $psi.Arguments = (@($req.args) | Where-Object { $_ -ne $null } | ForEach-Object {
@@ -157,26 +213,16 @@ function Invoke-Program($req) {
         $psi.RedirectStandardError = $true
         $psi.CreateNoWindow = $true   # the output comes back to desk, no console window on the desktop
     }
-    $before = Get-TopHandles
+    if (-not $req.wait) {
+        $before = Get-TopHandles
+        $p = [Diagnostics.Process]::Start($psi)
+        return @{ ok = $true; pid = $p.Id; focused = (Focus-NewWindow $before $p.Id) }
+    }
     $p = [Diagnostics.Process]::Start($psi)
-    if (-not $req.wait) { return @{ ok = $true; pid = $p.Id; focused = (Focus-NewWindow $before $p.Id) } }
-    $out = New-Object IO.MemoryStream
-    $err = New-Object IO.MemoryStream
-    $copies = @($p.StandardOutput.BaseStream.CopyToAsync($out), $p.StandardError.BaseStream.CopyToAsync($err))
-    $ms = if ($req.timeout_s) { [int](1000 * $req.timeout_s) } else { -1 }
-    $done = $p.WaitForExit($ms)
-    if (-not $done) { try { $p.Kill() } catch { } }
-    [void][Threading.Tasks.Task]::WaitAll($copies, 5000)
-    $reply = @{ ok = $true; pid = $p.Id; stdout = (Decode-Output $out.ToArray()); stderr = (Decode-Output $err.ToArray()) }
-    if ($done) { $reply.code = $p.ExitCode } else { $reply.timeout = $true }
-    $reply
-}
-
-# Programs that print UTF-8 (Rust, Python with UTF-8 mode) come through as they are; console
-# tools write in the OEM code page when their output is redirected.
-function Decode-Output($bytes) {
-    try { (New-Object Text.UTF8Encoding($false, $true)).GetString($bytes) }
-    catch { [Text.Encoding]::GetEncoding([Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage).GetString($bytes) }
+    $ms = if ($req.timeout_s) { [int][Math]::Min(1000 * [double]$req.timeout_s, [int]::MaxValue) } else { -1 }
+    # From here the connection is the waiting thread's: it answers and closes it.
+    $script:handed = $true
+    [Desk.Waiter]::Answer($p, $client, $ms)
 }
 
 $port = 47011
@@ -185,14 +231,19 @@ $listener.Start()
 $utf8 = New-Object Text.UTF8Encoding($false)
 while ($true) {
     $client = $listener.AcceptTcpClient()
+    $script:handed = $false
+    $reply = $null
     try {
+        # A connection that sends no request (a probe, a caller that gave up) is not waited for.
+        $client.ReceiveTimeout = 5000
+        $client.SendTimeout = 30000
         $stream = $client.GetStream()
         $reader = New-Object IO.StreamReader($stream, $utf8)
         $req = $reader.ReadLine() | ConvertFrom-Json
         $reply = switch ($req.cmd) {
             'ping' { @{ ok = $true; session = (Get-Process -Id $PID).SessionId; user = $env:USERNAME } }
             'run' {
-                if ($req.wait -or $req.env) { Invoke-Program $req }
+                if ($req.wait -or $req.env) { Invoke-Program $req $client }
                 else {
                     $before = Get-TopHandles
                     $p = if ($req.args) { Start-Process -FilePath $req.file -ArgumentList $req.args -PassThru }
@@ -226,6 +277,8 @@ while ($true) {
     } catch {
         $reply = @{ error = $_.Exception.Message }
     }
+    if ($script:handed) { continue }
+    if ($null -eq $reply) { $reply = @{ error = "the agent has no answer to $($req.cmd)" } }
     try {
         $bytes = $utf8.GetBytes(($reply | ConvertTo-Json -Depth 20 -Compress))
         $stream.Write($bytes, 0, $bytes.Length)
