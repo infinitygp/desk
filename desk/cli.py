@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import a11y, display, evidence, guest, images, record, runs
-from .config import DeskError, list_images, load_image
+from .config import DeskError, list_images, load_image, version
 
 
 def _emit_shot(run: runs.Run, png: bytes, out: str | None, label: str = "") -> None:
@@ -719,6 +719,22 @@ def cmd_maintain(args) -> None:
     sys.exit(0 if maintain.maintain(only=args.only, dry_run=args.dry_run) else 1)
 
 
+def cmd_install(args) -> None:
+    from . import install
+
+    for line in install.install():
+        print(line)
+    if not args.quiet:
+        print()
+        cmd_doctor(args)
+
+
+def cmd_update(args) -> None:
+    from . import install
+
+    print(install.update())
+
+
 def cmd_doctor(args) -> None:
     from . import doctor
 
@@ -770,6 +786,7 @@ def _action_opts(p: argparse.ArgumentParser) -> None:
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="desk", description="Drive disposable desktop VMs for testing.")
     ap.add_argument("-r", "--run", help="run id (default: $DESK_RUN or the only active run)")
+    ap.add_argument("--version", action="version", version=f"desk {version()}")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("image", help="golden images")
@@ -955,6 +972,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("doctor", help="what desk needs on this host, what is missing and how to install it; "
                    "where images and runs are kept").set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser("install", help="put desk on PATH (~/.local/bin) and its skill where coding agents look "
+                       "(~/.agents/skills, ~/.claude/skills), then check the host")
+    p.add_argument("--quiet", action="store_true", help="without the host check")
+    p.set_defaults(func=cmd_install)
+    sub.add_parser("update", help="replace this release of desk with the newest one (gh), skill included"
+                   ).set_defaults(func=cmd_update)
 
     p = sub.add_parser("focus", help="bring a window to the front by application or title")
     p.add_argument("query")

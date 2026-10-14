@@ -1,0 +1,139 @@
+"""The single-file release: built from the checkout, unpacked on first start, installed and
+updated without the repository."""
+
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+import zipfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+# Stands in for `gh release download ... --output FILE`, handing out $FAKE_RELEASE.
+FAKE_GH = """#!/bin/sh
+while [ $# -gt 0 ]; do [ "$1" = "--output" ] && out=$2; shift; done
+cp "$FAKE_RELEASE" "$out"
+"""
+
+
+class Release(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.dir = Path(cls.tmp.name)
+        cls.pyz = cls.build("v9.9.9-test")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    @classmethod
+    def build(cls, version: str, name: str = "desk.pyz") -> Path:
+        out = cls.dir / name
+        subprocess.run([sys.executable, str(ROOT / "scripts" / "build.py"), "--version", version, "--output", str(out)],
+                       check=True, capture_output=True)
+        return out
+
+    def desk(self, launcher: Path, *args: str, home: Path, **env) -> subprocess.CompletedProcess:
+        environ = {**os.environ, "HOME": str(home), "XDG_CACHE_HOME": str(home / ".cache"),
+                   "XDG_CONFIG_HOME": str(home / ".config"), "PATH": f"{home / 'bin'}:{os.environ['PATH']}", **env}
+        environ.pop("DESK_LAUNCHER", None)
+        return subprocess.run([sys.executable, str(launcher), *args], capture_output=True, text=True, env=environ,
+                              timeout=120)
+
+    def home(self) -> Path:
+        home = Path(tempfile.mkdtemp(dir=self.dir))
+        (home / ".claude").mkdir()
+        (home / "bin").mkdir()
+        (home / "bin" / "gh").write_text(FAKE_GH)
+        (home / "bin" / "gh").chmod(0o755)
+        return home
+
+    def test_contents(self):
+        with zipfile.ZipFile(self.pyz) as z:
+            names = set(z.namelist())
+            build = json.loads(z.read("BUILD.json"))
+            provision = z.getinfo("images/fedora-44-gnome/provision.sh")
+        self.assertLessEqual({"__main__.py", "desk/cli.py", "desk/guest_a11y.py", "images/windows-11/image.toml",
+                              "images/_shared/windows/agent.ps1", "skill/SKILL.md"}, names)
+        self.assertFalse([n for n in names if n.startswith(("tests/", ".git", "dist/")) or "__pycache__" in n])
+        self.assertEqual(build["version"], "v9.9.9-test")
+        self.assertRegex(build["repo"], r"^[\w.-]+/[\w.-]+$")
+        self.assertTrue(provision.external_attr >> 16 & 0o111)  # a script keeps its mode
+        self.assertTrue(self.pyz.read_bytes().startswith(b"#!/usr/bin/python3\n"))
+
+    def test_runs_unpacked_with_the_files_modes(self):
+        home = self.home()
+        r = self.desk(self.pyz, "--version", home=home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(f"desk v9.9.9-test (release ", r.stdout)
+        self.assertIn(str(self.pyz), r.stdout)
+        [unpacked] = (home / ".cache" / "desk").iterdir()
+        self.assertTrue(os.access(unpacked / "images/fedora-44-gnome/provision.sh", os.X_OK))
+
+    def test_install_and_update_without_the_repository(self):
+        home = self.home()
+        launcher = home / ".local" / "bin" / "desk"
+        launcher.parent.mkdir(parents=True)
+        launcher.write_bytes(self.pyz.read_bytes())
+        r = self.desk(launcher, "install", "--quiet", home=home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        skill = home / ".agents" / "skills" / "desk" / "SKILL.md"
+        self.assertEqual(skill.read_text(), (ROOT / "skill" / "SKILL.md").read_text())
+        self.assertFalse(skill.parent.is_symlink())  # a copy: the unpacked build is pruned some day
+        self.assertEqual((home / ".claude" / "skills" / "desk").resolve(), skill.parent)
+
+        same = self.desk(launcher, "update", home=home, FAKE_RELEASE=str(self.pyz))
+        self.assertIn("is the newest release", same.stdout, same.stderr)
+
+        # A later release, whose skill says something else.
+        rebuilt = self.dir / "newer.pyz"
+        with zipfile.ZipFile(self.pyz) as src, zipfile.ZipFile(rebuilt, "w") as dst:
+            for item in src.infolist():
+                data = src.read(item.filename)
+                if item.filename == "BUILD.json":
+                    data = json.dumps({**json.loads(data), "version": "v9.9.10-test", "id": "newer-build"}).encode()
+                elif item.filename == "skill/SKILL.md":
+                    data = b"the newer skill\n"
+                dst.writestr(item, data)
+        rebuilt.write_bytes(b"#!/usr/bin/python3\n" + rebuilt.read_bytes())
+        r = self.desk(launcher, "update", home=home, FAKE_RELEASE=str(rebuilt))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("-> v9.9.10-test", r.stdout)
+        self.assertIn("v9.9.10-test", self.desk(launcher, "--version", home=home).stdout)
+        self.assertEqual(skill.read_text(), "the newer skill\n")
+
+    def test_without_libvirt_it_says_what_to_install(self):
+        home = self.home()
+        blocker = home / "nolibvirt"
+        blocker.mkdir()
+        (blocker / "libvirt.py").write_text("raise ModuleNotFoundError(name='libvirt')\n")
+        r = self.desk(self.pyz, "--version", home=home, PYTHONPATH=str(blocker))
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("sudo dnf install python3-libvirt", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+
+    def test_another_desk_on_path_is_left_alone(self):
+        home = self.home()
+        other = home / ".local" / "bin" / "desk"
+        other.parent.mkdir(parents=True)
+        other.write_text("#!/bin/sh\necho another desk\n")
+        r = self.desk(self.pyz, "install", "--quiet", home=home)
+        self.assertIn("is another desk", r.stdout)
+        self.assertEqual(other.read_text(), "#!/bin/sh\necho another desk\n")
+
+    def test_a_checkout_links_and_is_updated_by_git(self):
+        home = self.home()
+        r = self.desk(ROOT / "bin" / "desk", "install", "--quiet", home=home)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual((home / ".local" / "bin" / "desk").resolve(), ROOT / "bin" / "desk")
+        self.assertEqual((home / ".agents" / "skills" / "desk").resolve(), ROOT / "skill")
+        r = self.desk(ROOT / "bin" / "desk", "update", home=home)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("git pull", r.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()

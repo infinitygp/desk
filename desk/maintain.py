@@ -22,7 +22,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from . import images, runs
-from .config import BASE, HOME, PROJECT, URI, WARM, DeskError, ImageSpec, list_images, load_image
+from .config import BASE, HOME, LAUNCHER, URI, WARM, DeskError, ImageSpec, list_images, load_image
 
 MAINTAIN = HOME / "maintain"
 STATUS = MAINTAIN / "status.json"
@@ -305,7 +305,7 @@ def install_timer() -> None:
     # this shell's variables nor, necessarily, its XDG directories.
     settings = {"DESK_HOME": str(HOME), "DESK_URI": URI, **{k: os.environ[k] for k in ("DESK_TTL",) if k in os.environ}}
     env = "".join(f'Environment="{k}={v}"\n' for k, v in settings.items())
-    (units / "desk-maintain.service").write_text(SERVICE.format(desk=PROJECT / "bin" / "desk", environment=env))
+    (units / "desk-maintain.service").write_text(SERVICE.format(desk=LAUNCHER, environment=env))
     (units / "desk-maintain.timer").write_text(TIMER)
     subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
     subprocess.run(["systemctl", "--user", "enable", "--now", "desk-maintain.timer"], check=True)

@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import config
-from .config import HOME, PROJECT, URI, DeskError, list_images, load_image
+from .config import HOME, URI, DeskError, list_images, load_image, version
 
 
 def tool(name: str) -> Callable[[], bool]:
@@ -118,6 +118,7 @@ FEATURES = [
     Need("QEMU virtio-gpu-pci", "desk up --resolution/--displays", qemu_device("virtio-gpu-pci"),
          "qemu-hw-display-virtio-gpu-pci", "qemu-device-display-virtio-gpu-pci"),
     Need("virt-diff", "desk diff, desk down --diff", tool("virt-diff"), "guestfs-tools", "guestfs-tools"),
+    Need("gh", "desk update of a release", tool("gh"), "github-cli", "gh"),
     Need("GStreamer with VP9, WebM, PNG and text overlay", "desk record",
          lambda: tool("gst-launch-1.0")() and gst_elements("multifilesrc", "pngdec", "videobox", "timeoverlay", "vp9enc",
                                                          "webmmux")(),
@@ -256,7 +257,7 @@ def run() -> bool:
         family = host_family(Path("/etc/os-release").read_text())
     except OSError:
         family = None
-    print(f"source     {PROJECT}")
+    print(f"desk       {version()}")
     home_lines, home_problems = storage()
     print("\n".join(home_lines))
     line, connection_problem = libvirt_connection()

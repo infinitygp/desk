@@ -1,0 +1,37 @@
+name: Release
+
+# A tag vX.Y.Z builds desk.pyz from it and publishes it as that release (desk update fetches the
+# newest one). The same steps run on a host before the tag: AGENTS.md, "Releases".
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # The distribution desk runs on, with its Python and its libvirt bindings.
+    container: fedora:44
+    permissions:
+      contents: write
+    steps:
+      - name: Tools
+        run: dnf install -y -q git python3 python3-libvirt gh
+
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Unit tests
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          /usr/bin/python3 -m unittest discover -s tests -t .
+
+      - name: Build
+        run: /usr/bin/python3 scripts/build.py --version "$GITHUB_REF_NAME" --output dist/desk.pyz
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/desk.pyz --repo "$GITHUB_REPOSITORY" --title "desk $GITHUB_REF_NAME" --generate-notes

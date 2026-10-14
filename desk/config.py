@@ -1,5 +1,7 @@
 import base64
+import json
 import os
+import subprocess
 import sys
 import tomllib
 from dataclasses import dataclass
@@ -7,6 +9,23 @@ from pathlib import Path
 
 PROJECT = Path(__file__).resolve().parent.parent
 IMAGES_DIR = PROJECT / "images"
+
+# A release (desk.pyz) runs unpacked from the cache, with BUILD.json saying which build it is and
+# DESK_LAUNCHER the file it was started as; a checkout of the repository has neither.
+BUILD = json.loads((PROJECT / "BUILD.json").read_text()) if (PROJECT / "BUILD.json").is_file() else {}
+LAUNCHER = Path(os.environ["DESK_LAUNCHER"]) if BUILD and os.environ.get("DESK_LAUNCHER") else PROJECT / "bin" / "desk"
+
+
+def version() -> str:
+    """The release and where it runs from, or for a checkout what git says of it and where it is."""
+    if BUILD:
+        return f"{BUILD['version']} (release {BUILD['commit']}, {LAUNCHER})"
+    try:
+        described = subprocess.run(["git", "-C", str(PROJECT), "describe", "--tags", "--always", "--dirty"],
+                                   capture_output=True, text=True, timeout=10).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        described = ""
+    return f"{described or 'unknown'} (checkout {PROJECT})"
 
 # What differs from host to host lives outside the repository: where images and runs are kept
 # (`home`), which libvirt to use (`uri`). The environment wins over the file.
