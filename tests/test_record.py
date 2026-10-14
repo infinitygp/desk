@@ -6,8 +6,10 @@ import time
 import unittest
 import zlib
 from pathlib import Path
+from unittest import mock
 
-from desk import record
+from desk import evidence, record
+from desk.config import DeskError
 
 
 def png(width: int, height: int, shade: int) -> bytes:
@@ -24,6 +26,9 @@ class FakeRun:
 
     def log_event(self, **event):
         self.events.append(event)
+
+    def live_domain(self):
+        return None
 
 
 @unittest.skipIf(shutil.which("gst-launch-1.0") is None, "GStreamer not installed")
@@ -46,6 +51,37 @@ class Encode(unittest.TestCase):
     def test_nothing_to_encode(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertIsNone(record.encode(FakeRun(Path(tmp))))
+
+
+class FailedEncode(unittest.TestCase):
+    def frames(self, run) -> Path:
+        frames = run.dir / "rec"
+        frames.mkdir()
+        (frames / "meta.json").write_text(json.dumps({"fps": 4, "start": time.time()}))
+        (frames / "000000.png").write_bytes(png(8, 8, 40))
+        return frames
+
+    def test_frames_are_set_aside_so_the_next_recording_can_start(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = FakeRun(Path(tmp))
+            frames = self.frames(run)
+            with mock.patch("desk.record.subprocess.run", side_effect=FileNotFoundError("gst-launch-1.0")):
+                with self.assertRaisesRegex(DeskError, "not installed.*rec-failed-"):
+                    record.encode(run)
+            self.assertFalse(frames.exists())
+            self.assertEqual(len(list(run.dir.glob("rec-failed-*/000000.png"))), 1)
+            self.assertEqual(list((run.dir / "videos").glob("*")), [])
+            self.assertIsNone(record.encode(run))
+
+    def test_the_run_goes_down_without_its_video(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = FakeRun(Path(tmp))
+            self.frames(run)
+            with mock.patch("desk.record.subprocess.run", side_effect=FileNotFoundError("gst-launch-1.0")), \
+                    mock.patch("desk.runs.down") as down, mock.patch("sys.stderr"):
+                report, videos = evidence.finish(run)
+            down.assert_called_once_with(run, keep=False)
+            self.assertEqual((report, videos), (None, []))
 
 
 if __name__ == "__main__":

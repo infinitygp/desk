@@ -508,7 +508,10 @@ def finish(run, keep: bool = False, diff: bool = False, report: bool = True,
     `running`: a scenario run kept for testing by hand)."""
     from . import record, runs
 
-    record.stop(run)
+    try:
+        record.stop(run)
+    except Exception as e:  # noqa: BLE001 - a video that cannot be made must not keep the VM running
+        print(f"[desk] warning: no video ({type(e).__name__}: {e})", file=sys.stderr)
     out = None
     if report and run.live_domain() is not None:
         # A report that cannot be written must not keep the VM running.

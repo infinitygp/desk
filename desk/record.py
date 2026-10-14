@@ -72,6 +72,8 @@ def stop(run) -> Path | None:
         deadline = time.monotonic() + 15
         while _pid(run) is not None and time.monotonic() < deadline:
             time.sleep(0.2)
+        if _pid(run) is not None:
+            os.kill(pid, signal.SIGKILL)  # stuck in a screenshot; it must not write while frames are encoded
     return encode(run)
 
 
@@ -105,9 +107,21 @@ def encode(run) -> Path | None:
             "!", "videoconvert", "!", "vp9enc", "deadline=1", "cpu-used=8", "row-mt=true", "threads=4",
             "!", "webmmux", "!", "filesink", f"location={video}",
         ]
-        r = subprocess.run(pipeline, capture_output=True, text=True)
-        if r.returncode != 0:
-            raise DeskError(f"encoding the video failed (frames kept in {d}): {r.stderr.strip()[-500:]}")
+        try:
+            r = subprocess.run(pipeline, capture_output=True, text=True, timeout=max(120.0, len(frames) * 0.25))
+            problem = (r.stderr.strip()[-500:] or f"gst-launch-1.0 exited {r.returncode}") if r.returncode else None
+        except FileNotFoundError:
+            problem = "gst-launch-1.0 is not installed (desk doctor)"
+        except subprocess.TimeoutExpired:
+            problem = "the encoder did not finish in time"
+        if problem:
+            video.unlink(missing_ok=True)
+            # Out of the way: left in place, these frames would fail every later recording too.
+            aside = d.with_name(f"rec-failed-{int(time.time())}")
+            d.rename(aside)
+            run.log_event(record="stop", video=None, seconds=round(len(frames) / meta["fps"]))
+            raise DeskError(f"encoding the video failed: {problem}; its frames stay in {aside} while the run's "
+                            "files are kept")
     run.log_event(record="stop", video=video.name if video else None,
                   seconds=round(len(frames) / meta["fps"]))
     shutil.rmtree(d)
