@@ -114,8 +114,9 @@ guest shell; `--root` and `--gui` apply to the whole snippet.
 - `desk type` only knows ASCII and Polish letters; for anything else use `desk set-text`.
 - In a GTK file chooser, `ctrl+l`, type the path, then click "Open": Enter may only accept the
   path completion.
-- `pkill -f PATTERN` inside `desk exec -- '...'` also matches the shell running that snippet and
-  kills it; write the pattern as `[g]st-launch` so it does not match itself.
+- `pgrep -f`/`pkill -f PATTERN` in `desk exec --gui -- '...'` also matches the `systemd-run` that
+  runs the snippet (and `pkill` kills it); write the pattern as `[g]st-launch` so it does not match
+  itself. Plain `desk exec` and scenario `exec`/`root` steps hand the snippet over unseen.
 - `dnf` prints its progress on stderr even with `-q`; add `>/dev/null 2>&1` and check the result with
   `rpm -q` / `rpm -V` instead of reading the transaction log.
 - Web UIs on `https://localhost` with a self-signed certificate (Cockpit) show Firefox's warning on
