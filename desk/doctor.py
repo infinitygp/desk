@@ -205,7 +205,11 @@ def libvirt_connection() -> tuple[str, str | None]:
         return f"libvirt    {URI}", f"cannot connect to {URI}: {e}"
     def dotted(v: int) -> str:
         return f"{v // 1000000}.{v // 1000 % 1000}.{v % 1000}"
-    return f"libvirt    {URI}, libvirt {dotted(conn.getLibVersion())}, QEMU {dotted(conn.getVersion())}", None
+    try:
+        versions = f", libvirt {dotted(conn.getLibVersion())}, QEMU {dotted(conn.getVersion())}"
+    except libvirt.libvirtError:
+        versions = ""  # no QEMU to ask: it is listed among the missing packages
+    return f"libvirt    {URI}{versions}", None
 
 
 def images() -> tuple[list[str], dict[str, list[str]]]:
