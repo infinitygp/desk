@@ -173,8 +173,10 @@ def agent_set_time(dom, offset: float = 0.0, wait: float = AGENT_WAIT) -> None:
         try:
             agent(dom, "guest-set-time", time=time.time_ns() + int(offset * 1e9))
             return
-        except DeskError:
-            if time.monotonic() >= deadline:
+        except DeskError as e:
+            # Not a guest that refuses the time, or a domain that is gone: those stay as they are.
+            away = any(sign in str(e) for sign in ("not responding", "not connected", "not available"))
+            if not away or time.monotonic() >= deadline:
                 raise
             time.sleep(0.5)
 

@@ -46,6 +46,12 @@ class SetTime(unittest.TestCase):
             guest.agent_set_time(None, offset=86400)
         self.assertEqual(len(calls), 3)
 
+    def test_a_refusal_is_not_waited_out(self):
+        with mock.patch("desk.guest.agent", side_effect=DeskError("guest agent guest-set-time: Invalid time")) as agent, \
+                mock.patch("desk.guest.time.sleep"), self.assertRaisesRegex(DeskError, "Invalid time"):
+            guest.agent_set_time(None)
+        self.assertEqual(agent.call_count, 1)
+
     def test_gives_up_when_it_stays_away(self):
         with mock.patch("desk.guest.agent", side_effect=DeskError("not connected")), mock.patch("desk.guest.time.sleep"):
             with self.assertRaisesRegex(DeskError, "not connected"):
