@@ -49,15 +49,23 @@ def listing(run) -> list[dict]:
     return out
 
 
-def add(run, size: str, name: str | None = None) -> str:
+def parse(item: str) -> tuple[str, str | None]:
+    """`SIZE[:NAME]` as `desk up --disk` and scenarios write it; raises on what `add` would refuse,
+    so that a mistake shows before a VM is started for it."""
+    size, _, name = item.partition(":")
     if not SIZE.fullmatch(size):
         raise DeskError(f"disk size is a number with M, G or T, e.g. 10G (got {size!r})")
+    if name and not NAME.fullmatch(name):
+        raise DeskError(f"disk names are 1-20 of a-z, 0-9 and - (got {name!r})")
+    return size, name or None
+
+
+def add(run, size: str, name: str | None = None) -> str:
+    size, name = parse(f"{size}:{name}" if name else size)
     dom = run.dom()
     existing = {f.stem for f in directory(run).glob("*.qcow2")} if directory(run).exists() else set()
     if name is None:
         name = next(f"disk{i}" for i in range(1, 100) if f"disk{i}" not in existing)
-    if not NAME.fullmatch(name):
-        raise DeskError(f"disk names are 1-20 of a-z, 0-9 and - (got {name!r})")
     if name in existing:
         raise DeskError(f"disk {name} exists (desk disk ls)")
     used = {t.get("dev") for t in ET.fromstring(dom.XMLDesc(0)).iter("target") if t.get("dev")}

@@ -96,26 +96,32 @@ def _resolution(text: str | None) -> tuple[int, int] | None:
 
 
 def cmd_up(args) -> None:
+    from . import disks, forward, monitors
+
     resolution = _resolution(args.resolution)
     spec = load_image(args.image)
+    # Whatever can be refused without a VM is refused before one is started.
+    monitors.check(spec, args.displays, resolution, args.scale)
+    extra_disks = [disks.parse(item) for item in args.disk or []]
     run = runs.up(spec, run_id=args.name, cold=args.cold, force=args.force, label=args.label,
                   displays=args.displays, resolution=resolution)
-    if args.displays != 1 or resolution or args.scale:
-        from . import monitors
-
-        monitors.apply(run, spec, resolution=resolution, scale=args.scale)
-    run.log_event(argv=sys.argv[1:])
-    if args.disk:
-        from . import disks
-
-        for item in args.disk:
-            size, _, name = item.partition(":")
-            disks.add(run, size, name or None)
-    if args.record:
-        record.start(run)
+    try:
+        if args.displays != 1 or resolution or args.scale:
+            monitors.apply(run, spec, resolution=resolution, scale=args.scale)
+        run.log_event(argv=sys.argv[1:])
+        for size, name in extra_disks:
+            disks.add(run, size, name)
+        if args.record:
+            record.start(run)
+        forwards = [(port, forward.start(run, port)) for port in args.forward or []]
+    except BaseException:
+        # Its id has not been printed yet, so nobody could take a half set up run down.
+        print(f"[desk] run {run.id} started, but setting it up failed; taking it down again", file=sys.stderr)
+        runs.down(run)
+        raise
     print(f"run {run.id} up (image {run.image}, ssh port {run.ssh_port})" + (", recording" if args.record else ""))
-    for port in args.forward or []:
-        _print_forward(run, port)
+    for port, local in forwards:
+        print(_forward_line(port, local))
     print(f"export DESK_RUN={run.id}  # fish: set -x DESK_RUN {run.id}")
 
 
@@ -150,13 +156,10 @@ def _run_files(run: runs.Run) -> str:
     return f" with {' and '.join(parts)}" if parts else ""
 
 
-def _print_forward(run: runs.Run, port: int, local: int | None = None) -> None:
-    from . import forward
-
-    local = forward.start(run, port, local)
+def _forward_line(port: int, local: int) -> str:
     scheme = "https://" if port in (443, 8443, 9090) else "http://" if port in (80, 8080) else ""
-    print(f"guest port {port} -> {scheme}127.0.0.1:{local}{'/' if scheme else ''} on the host, until the run goes down "
-          f"(desk forward --stop {port})")
+    return (f"guest port {port} -> {scheme}127.0.0.1:{local}{'/' if scheme else ''} on the host, until the run goes "
+            f"down (desk forward --stop {port})")
 
 
 def cmd_forward(args) -> None:
@@ -176,7 +179,7 @@ def cmd_forward(args) -> None:
         return
     port, _, local = args.port.partition(":")
     run.dom()
-    _print_forward(run, _port(port), _port(local) if local else None)
+    print(_forward_line(_port(port), forward.start(run, _port(port), _port(local) if local else None)))
 
 
 def _port_arg(text: str) -> int:

@@ -200,8 +200,7 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
         run_prepare(spec, run, hook)
         return f"{hook} done"
     elif action == "disk_add":
-        size, _, name = value.partition(":")
-        return f"disk {disks.add(run, size, name or None)} plugged in"
+        return f"disk {disks.add(run, *disks.parse(value))} plugged in"
     elif action == "disk_rm":
         disks.remove(run, value, timeout=timeout or 30)
         return f"disk {value} unplugged"
@@ -249,8 +248,7 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None) -> bo
                 if guest.scp(run.ssh_port, str(f), f"{run.user}@127.0.0.1:{dest}/{f.name}") != 0:
                     raise DeskError(f"copying {f.name} to the guest failed")
         for d in data.get("disks", []):
-            size, _, name = d.partition(":")
-            disks.add(run, size, name or None)
+            disks.add(run, *disks.parse(d))
         steps = Steps(spec, run)
         for i, step in enumerate(data.get("step", []), 1):
             action, arg = describe(step)

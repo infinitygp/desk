@@ -12,6 +12,19 @@ from .config import DeskError, ImageSpec
 WINDOWS_SCALES = (100, 125, 150, 175, 200, 225, 250, 300)
 
 
+def check(spec: ImageSpec, displays: int = 1, resolution: tuple[int, int] | None = None,
+          scale: int | None = None) -> None:
+    """What can be refused without asking the guest, so `desk up` says it before it starts a VM."""
+    if displays < 1:
+        raise DeskError("--displays is 1 or more")
+    if scale is not None and spec.family == "windows" and scale not in WINDOWS_SCALES:
+        raise DeskError(f"Windows scales: {', '.join(map(str, WINDOWS_SCALES))} (percent)")
+    if scale is not None and scale <= 0:
+        raise DeskError("--scale is a percentage, e.g. 150")
+    if (resolution or scale) and spec.family != "windows":
+        spec.need_desktop("desk display")
+
+
 def apply(run, spec: ImageSpec, resolution: tuple[int, int] | None = None, scale: int | None = None) -> None:
     if spec.family == "windows":
         _windows(run, spec, resolution, scale)
@@ -35,8 +48,7 @@ def _windows(run, spec: ImageSpec, resolution, scale) -> None:
 
     arrange()
     if scale is not None and scale != (run.scale or 100):
-        if scale not in WINDOWS_SCALES:
-            raise DeskError(f"Windows scales: {', '.join(map(str, WINDOWS_SCALES))} (percent)")
+        check(spec, scale=scale)
         # One DPI for every monitor, which Windows applies when the user signs in again; desk signs
         # in again on Windows by rebooting.
         dpi = round(96 * scale / 100)
