@@ -47,8 +47,12 @@ def shell_windows() -> list[dict]:
         res = bus.call_sync("org.desk.Helper", "/org/desk/Helper", "org.desk.Helper", "GetWindows",
                             None, GLib.VariantType("(s)"), Gio.DBusCallFlags.NONE, 2000, None)
         return json.loads(res.unpack()[0])
-    except GLib.Error:
-        return []
+    except GLib.Error as e:
+        # Without the window list nothing can be placed on the screen; an empty tree would read
+        # as "no windows open".
+        raise LookupError("the desk shell extension (org.desk.Helper) does not answer, so windows cannot be placed "
+                          f"on the screen: {e.message}. The session may still be starting (desk wait --ready); "
+                          "otherwise GNOME Shell did not load the extension") from None
 
 
 def focus(query: str) -> dict:
@@ -556,7 +560,9 @@ def action(spec: dict, name: str | None) -> dict:
     if name is not None and name not in names:
         raise LookupError(f"no action {name!r}; available: {', '.join(names)}")
     idx = names.index(name) if name is not None else 0
-    Atspi.Action.do_action(acc, idx)
+    if not Atspi.Action.do_action(acc, idx):
+        raise LookupError(f"the application answered that action {names[idx]!r} failed (available: "
+                          f"{', '.join(names)}); look at the screen before trying again")
     return {"done": names[idx], "actions": names}
 
 
@@ -564,7 +570,8 @@ def set_text(spec: dict, text: str) -> dict:
     _, _, acc = find_node(spec)
     if "EditableText" not in acc.get_interfaces():
         raise LookupError("element is not editable")
-    Atspi.EditableText.set_text_contents(acc, text)
+    if not Atspi.EditableText.set_text_contents(acc, text):
+        raise LookupError("the application refused to replace the field's text through AT-SPI")
     return {"done": True}
 
 

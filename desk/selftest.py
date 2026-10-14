@@ -85,12 +85,16 @@ def _launch(run, app: str, window: str) -> None:
 
 def _wait_focused(run, app: str, window: str) -> None:
     deadline = time.monotonic() + 30
+    problem = ""
     while time.monotonic() < deadline:
-        snap = a11y.snapshot(run)
+        try:
+            snap = a11y.snapshot(run)
+        except DeskError as e:
+            snap, problem = {"tops": []}, f": {e}"  # a session still starting answers a moment later
         if any(t["focus"] and (t["app"] == window or window in t["title"]) for t in snap["tops"]):
             return
         time.sleep(1)
-    raise Failed(f"no focused {window} window in the a11y tree")
+    raise Failed(f"no focused {window} window in the a11y tree{problem}")
 
 
 def _node(run, role: str) -> dict:
