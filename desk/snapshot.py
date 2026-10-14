@@ -82,9 +82,13 @@ def save(run, name: str, force: bool = False) -> float:
             print(f"[desk] warning: the guest could not be resumed after the failed save: {e}", file=sys.stderr)
         shutil.rmtree(new, ignore_errors=True)
         raise
-    _resume(run, d / "memory.save")
+    # The snapshot is whole from here on, whatever resuming the guest brings.
     shutil.rmtree(old, ignore_errors=True)
     run.log_event(snapshot="save", name=name)
+    try:
+        _resume(run, d / "memory.save")
+    except DeskError as e:
+        raise DeskError(f"snapshot {name} is saved, but: {e}") from None
     return time.monotonic() - t0
 
 

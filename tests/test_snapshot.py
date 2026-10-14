@@ -82,6 +82,16 @@ class SaveRestore(unittest.TestCase):
             snapshot.save(run, "clean", force=True)
             self.assertEqual((run.dir / "snapshots" / "clean" / "disk.qcow2").read_text(), "later")
 
+    def test_a_guest_that_does_not_resume_well_still_has_its_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Run(tmp)
+            snapshot.save(run, "clean")
+            with mock.patch("desk.snapshot._resume", side_effect=DeskError("its clock shows the time of the snapshot")), \
+                    self.assertRaisesRegex(DeskError, "snapshot clean is saved, but: its clock"):
+                snapshot.save(run, "clean", force=True)
+            self.assertEqual([s["name"] for s in snapshot.listing(run)], ["clean"])
+            self.assertEqual([p.name for p in (run.dir / "snapshots").iterdir()], ["clean"])
+
     def test_half_a_snapshot_is_not_restored(self):
         with tempfile.TemporaryDirectory() as tmp:
             run = Run(tmp)
