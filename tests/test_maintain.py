@@ -89,6 +89,20 @@ class Due(unittest.TestCase):
         self.build("base")
         self.assertEqual(maintain.warm_reasons(self.spec), ["base build changed"])
 
+    def test_only_images_in_use_here_are_looked_after(self):
+        family = ["windows-11", "windows-11-pl"]
+        # Nothing built: a timer must not install it; naming it does.
+        self.assertEqual(maintain.selected("windows-11", family, None), [])
+        self.assertEqual(maintain.selected("windows-11", family, "windows-11"), ["windows-11"])
+        self.assertEqual(maintain.selected("windows-11", family, "windows-11-pl"), ["windows-11-pl"])
+        # Installed, but no warm state anywhere: nobody uses it yet.
+        self.build("base")
+        self.assertEqual(maintain.selected("windows-11", family, None), [])
+        # In use: renewed, and only the variants that are in use with it.
+        self.build("warm")
+        self.assertEqual(maintain.selected("windows-11", family, None), ["windows-11"])
+        self.assertEqual(maintain.selected("windows-11", family, "windows-11-pl"), family)
+
     def test_a_failed_maintenance_is_shown_until_a_newer_warm_state(self):
         warm = self.build("warm", age_days=2)
         (warm / "memory.save").write_bytes(b"")

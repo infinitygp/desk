@@ -22,7 +22,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from . import images, runs
-from .config import BASE, HOME, PROJECT, WARM, DeskError, ImageSpec, list_images, load_image
+from .config import BASE, HOME, PROJECT, URI, WARM, DeskError, ImageSpec, list_images, load_image
 
 MAINTAIN = HOME / "maintain"
 STATUS = MAINTAIN / "status.json"
@@ -119,6 +119,16 @@ def families() -> dict[str, list[str]]:
     return {n: [n] + [v for v, s in specs.items() if s.base == n] for n, s in specs.items() if not s.base}
 
 
+def selected(base: str, members: list[str], only: str | None) -> list[str]:
+    """The members of a family that maintenance looks after: those the host has a warm state of,
+    and the one `--only` names. A host keeps the images it tests on; an image nobody built or
+    warmed here is not installed because a timer went off. [] leaves the family alone."""
+    chosen = [m for m in members if m == only or images.current(WARM / m) is not None]
+    if images.current(BASE / base) is None and only not in members:
+        return []
+    return chosen
+
+
 def _family(base: str, members: list[str], out: Path, dry_run: bool) -> list[str]:
     """Maintain one family; returns report lines. Raises when it failed."""
     from .selftest import run_selftest
@@ -132,11 +142,12 @@ def _family(base: str, members: list[str], out: Path, dry_run: bool) -> list[str
             lines.append(f"- {', '.join(members)}: up to date, selftest only")
         return reasons, warm, lines
 
-    specs = {m: load_image(m) for m in members}
+    # The base's definition and lock too when only a variant of it is looked after.
+    specs = {m: load_image(m) for m in dict.fromkeys([base, *members])}
     if dry_run:
         return decide()[2]
     with ExitStack() as stack:
-        for m in members:
+        for m in specs:
             stack.enter_context(runs.image_lock(m))
         reasons, plan, lines = decide()
         runs.check_memory(specs[base])
@@ -200,8 +211,14 @@ def maintain(only: str | None = None, dry_run: bool = False) -> bool:
     fams = families()
     if only and not any(only in members for members in fams.values()):
         raise DeskError(f"unknown image {only!r}")
-    for base, members in fams.items():
-        if only and only not in members:
+    for base, family in fams.items():
+        if only and only not in family:
+            continue
+        members = selected(base, family, only)
+        if not members:
+            line = f"- {base}: not in use on this host, left alone (desk maintain --only {base} builds it)"
+            report += [line, ""]
+            _log(line)
             continue
         t0 = time.monotonic()
         try:
@@ -264,8 +281,10 @@ WantedBy=timers.target
 def install_timer() -> None:
     units = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "systemd" / "user"
     units.mkdir(parents=True, exist_ok=True)
-    env = "".join(f'Environment="{k}={os.environ[k]}"\n' for k in ("DESK_HOME", "DESK_URI", "DESK_TTL")
-                  if k in os.environ)
+    # As resolved here, from the environment or the host's config file: the unit has neither
+    # this shell's variables nor, necessarily, its XDG directories.
+    settings = {"DESK_HOME": str(HOME), "DESK_URI": URI, **{k: os.environ[k] for k in ("DESK_TTL",) if k in os.environ}}
+    env = "".join(f'Environment="{k}={v}"\n' for k, v in settings.items())
     (units / "desk-maintain.service").write_text(SERVICE.format(desk=PROJECT / "bin" / "desk", environment=env))
     (units / "desk-maintain.timer").write_text(TIMER)
     subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
