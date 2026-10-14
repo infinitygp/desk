@@ -124,12 +124,17 @@ def run_selftest(image: str, reboot: bool = False, keep: bool = False, spec: Ima
         print(f"{'PASS' if ok else 'FAIL'}  {name:<34} {time.monotonic() - t0:5.1f}s  {detail}", flush=True)
         return ok
 
+    # A build under test (desk maintain) must restore its warm state; so must any image that has
+    # a usable one. Only where none is to be had is a cold boot what the step checks.
+    cold_reason = runs.cold_reason(spec) if spec.base_xml.exists() else None
+    expect_cold = bool(cold_reason) and not spec.warm_version
+
     def start():
         nonlocal run
         run = runs.up(spec, run_id=f"selftest-{secrets.token_hex(3)}", label="selftest")
-        # A new build under test must really restore its warm state, not fall back to a cold boot.
-        _check(not spec.warm_version or run.domain != f"desk-{run.id}", "booted cold instead of restoring")
-        return f"run {run.id}"
+        cold = run.domain == f"desk-{run.id}"
+        _check(expect_cold or not cold, "booted cold instead of restoring" + (f": {cold_reason}" if cold_reason else ""))
+        return f"run {run.id}" + (f"; {cold_reason}" if cold else "")
 
     def screen():
         png = display.screenshot(run.dom())
@@ -229,7 +234,7 @@ def run_selftest(image: str, reboot: bool = False, keep: bool = False, spec: Ima
         return f"{title.group(1).decode(errors='replace')!r} through desk forward, logged in"
 
     try:
-        if step("up (warm restore)", start):
+        if step("up (cold boot)" if expect_cold else "up (warm restore)", start):
             step("screenshot", screen)
             step("exec over SSH", ssh)
             step("exec through guest agent", agent)

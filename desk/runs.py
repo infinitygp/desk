@@ -226,6 +226,20 @@ def warm_is_current(spec: ImageSpec) -> bool:
     return spec.base_dir.exists() and warm_meta(spec).get("base") == str(spec.base_dir.resolve())
 
 
+def cold_reason(spec: ImageSpec, warm_dir: Path | None = None) -> str | None:
+    """Why a run of this image would boot instead of restoring the warm state; None: it restores."""
+    warm = (warm_dir or spec.warm_dir) / "memory.save"
+    if not warm.exists():
+        return f"no warm state for {spec.name} (desk image warm {spec.name})"
+    if not warm_is_current(spec):
+        return f"warm state of {spec.name} predates its base image (desk image warm {spec.name} --force)"
+    saved_xml = conn().saveImageGetXMLDesc(str(warm), libvirt.VIR_DOMAIN_SAVE_IMAGE_XML_SECURE)
+    if uuid_active(domain_uuid(saved_xml)):
+        # Restores share the save image's UUID, so only one can run at a time.
+        return f"warm state of {spec.name} is in use by another run"
+    return None
+
+
 def active_runs_of(image: str) -> list[Run]:
     return [r for r in all_runs() if r.image == image and r.live_domain() is not None]
 
@@ -375,19 +389,12 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
               "booting cold (the warm state has one monitor)")
         cold = True
     if not cold:
-        if not warm.exists():
-            print(f"[desk] no warm state for {spec.name}, booting cold (desk image warm {spec.name})")
+        reason = cold_reason(spec, warm_dir)
+        if reason:
+            print(f"[desk] booting cold: {reason}")
             cold = True
-        elif not warm_is_current(spec):
-            print(f"[desk] warm state of {spec.name} predates its base image, booting cold "
-                  f"(desk image warm {spec.name} --force)")
-            cold = True
-    if not cold:
-        saved_xml = conn().saveImageGetXMLDesc(str(warm), libvirt.VIR_DOMAIN_SAVE_IMAGE_XML_SECURE)
-        if uuid_active(domain_uuid(saved_xml)):
-            # Restores share the save image's UUID, so only one can run at a time.
-            print(f"[desk] warm state of {spec.name} is in use by another run, booting cold instead")
-            cold = True
+        else:
+            saved_xml = conn().saveImageGetXMLDesc(str(warm), libvirt.VIR_DOMAIN_SAVE_IMAGE_XML_SECURE)
     rd.mkdir(parents=True)
     # A restore must also keep the saved domain name; run ids stay independent of it.
     domain = f"desk-{run_id}" if cold else ET.fromstring(saved_xml).findtext("name")
