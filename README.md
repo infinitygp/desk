@@ -48,7 +48,10 @@ no TPM (LabConfig bypass), virtio disk with the viostor driver loaded by Setup
 OpenSSH from the Win32-OpenSSH MSI with PowerShell as the shell, virtio-win guest tools for the
 display driver and qemu-guest-agent, and an agent in the logged-in session
 (`images/_shared/windows/agent.ps1`, port forwarded like SSH) for UI Automation and starting
-programs on the desktop, which SSH sessions cannot see. Commands are sent as
+programs on the desktop, which SSH sessions cannot see. The agent serves one request at a time,
+so nothing may hold it: a connection that sends nothing is dropped after 5 s, a tree walk ends
+after 20 s, and a program that is waited for (`exec --gui --wait`) is waited for on a thread of
+its own. Commands are sent as
 `powershell -EncodedCommand`, since Windows' command line mangles quotes.
 Provisioning opts in to early feature updates and enables the taskbar position and size
 features (59213768, 61090762) with ViVeTool v0.3.4 (GPL-3.0, downloaded and checked against a
@@ -151,7 +154,9 @@ opened from outside (`desk browser open`, `firefox URL`) replace the current tab
 into the responsive design mode instead.
 
 `desk clock` (`desk/clock.py`) sets the guest's time through qemu-guest-agent with the guest's
-time sync off and keeps the offset in `run.json`, reapplied after snapshot restores and reboots.
+time sync off and keeps the offset in `run.json`, reapplied after snapshot restores and reboots
+(tried for 20 s, as libvirt now and then sees the agent a moment late after a restore; a moved
+clock that could not be put back is an error, not a warning).
 
 ## Clicking and typing
 

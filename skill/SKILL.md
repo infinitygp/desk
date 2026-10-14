@@ -62,7 +62,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk ls`, `desk down [ID] [--all] [--keep] [--diff] [--no-report]`, `desk gc` | List (with who holds each run), destroy (writing the report first), clean up idle runs |
 | `desk view` | Tell the user how to watch the run live (VNC through an SSH tunnel) |
 | `desk forward PORT[:LOCAL]`, `desk forward`, `desk forward --stop PORT\|all`, `desk up IMAGE --forward PORT` | Reach a guest port from the host (127.0.0.1, the same number when free, else printed) for as long as the run exists, across reboots and snapshot restores |
-| `desk browser open URL\|/PATH` | Open an address in Firefox's current tab, as a link from another program would; a path is opened on the site shown now (`/podman`, `/system/services`) |
+| `desk browser open URL\|/PATH` | Open an address in Firefox's current tab, as a link from another program would; a path is opened on the site shown now (`/podman`, `/system/services`). Exits 1 and says what Firefox shows instead when the page did not load (server not found, connection refused, a certificate warning) |
 | `desk browser viewport WxH\|reset` | Pages at WxH CSS pixels (a phone: `390x700`) through Firefox's responsive design mode; prints the `desk shot --region` of the page area |
 | `desk browser console [--errors] [--all]` | Web console of every page since the run started (see Pitfalls) |
 | `desk record start [--fps N]`, `desk record stop`, `desk up --record` | Record the screen as a WebM video, kept with the report |
@@ -184,7 +184,7 @@ running out, pass it on to the user.
   `desk exec --gui -- conhost.exe --headless powershell.exe -NoProfile -Command "..."`.
 - What only the desktop session sees (FindWindow, UI Automation, the session's environment):
   `desk exec --gui --wait -- powershell.exe -NoProfile -Command "..."` returns the output and exit
-  code, with no console window. UTF-8 output comes through as it is (Rust, or PowerShell after
+  code, with no console window; other desk commands (a11y, clicks) work while it runs. UTF-8 output comes through as it is (Rust, or PowerShell after
   `[Console]::OutputEncoding = [Text.Encoding]::UTF8`); console tools' OEM code page is converted.
 - Windows PowerShell 5.1 writes files in the ANSI code page by default: use
   `Set-Content -Encoding UTF8` / `Get-Content -Encoding UTF8` for text with Polish letters.
