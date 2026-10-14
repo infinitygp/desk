@@ -1,5 +1,6 @@
 import base64
 import os
+import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,12 +20,17 @@ def _local() -> dict:
     except FileNotFoundError:
         return {}
     except (OSError, tomllib.TOMLDecodeError) as e:
-        raise SystemExit(f"desk: {CONFIG_FILE}: {e}") from None
+        _refuse(str(e))
     unknown = set(data) - {"home", "uri"}
     if unknown or not all(isinstance(v, str) for v in data.values()):
-        raise SystemExit(f"desk: {CONFIG_FILE} takes home = \"/path\" and uri = \"qemu:///session\" "
-                         f"(got {sorted(data)})")
+        _refuse(f"it takes home = \"/path\" and uri = \"qemu:///session\" (got {sorted(data)})")
     return data
+
+
+def _refuse(why: str) -> None:
+    # Exit code 2, as for everything desk cannot do; 1 would read as a failed check.
+    print(f"desk: {CONFIG_FILE}: {why}", file=sys.stderr)
+    raise SystemExit(2)
 
 
 LOCAL = _local()
