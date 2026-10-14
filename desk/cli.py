@@ -1114,7 +1114,10 @@ def main(argv: list[str] | None = None) -> None:
     argv = _text_args(sys.argv[1:] if argv is None else argv)
     args = build_parser().parse_args(argv)
     try:
-        args.func(args)
+        try:
+            args.func(args)
+        finally:
+            sys.stdout.flush()  # here, where a reader that has left can still be handled
     except DeskError as e:
         print(f"desk: {e}", file=sys.stderr)
         sys.exit(2)
