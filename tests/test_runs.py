@@ -55,6 +55,38 @@ class Gc(unittest.TestCase):
         self.assertEqual([p.name for p in (self.home / "reports").iterdir()], ["old"])
 
 
+class Locks(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.path = Path(tmp.name) / ".lock"
+        patch = mock.patch("desk.runs.HOME", Path(tmp.name))
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_held_again_by_what_the_holder_calls(self):
+        with runs._flock(self.path, "the test", 1):
+            self.assertIn("pid", self.path.read_text())
+            with runs._flock(self.path, "the test", 1):
+                pass
+            self.assertEqual(runs._locked[self.path], 1)
+        self.assertNotIn(self.path, runs._locked)
+        self.assertEqual(self.path.read_text(), "")
+
+    def test_waiting_ends_and_names_the_holder(self):
+        import fcntl
+
+        with open(self.path, "a+") as other:  # another open file: as another process holds it
+            fcntl.flock(other, fcntl.LOCK_EX)
+            other.write("desk up windows-11 (pid 1, since 03:00:00)")
+            other.flush()
+            with mock.patch("sys.stderr"), self.assertRaisesRegex(runs.DeskError, r"held by desk up windows-11 \(pid 1"):
+                with runs._flock(self.path, "the test", 0.2):
+                    self.fail("got a lock somebody else holds")
+        with runs._flock(self.path, "the test", 1):
+            pass
+
+
 class PruneVersions(unittest.TestCase):
     def test_nothing_is_deleted_while_a_run_disk_cannot_be_read(self):
         def unreachable():

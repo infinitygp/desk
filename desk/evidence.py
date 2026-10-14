@@ -529,7 +529,10 @@ def finish(run, keep: bool = False, diff: bool = False, report: bool = True,
     # Videos outlive the run in its report directory, report or not.
     videos = record.save_videos(run, out or REPORTS / run.id)
     if not running:
-        runs.down(run, keep=keep)
+        # Like starting one: no other command picks ports or looks for orphans meanwhile. Only
+        # here, so that nobody waits for a report to be written.
+        with runs.state_lock():
+            runs.down(run, keep=keep)
     return out, videos
 
 

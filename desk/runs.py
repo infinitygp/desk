@@ -8,7 +8,7 @@ import shutil
 import sys
 import time
 import xml.etree.ElementTree as ET
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
@@ -25,33 +25,73 @@ IDLE_TTL = int(os.environ.get("DESK_TTL", 2 * 3600))
 HOST_RESERVE_MIB = 1024
 
 
+# How long a command waits for another one's lock before it gives up and names the holder. The
+# state lock is held for seconds (a domain started, a run destroyed), the lock of an image for a
+# whole build or `desk maintain` of its family.
+STATE_LOCK_WAIT = 15 * 60
+IMAGE_LOCK_WAIT = 6 * 3600
+# Locks this process holds, so that what it calls while holding one can ask for it again
+# (flock on a second descriptor of the file would wait for the first for ever).
+_locked: dict[Path, int] = {}
+
+
 @contextmanager
-def _flock(path: Path, waiting: str):
-    HOME.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
+def _flock(path: Path, waiting: str, timeout: float):
+    if _locked.get(path):
+        _locked[path] += 1
         try:
-            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            print(f"[desk] {waiting}", file=sys.stderr)
-            fcntl.flock(f, fcntl.LOCK_EX)
-        yield
+            yield
+        finally:
+            _locked[path] -= 1
+        return
+    HOME.mkdir(parents=True, exist_ok=True)
+    # Not "w": that would wipe the holder's note for everybody waiting.
+    with open(path, "a+") as f:
+        deadline = time.monotonic() + timeout
+        told = False
+        while True:
+            try:
+                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                f.seek(0)
+                holder = f.read().strip() or "another desk command"
+                if not told:
+                    print(f"[desk] waiting for {waiting}: {holder}", file=sys.stderr)
+                    told = True
+                if time.monotonic() > deadline:
+                    raise DeskError(f"gave up after {timeout / 60:.0f} min waiting for {waiting}, still held by "
+                                    f"{holder}; if that command hangs, stop it and try again") from None
+                time.sleep(0.5)
+        f.seek(0)
+        f.truncate()
+        f.write(f"desk {' '.join(sys.argv[1:4])} (pid {os.getpid()}, since {time.strftime('%H:%M:%S')})")
+        f.flush()
+        _locked[path] = 1
+        try:
+            yield
+        finally:
+            del _locked[path]
+            f.seek(0)
+            f.truncate()
 
 
 def state_lock():
-    """Serialises commands that create or destroy VMs (port picking, UUID checks, gc)."""
-    return _flock(HOME / ".lock", "waiting for another desk command (up, down, gc)...")
+    """Serialises what creates or destroys VMs (port picking, UUID checks, gc). Held while a
+    domain is started or destroyed, not while a guest boots or a report is written."""
+    return _flock(HOME / ".lock", "the commands that start and stop VMs", STATE_LOCK_WAIT)
 
 
 def image_lock(image: str):
     """Held for a whole image build or warm, which can take many minutes."""
-    return _flock(HOME / f".lock-{image}", f"waiting for another build/warm of {image}...")
+    return _flock(HOME / f".lock-{image}", f"the build or warm-up of {image}", IMAGE_LOCK_WAIT)
 
 
 @contextmanager
 def image_lock_if_free(image: str):
     """Yields whether the image lock was free; it stays held for the block if so."""
     HOME.mkdir(parents=True, exist_ok=True)
-    with open(HOME / f".lock-{image}", "w") as f:
+    with open(HOME / f".lock-{image}", "a+") as f:
         try:
             fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
@@ -393,15 +433,18 @@ def up(spec: ImageSpec, run_id: str | None = None, cold: bool = False, force: bo
 
     for warning in check_usable(spec):
         print(f"[desk] warning: {warning}", file=sys.stderr)
-    with state_lock():
+    with ExitStack() as lock:
+        lock.enter_context(state_lock())
         gc()
         if not force:
             check_memory(spec)
-        return _up(spec, run_id, cold, displays, resolution, label)
+        return _up(spec, run_id, cold, displays, resolution, label, started=lock.close)
 
 
 def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
-        resolution: tuple[int, int] | None = None, label: str | None = None) -> Run:
+        resolution: tuple[int, int] | None = None, label: str | None = None, started=lambda: None) -> Run:
+    """`started` is called once the domain runs: from there on nothing is picked or checked that
+    another command could take too, so the state lock is given back while the guest boots."""
     run_id = run_id or secrets.token_hex(3)
     rd = RUNS / run_id
     if rd.exists():
@@ -440,6 +483,9 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
               resolution=list(resolution) if resolution else None,
               label=label or auto_label, holder=holder)
     run.save()
+    # In use by this process until it ends: a scenario or selftest keeps its run through steps
+    # longer than the idle limit.
+    run.hold()
 
     disk, nvram = rd / "disk.qcow2", rd / "VARS.qcow2"
     try:
@@ -466,6 +512,7 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
                 guest.agent_sync_time(dom)
             except DeskError as e:
                 print(f"[desk] warning: clock not synced: {e}")
+        started()
         guest.wait_ssh(run.ssh_port, run.user, timeout=300 if cold else 60)
         if cold:
             guest.wait_ready(run.ssh_port, run.user, spec.cmd(spec.ready))

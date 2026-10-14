@@ -126,22 +126,21 @@ def cmd_up(args) -> None:
 
 
 def cmd_down(args) -> None:
-    with runs.state_lock():
-        if args.id and args.run and args.id != args.run:
-            raise DeskError(f"two different runs given: -r {args.run} and {args.id}")
-        targets = runs.all_runs() if args.all else [runs.resolve(args.id or args.run)]
-        for run in targets:
-            gone = _run_files(run)
-            report, videos = evidence.finish(run, keep=args.keep, diff=args.diff, report=not args.no_report)
-            if args.keep:
-                print(f"run {run.id} down (files kept in {run.dir})")
-            else:
-                print(f"run {run.id} down; deleted {run.dir}{gone} (--keep keeps it)"
-                      + ("; screenshots and logs are in the report" if report else ""))
-            if report:
-                print(f"report: {report / 'report.md'}")
-            for v in videos:
-                print(f"video: {v}")
+    if args.id and args.run and args.id != args.run:
+        raise DeskError(f"two different runs given: -r {args.run} and {args.id}")
+    targets = runs.all_runs() if args.all else [runs.resolve(args.id or args.run)]
+    for run in targets:
+        gone = _run_files(run)
+        report, videos = evidence.finish(run, keep=args.keep, diff=args.diff, report=not args.no_report)
+        if args.keep:
+            print(f"run {run.id} down (files kept in {run.dir})")
+        else:
+            print(f"run {run.id} down; deleted {run.dir}{gone} (--keep keeps it)"
+                  + ("; screenshots and logs are in the report" if report else ""))
+        if report:
+            print(f"report: {report / 'report.md'}")
+        for v in videos:
+            print(f"video: {v}")
 
 
 def _run_files(run: runs.Run) -> str:
