@@ -128,7 +128,7 @@ function New-ElementCache {
 # Classic Win32 dialogs (NSIS and other installers) come through the MSAA proxy, which hands
 # back no descendants for a cached subtree. Walk those live, caching one element at a time.
 function Walk-Live($live, $path, $depth, $parentName, $hwnd, $nodes, $limit, $crEl) {
-    if ($script:truncated -eq 'time') { return }
+    if ('time' -eq $script:truncated) { return }
     if ($script:walkClock.Elapsed.TotalSeconds -gt $WalkSeconds) { $script:truncated = 'time'; return }
     if ($script:visited -ge $MaxVisit -or ($nodes.Count - $script:offscreen) -ge $limit) { $script:truncated = $true; return }
     try { $el = $live.GetUpdatedCache($crEl) } catch { return }
@@ -229,6 +229,9 @@ function Snapshot($opts) {
     $script:walkClock = [Diagnostics.Stopwatch]::StartNew()
     $cr = New-Cache
     foreach ($top in (Get-TopWindows)) {
+        # Between windows too: fetching a window's tree is where a slow application costs time.
+        if ($script:walkClock.Elapsed.TotalSeconds -gt $WalkSeconds) { $script:truncated = 'time' }
+        if ('time' -eq $script:truncated) { break }
         try {
             $hwnd = $top.Current.NativeWindowHandle
             $procId = $top.Current.ProcessId
@@ -269,7 +272,7 @@ function Snapshot($opts) {
 }
 
 function Walk($el, $path, $depth, $parentName, $hwnd, $nodes, $limit) {
-    if ($script:truncated -eq 'time') { return }
+    if ('time' -eq $script:truncated) { return }
     if ($script:walkClock.Elapsed.TotalSeconds -gt $WalkSeconds) { $script:truncated = 'time'; return }
     if ($script:visited -ge $MaxVisit -or ($nodes.Count - $script:offscreen) -ge $limit) { $script:truncated = $true; return }
     $script:visited++

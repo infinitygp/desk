@@ -220,9 +220,10 @@ function Invoke-Program($req, $client) {
     }
     $p = [Diagnostics.Process]::Start($psi)
     $ms = if ($req.timeout_s) { [int][Math]::Min(1000 * [double]$req.timeout_s, [int]::MaxValue) } else { -1 }
-    # From here the connection is the waiting thread's: it answers and closes it.
-    $script:handed = $true
     [Desk.Waiter]::Answer($p, $client, $ms)
+    # From here the connection is the waiting thread's: it answers and closes it. Not before:
+    # a hand-off that failed is answered by the loop like any other error.
+    $script:handed = $true
 }
 
 $port = 47011
@@ -233,6 +234,7 @@ while ($true) {
     $client = $listener.AcceptTcpClient()
     $script:handed = $false
     $reply = $null
+    $stream = $null
     try {
         # A connection that sends no request (a probe, a caller that gave up) is not waited for.
         $client.ReceiveTimeout = 5000
@@ -281,7 +283,7 @@ while ($true) {
     if ($null -eq $reply) { $reply = @{ error = "the agent has no answer to $($req.cmd)" } }
     try {
         $bytes = $utf8.GetBytes(($reply | ConvertTo-Json -Depth 20 -Compress))
-        $stream.Write($bytes, 0, $bytes.Length)
+        if ($stream) { $stream.Write($bytes, 0, $bytes.Length) }
     } catch { }
     $client.Close()
 }
