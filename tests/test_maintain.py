@@ -20,6 +20,24 @@ class Families(unittest.TestCase):
         self.assertNotIn("fedora-44-cockpit", fams)
         self.assertEqual(fams["windows-11"], ["windows-11"])
 
+    def test_a_definition_that_cannot_be_read_does_not_stop_the_others(self):
+        def load(name):
+            if name == "arch-gnome":
+                raise DeskError("images/arch-gnome/image.toml: not valid TOML")
+            return load_image(name)
+
+        with mock.patch("desk.maintain.load_image", load):
+            broken = {}
+            fams = maintain.families(broken)
+            self.assertEqual(broken, {"arch-gnome": "images/arch-gnome/image.toml: not valid TOML"})
+            self.assertIn("fedora-44-gnome", fams)
+            self.assertNotIn("arch-gnome", fams)
+            with self.assertRaises(DeskError):
+                maintain.families()
+            # The unattended run goes on with the rest and ends as failed.
+            with mock.patch("desk.maintain.selected", return_value=[]), mock.patch("desk.maintain._log"):
+                self.assertFalse(maintain.maintain(dry_run=True))
+
 
 class Due(unittest.TestCase):
     """What makes `desk maintain` reinstall an image or warm it up again."""

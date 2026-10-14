@@ -114,8 +114,17 @@ def warm_reasons(spec: ImageSpec) -> list[str]:
     return reasons
 
 
-def families() -> dict[str, list[str]]:
-    specs = {n: load_image(n) for n in list_images()}
+def families(broken: dict[str, str] | None = None) -> dict[str, list[str]]:
+    """Base images with their variants. An image whose definition cannot be read goes into
+    `broken` with the reason instead of stopping the others (without `broken`: it raises)."""
+    specs = {}
+    for n in list_images():
+        try:
+            specs[n] = load_image(n)
+        except DeskError as e:
+            if broken is None:
+                raise
+            broken[n] = str(e)
     return {n: [n] + [v for v, s in specs.items() if s.base == n] for n, s in specs.items() if not s.base}
 
 
@@ -208,9 +217,17 @@ def maintain(only: str | None = None, dry_run: bool = False) -> bool:
         out.mkdir(parents=True, exist_ok=True)
     report = [f"# desk maintain {time.strftime('%Y-%m-%d %H:%M')}", ""]
     all_ok = True
-    fams = families()
+    broken: dict[str, str] = {}
+    fams = families(broken)
+    if only in broken:
+        raise DeskError(broken[only])
     if only and not any(only in members for members in fams.values()):
         raise DeskError(f"unknown image {only!r}")
+    for name, why in ({} if only else broken).items():
+        # One definition that cannot be read must not keep the other images from being renewed.
+        all_ok = False
+        report += [f"- {name}: {why}", "  FAILED", ""]
+        _log(f"- {name}: {why}")
     for base, family in fams.items():
         if only and only not in family:
             continue
@@ -227,7 +244,10 @@ def maintain(only: str | None = None, dry_run: bool = False) -> bool:
         except DeskError as e:
             lines, ok, note = [f"- {base}: {e}"], False, str(e)
         except Exception as e:  # noqa: BLE001 - one broken family must not stop the others
-            (out / f"{base}.traceback").write_text(traceback.format_exc())
+            if dry_run:  # nothing is written then, the directory included
+                traceback.print_exc()
+            else:
+                (out / f"{base}.traceback").write_text(traceback.format_exc())
             lines, ok, note = [f"- {base}: {type(e).__name__}: {e} (see {base}.traceback)"], False, str(e)
         skipped = "not enough free memory" in note
         # Skipped is not success either: the systemd unit shows it as failed.
