@@ -1118,6 +1118,11 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(2)
     except KeyboardInterrupt:
         sys.exit(130)
+    except BrokenPipeError:
+        # Whoever read the output has left (desk ... | head): nothing more to say, and nothing
+        # left to flush into the closed pipe when Python exits.
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        sys.exit(141)
     except Exception as e:  # noqa: BLE001 - never exit 1, which callers read as a failed test
         message = explain(e)
         if message is None or os.environ.get("DESK_DEBUG"):
