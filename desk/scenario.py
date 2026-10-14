@@ -17,6 +17,44 @@ from .steps import Steps
 ACTIONS = {"root", "exec", "gui", "focus", "click", "type", "key", "expect", "expect_absent", "shot",
            "reboot", "wait", "clock", "disk_add", "disk_rm", "console_errors", "prepare"}
 OPTIONS = {"role", "exact", "timeout", "output", "rc", "name", "soft", "env", "step", "until", "anywhere"}
+# The options each action reads, besides name and soft; any other would be ignored without a word.
+READS = {
+    "root": {"timeout", "output", "rc", "until"}, "exec": {"timeout", "output", "rc", "until"},
+    "gui": {"env"}, "click": {"role", "exact", "timeout"}, "type": {"anywhere"},
+    "expect": {"role", "exact", "timeout"}, "expect_absent": {"role", "exact", "timeout"},
+    "reboot": {"timeout"}, "wait": {"timeout"}, "clock": {"step", "timeout"}, "disk_rm": {"timeout"},
+}
+
+
+def _number(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _text(v) -> bool:
+    return isinstance(v, str) and bool(v)
+
+
+def _texts(v) -> bool:
+    return _text(v) or (isinstance(v, list) and bool(v) and all(_text(x) for x in v))
+
+
+# What each action and option takes, as (check, description).
+VALUES = {
+    **{a: (_text, "a text") for a in ("root", "exec", "focus", "click", "type", "expect", "expect_absent", "shot",
+                                      "clock", "disk_add", "disk_rm")},
+    "gui": (_texts, "a command line or a list of arguments"),
+    "key": (_texts, "a key combo or a list of them"),
+    "reboot": (lambda v: v is True or _text(v), "true or the command that reboots"),
+    "prepare": (lambda v: v is True or _text(v), "true or the name of a prepare step"),
+    "wait": (lambda v: v is True or (_number(v) and v > 0), "true (until the screen is still) or seconds"),
+    "console_errors": (lambda v: isinstance(v, int) and not isinstance(v, bool) and v >= 0, "a count, e.g. 0"),
+    "role": (_text, "a text"), "output": (_text, "a text"), "name": (_text, "a text"), "step": (_text, "a text"),
+    "timeout": (lambda v: _number(v) and v > 0, "seconds"),
+    "rc": (lambda v: isinstance(v, int) and not isinstance(v, bool), "an exit code"),
+    **{o: (lambda v: isinstance(v, bool), "true or false") for o in ("exact", "soft", "until", "anywhere")},
+    "env": (lambda v: isinstance(v, dict) and all(isinstance(x, (str, int, float)) for x in v.values()),
+            "a table like {NAME = \"value\"}"),
+}
 # Where build artifacts land in the guest.
 GUEST_IN = {"linux": "/tmp/desk", "openwrt": "/tmp/desk", "windows": "C:/Users/tester/desk"}
 
@@ -61,26 +99,64 @@ def split_windows(command: str) -> list[str]:
 
 
 def load(path: Path) -> dict:
-    with path.open("rb") as f:
-        data = tomllib.load(f)
+    try:
+        with path.open("rb") as f:
+            data = tomllib.load(f)
+    except OSError as e:
+        raise DeskError(f"{path}: {e.strerror}") from None
+    except tomllib.TOMLDecodeError as e:
+        raise DeskError(f"{path}: not valid TOML: {e}") from None
     unknown = set(data) - {"image", "record", "build", "disks", "step"}
     if unknown:
         raise DeskError(f"{path}: unknown keys {sorted(unknown)}")
-    if "image" not in data:
+    if not _text(data.get("image")):
         raise DeskError(f"{path}: no image")
+    if not isinstance(data.get("record", False), bool):
+        raise DeskError(f"{path}: record is true or false")
     if not isinstance(data.get("disks", []), list) or not all(isinstance(d, str) for d in data.get("disks", [])):
         raise DeskError(f"{path}: disks is a list like [\"8G:data\"]")
+    for d in data.get("disks", []):
+        _checked(path, "disks", disks.parse, d)
     build = data.get("build", {})
-    if set(build) - {"run", "artifacts"}:
+    if not isinstance(build, dict) or set(build) - {"run", "artifacts"}:
         raise DeskError(f"{path}: [build] takes run and artifacts")
+    if "run" in build and not _text(build["run"]):
+        raise DeskError(f"{path}: [build] run is a command line")
+    if not isinstance(build.get("artifacts", []), list) or not all(_text(a) for a in build.get("artifacts", [])):
+        raise DeskError(f"{path}: [build] artifacts is a list of file patterns")
+    if not isinstance(data.get("step", []), list) or not all(isinstance(s, dict) for s in data.get("step", [])):
+        raise DeskError(f"{path}: steps are [[step]] tables")
     for i, step in enumerate(data.get("step", []), 1):
         actions = set(step) & ACTIONS
         if len(actions) != 1 or set(step) - ACTIONS - OPTIONS:
             raise DeskError(f"{path}: step {i} needs exactly one of {sorted(ACTIONS)}, "
                             f"plus any of {sorted(OPTIONS)} (got {sorted(step)})")
-        if "until" in step and not actions & {"exec", "root"}:
+        action = actions.pop()
+        if "until" in step and action not in ("exec", "root"):
             raise DeskError(f"{path}: step {i}: until goes with exec or root")
+        unread = set(step) - {action, "name", "soft"} - READS.get(action, set())
+        if unread:
+            takes = sorted(READS.get(action, set()) | {"name", "soft"})
+            raise DeskError(f"{path}: step {i}: {action} does not use {', '.join(sorted(unread))} "
+                            f"(it takes {', '.join(takes)})")
+        for key, value in step.items():
+            check, takes = VALUES[key]
+            if not check(value):
+                raise DeskError(f"{path}: step {i}: {key} takes {takes} (got {value!r})")
+        if action == "disk_add":
+            _checked(path, f"step {i}", disks.parse, step[action])
+        if action == "clock" and step[action] != "reset":
+            _checked(path, f"step {i}", clock.parse, step[action], 0.0)
+        if "step" in step:
+            _checked(path, f"step {i}", clock.duration, step["step"])
     return data
+
+
+def _checked(path: Path, where: str, parse, *args) -> None:
+    try:
+        parse(*args)
+    except DeskError as e:
+        raise DeskError(f"{path}: {where}: {e}") from None
 
 
 def describe(step: dict) -> tuple[str, str]:
@@ -164,7 +240,7 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
     elif action == "focus":
         return steps.focus(value)
     elif action == "click":
-        steps.click(value, role, step.get("exact", True))
+        steps.click(value, role, step.get("exact", True), timeout or 60)
     elif action == "type":
         steps.type(value, anywhere=step.get("anywhere", False))
     elif action == "key":

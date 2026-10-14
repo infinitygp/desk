@@ -84,8 +84,8 @@ class Steps:
                           capture=True, timeout=30)
         return r.returncode == 0
 
-    def click(self, name: str, role: str | None = None, exact: bool = True) -> None:
-        self.wait_for(name, role, exact)
+    def click(self, name: str, role: str | None = None, exact: bool = True, timeout: float = 60) -> None:
+        self.wait_for(name, role, exact, timeout)
         x, y = a11y.locate_name(self.target, name, role, exact)
         display.click(self.target.dom(), x, y, run=self.target)
 

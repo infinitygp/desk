@@ -45,9 +45,80 @@ reboot = true
             'image = "a"\nrecrod = true',                          # unknown top-level key
             'image = "a"\n[build]\ncommand = "make"',              # unknown build key
             'image = "a"\ndisks = "8G"',                           # disks is a list
+            'image = "a"\ndisks = ["8G:Bad_Name"]',                # not a disk name
+            'image = "a"\nrecord = "yes"',
+            'image = "a"\n[[step]]\nclick = 5',                    # a name is a text
+            'image = "a"\n[[step]]\nclick = ""',
+            'image = "a"\n[[step]]\nconsole_errors = "0"',
+            'image = "a"\n[[step]]\nconsole_errors = true',
+            'image = "a"\n[[step]]\nwait = "abc"',
+            'image = "a"\n[[step]]\nwait = false',
+            'image = "a"\n[[step]]\nkey = 12',
+            'image = "a"\n[[step]]\nkey = []',
+            'image = "a"\n[[step]]\nreboot = false',
+            'image = "a"\n[[step]]\nexec = "true"\ntimeout = "long"',
+            'image = "a"\n[[step]]\nexec = "true"\nrc = "0"',
+            'image = "a"\n[[step]]\nexpect = "x"\nexact = "no"',
+            'image = "a"\n[[step]]\ngui = "app"\nenv = "A=1"',
+            'image = "a"\n[[step]]\ndisk_add = "lots"',
+            'image = "a"\n[[step]]\nclock = "tomorrow"',
+            'image = "a"\n[[step]]\nclock = "+3d"\nstep = "daily"',
+            # Options the action never reads: the step would run as if they were not there.
+            'image = "a"\n[[step]]\nclick = "x"\nrc = 7',
+            'image = "a"\n[[step]]\nclick = "x"\noutput = "y"',
+            'image = "a"\n[[step]]\nkey = "f5"\ntimeout = 3',
+            'image = "a"\n[[step]]\ntype = "x"\nrole = "text"',
+            'image = "a"\n[[step]]\nexec = "true"\nenv = {A = "1"}',
+            'image = "a"\n[[step]]\nclick = "x',                   # not TOML
         ):
             with self.subTest(text=text), self.assertRaises(DeskError):
                 scenario.load(write(text))
+
+    def test_what_each_action_takes(self):
+        data = scenario.load(write('''
+image = "a"
+[[step]]
+click = "Save"
+role = "button"
+exact = false
+timeout = 5
+name = "save it"
+soft = true
+[[step]]
+gui = ["app", "--flag"]
+env = {LANG = "pl_PL.UTF-8", DEPTH = 2}
+[[step]]
+exec = "systemctl is-active foo"
+until = true
+timeout = 30.5
+rc = 3
+output = "active"
+[[step]]
+wait = 1.5
+[[step]]
+wait = true
+timeout = 20
+[[step]]
+reboot = "dnf offline reboot -y"
+timeout = 3600
+[[step]]
+clock = "+3d"
+step = "1d"
+[[step]]
+clock = "reset"
+[[step]]
+type = "text"
+anywhere = true
+[[step]]
+prepare = "admin"
+[[step]]
+disk_add = "8G:data"
+'''))
+        self.assertEqual(len(data["step"]), 11)
+
+    def test_a_missing_file_is_a_mistake_too(self):
+        with self.assertRaisesRegex(DeskError, "No such file"):
+            scenario.load(Path("/nonexistent/scenario.toml"))
 
     def test_disks_and_console(self):
         data = scenario.load(write('''
