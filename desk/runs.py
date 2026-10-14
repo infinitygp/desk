@@ -244,8 +244,25 @@ def active_runs_of(image: str) -> list[Run]:
     return [r for r in all_runs() if r.image == image and r.live_domain() is not None]
 
 
+def abandoned_warmup(name: str, xml: str) -> str | None:
+    """The image whose warm-up this domain is, when it is one: a `desk image warm` that was killed
+    leaves its guest running. Runs restored from a warm state carry the same domain name, but
+    their disk is a run's."""
+    from .config import WARM
+
+    if not name.startswith("desk-warm-") or str(RUNS) in xml:
+        return None
+    for src in ET.fromstring(xml).iter("source"):
+        disk = Path(src.get("file") or "")
+        if disk.parent.parent == WARM:
+            return disk.parent.name.rsplit(".", 1)[0]
+    return None
+
+
 def gc(verbose: bool = True) -> list[str]:
     """Destroy idle runs, delete stopped ones past the TTL, and kill orphaned desk domains."""
+    from . import evidence
+
     removed = []
     # Only a domain whose run directory is gone is orphaned; one whose run.json this desk cannot
     # read (another version wrote it) still belongs to someone.
@@ -259,9 +276,13 @@ def gc(verbose: bool = True) -> list[str]:
                 run.touch()
             continue
         if run.idle() > IDLE_TTL:
-            down(run)
+            what = f"{'running' if live else 'stopped'}, idle {run.idle() / 3600:.1f} h"
+            # Whoever left it may still want what it showed: the report keeps the screenshots,
+            # the timeline and, while the guest runs, its logs.
+            run.log_event(gc=f"destroyed by desk gc ({what})")
+            report, _ = evidence.finish(run, stopped=not evidence.reported(run))
             known_disks.discard(str(run.dir / "disk.qcow2"))
-            removed.append(f"{run.id} ({'running' if live else 'stopped'}, idle {run.idle() / 3600:.1f} h)")
+            removed.append(f"{run.id} ({what})" + (f"; report: {report / 'report.md'}" if report else ""))
     for dom in conn().listAllDomains(libvirt.VIR_CONNECT_LIST_DOMAINS_ACTIVE):
         try:
             name = dom.name()
@@ -271,6 +292,14 @@ def gc(verbose: bool = True) -> list[str]:
             if str(RUNS) in xml and not any(d in xml for d in known_disks):
                 dom.destroy()
                 removed.append(f"orphaned domain {name}")
+                continue
+            image = abandoned_warmup(name, xml)
+            if image:
+                # Whoever warms an image holds its lock for as long as the guest is theirs.
+                with image_lock_if_free(image) as free:
+                    if free:
+                        dom.destroy()
+                        removed.append(f"abandoned warm-up domain {name}")
         except libvirt.libvirtError:
             continue  # gone between listing and looking at it
     if verbose:

@@ -490,6 +490,8 @@ def collect(run, diff: bool = False) -> Path:
             md.append(f"- {stamp} clock {ev['clock']}" + (f" in steps of {step}" if step else ""))
         elif "snapshot" in ev:
             md.append(f"- {stamp} snapshot {ev['snapshot']}d: {ev['name']}")
+        elif "gc" in ev:
+            md.append(f"- {stamp} {ev['gc']}")
         elif ev.get("record") == "start":
             md.append(f"- {stamp} recording started ({ev.get('fps')} fps)")
         elif ev.get("record") == "stop" and ev.get("video"):
@@ -502,10 +504,15 @@ def collect(run, diff: bool = False) -> Path:
     return out
 
 
+def reported(run) -> bool:
+    return (REPORTS / run.id).exists()
+
+
 def finish(run, keep: bool = False, diff: bool = False, report: bool = True,
-           running: bool = False) -> tuple[Path | None, list[Path]]:
+           running: bool = False, stopped: bool = False) -> tuple[Path | None, list[Path]]:
     """Stop recording, write the report, keep the videos with it and destroy the run (unless
-    `running`: a scenario run kept for testing by hand)."""
+    `running`: a scenario run kept for testing by hand). `stopped`: report on a run whose VM is
+    gone too, from what its directory holds."""
     from . import record, runs
 
     try:
@@ -513,7 +520,7 @@ def finish(run, keep: bool = False, diff: bool = False, report: bool = True,
     except Exception as e:  # noqa: BLE001 - a video that cannot be made must not keep the VM running
         print(f"[desk] warning: no video ({type(e).__name__}: {e})", file=sys.stderr)
     out = None
-    if report and run.live_domain() is not None:
+    if report and (stopped or run.live_domain() is not None):
         # A report that cannot be written must not keep the VM running.
         try:
             out = collect(run, diff=diff)
