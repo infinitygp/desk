@@ -159,9 +159,24 @@ def agent_exec(dom, argv: list[str], timeout: float = 120) -> tuple[int, bytes, 
     raise DeskError(f"guest-exec {argv[0]} still running after {timeout:.0f}s")
 
 
-def agent_sync_time(dom) -> None:
-    """After restoring a saved state the guest clock lags by however long the image sat on disk."""
-    agent(dom, "guest-set-time", time=time.time_ns())
+# After a restore libvirt now and then takes a moment to see the guest agent's channel as
+# connected again (measured: one restore in ten, well under a second).
+AGENT_WAIT = 20.0
+
+
+def agent_set_time(dom, offset: float = 0.0, wait: float = AGENT_WAIT) -> None:
+    """The host's time plus `offset` seconds into the guest. After restoring a saved state its
+    clock lags by however long the image sat on disk. Tried again for `wait` seconds while the
+    agent does not answer."""
+    deadline = time.monotonic() + wait
+    while True:
+        try:
+            agent(dom, "guest-set-time", time=time.time_ns() + int(offset * 1e9))
+            return
+        except DeskError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.5)
 
 
 def boot_id(port: int, user: str, command: str = "cat /proc/sys/kernel/random/boot_id") -> str:

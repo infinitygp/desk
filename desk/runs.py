@@ -563,7 +563,7 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
             conn().restoreFlags(str(warm), xml, libvirt.VIR_DOMAIN_SAVE_RUNNING)
             dom = run.dom()
             try:
-                guest.agent_sync_time(dom)
+                guest.agent_set_time(dom)
             except DeskError as e:
                 print(f"[desk] warning: clock not synced: {e}")
         started()

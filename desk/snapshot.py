@@ -33,11 +33,17 @@ def _resume(run, memory: Path) -> None:
     # The saved domain is this run's own, so its XML (name, UUID, disk, ports) is used as is.
     xml = conn().saveImageGetXMLDesc(str(memory), libvirt.VIR_DOMAIN_SAVE_IMAGE_XML_SECURE)
     conn().restoreFlags(str(memory), xml, libvirt.VIR_DOMAIN_SAVE_RUNNING)
+    unset = None
     try:
         clock.apply(run)
     except DeskError as e:
-        print(f"[desk] warning: clock not synced: {e}")
+        unset = e
+        print(f"[desk] warning: clock not synced: {e}", file=sys.stderr)
     guest.wait_ssh(run.ssh_port, run.user, timeout=60)
+    if unset and run.clock_offset:
+        # Its own time sync is off (desk clock), so nothing else will put this right.
+        raise DeskError(f"the guest runs again, but its clock shows the time the snapshot was saved instead of the "
+                        f"time desk clock set ({unset}); set it again with desk clock")
 
 
 def save(run, name: str, force: bool = False) -> float:

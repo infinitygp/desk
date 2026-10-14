@@ -54,7 +54,7 @@ def guest_time(run) -> float:
 
 def apply(run) -> None:
     """Host time plus the run's offset into the guest (after a restore or a reboot)."""
-    guest.agent(run.dom(), "guest-set-time", time=time.time_ns() + int(run.clock_offset * 1e9))
+    guest.agent_set_time(run.dom(), run.clock_offset)
 
 
 def set_time(run, value: str) -> float:

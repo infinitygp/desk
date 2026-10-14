@@ -33,6 +33,25 @@ class Waits(unittest.TestCase):
         self.assertIn("systemctl --user is-active x", message)
 
 
+class SetTime(unittest.TestCase):
+    def test_tried_again_while_the_agent_is_not_back(self):
+        calls = []
+
+        def agent(dom, execute, **arguments):
+            calls.append(arguments["time"])
+            if len(calls) < 3:
+                raise DeskError("guest agent guest-set-time: QEMU guest agent is not connected")
+
+        with mock.patch("desk.guest.agent", agent), mock.patch("desk.guest.time.sleep"):
+            guest.agent_set_time(None, offset=86400)
+        self.assertEqual(len(calls), 3)
+
+    def test_gives_up_when_it_stays_away(self):
+        with mock.patch("desk.guest.agent", side_effect=DeskError("not connected")), mock.patch("desk.guest.time.sleep"):
+            with self.assertRaisesRegex(DeskError, "not connected"):
+                guest.agent_set_time(None, wait=0.05)
+
+
 class WindowsAgent(unittest.TestCase):
     def test_busy_is_not_unreachable(self):
         with socket.socket() as server:
