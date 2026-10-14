@@ -433,6 +433,10 @@ def _unattend_iso(spec: ImageSpec, work: Path) -> Path:
     return iso
 
 
+# Enter presses while the CD's loader waits for a key; the first one that arrives is enough.
+CD_PROMPT_PRESSES = 3
+
+
 def _windows_install(spec: ImageSpec, name: str, common: list[str], work: Path, deadline: float) -> None:
     iso = _fetch_iso(spec)
     unattend = _unattend_iso(spec, work)
@@ -450,17 +454,28 @@ def _windows_install(spec: ImageSpec, name: str, common: list[str], work: Path, 
              "--input", "keyboard,bus=usb"]
     _log(f"installing {spec.name} (windows); `desk image shot {spec.name}` shows the screen")
     subprocess.run(args, check=True)
-    # OVMF asks "Press any key to boot from CD or DVD" during the first seconds. Stop well before
-    # Setup's own screens, where Enter would hit their focused "Cancel" button.
-    prompt = time.monotonic() + 15
-    while time.monotonic() < prompt:
-        dom = lookup(name)
-        if dom is not None and dom.isActive():
-            try:
-                display.key(dom, "ret")
-            except DeskError:
-                pass
-        time.sleep(0.5)
+    # The CD's loader asks "Press any key to boot from CD or DVD" for five seconds once the
+    # firmware has started it, which the firmware says on the serial console. Keys go in only
+    # then, and only a few: pressed for longer they wait in the keyboard's queue until Setup
+    # reads them, where Enter hits the focused "Cancel" (seen once the ISO was in the page cache
+    # and booted in seconds). Without that line, as before: during the first 15 seconds.
+    log = LOGS / f"{name}.log"
+    began = time.monotonic()
+    started, presses = None, 0
+    while time.monotonic() < began + 15 and presses < CD_PROMPT_PRESSES:
+        if started is None and log.exists() and b"BdsDxe: starting" in log.read_bytes():
+            started = time.monotonic()
+        if started is not None or time.monotonic() > began + 8:
+            dom = lookup(name)
+            if dom is not None and dom.isActive():
+                try:
+                    display.key(dom, "ret")
+                    presses += 1 if started is not None else 0
+                except DeskError:
+                    pass
+            time.sleep(1 if started is not None else 0.5)
+        else:
+            time.sleep(0.1)
     # Setup's first reboot ends the install domain (virt-install's on_reboot=destroy); start it
     # again from the disk with the final configuration for the remaining passes and first logon.
     _wait_shutoff(name, timeout=max(60.0, deadline - time.monotonic()))
