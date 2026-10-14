@@ -72,7 +72,13 @@ class SaveRestore(unittest.TestCase):
                 snapshot.save(run, "clean", force=True)
             self.assertEqual((run.dir / "snapshots" / "clean" / "disk.qcow2").read_text(), "disk")
             self.assertEqual([p.name for p in (run.dir / "snapshots").iterdir()], ["clean"])
+            # Cut off at the very end, with the old one already moved out of the way.
             run.save_fails = False
+            with mock.patch("desk.snapshot.Path.rename", side_effect=[None, OSError("no space left")]), \
+                    self.assertRaises(OSError):
+                snapshot.save(run, "clean", force=True)
+            self.assertEqual((run.dir / "snapshots" / "clean" / "disk.qcow2").read_text(), "disk")
+            self.assertEqual(sorted(p.name for p in (run.dir / "snapshots").iterdir()), ["clean"])
             snapshot.save(run, "clean", force=True)
             self.assertEqual((run.dir / "snapshots" / "clean" / "disk.qcow2").read_text(), "later")
 

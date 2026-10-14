@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import time
 from pathlib import Path
 
@@ -46,8 +47,9 @@ def save(run, name: str, force: bool = False) -> float:
     dom = run.dom()
     # Made next to its place and moved there once whole, so a save that fails or is cut off
     # leaves neither half a snapshot nor a hole where the one it was to replace used to be.
-    new = d.with_name(f".{name}.saving")
+    new, old = d.with_name(f".{name}.saving"), d.with_name(f".{name}.replaced")
     shutil.rmtree(new, ignore_errors=True)
+    shutil.rmtree(old, ignore_errors=True)
     new.mkdir(parents=True)
     t0 = time.monotonic()
     try:
@@ -61,15 +63,21 @@ def save(run, name: str, force: bool = False) -> float:
         # Written last: a snapshot without it is not one (listing, restore).
         (new / "meta.json").write_text(json.dumps({"created": time.time(), "seconds": round(took, 1),
                                                    "clock_offset": run.clock_offset}))
+        if d.exists():
+            d.rename(old)
+        new.rename(d)
     except BaseException:
-        if run.live_domain() is None and (new / "memory.save").exists():
-            _resume(run, new / "memory.save")
+        if old.exists() and not d.exists():
+            old.rename(d)
+        try:
+            if run.live_domain() is None and (new / "memory.save").exists():
+                _resume(run, new / "memory.save")
+        except Exception as e:  # noqa: BLE001 - the error that stopped the save is the one to report
+            print(f"[desk] warning: the guest could not be resumed after the failed save: {e}", file=sys.stderr)
         shutil.rmtree(new, ignore_errors=True)
         raise
-    if d.exists():
-        shutil.rmtree(d)
-    new.rename(d)
     _resume(run, d / "memory.save")
+    shutil.rmtree(old, ignore_errors=True)
     run.log_event(snapshot="save", name=name)
     return time.monotonic() - t0
 
