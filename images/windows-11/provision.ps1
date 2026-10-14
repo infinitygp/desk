@@ -1,5 +1,8 @@
 # Runs over SSH (as tester, elevated) before the warm state is saved; the reboot that follows
 # (relogin in image.toml) starts the in-session agent again. Keep it idempotent.
+# Any error ends it: a setting that could not be made must not end up in a warm state that looks
+# complete.
+$ErrorActionPreference = 'Stop'
 $run = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 # conhost --headless: Windows Terminal, the default console host, ignores -WindowStyle Hidden.
 # -MTA: UI Automation clients belong in the multithreaded apartment; in PowerShell's default
