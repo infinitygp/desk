@@ -1,11 +1,14 @@
 """What a run left behind: guest problems since it started, file changes, a timeline report."""
 
+import fcntl
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -505,34 +508,62 @@ def collect(run, diff: bool = False) -> Path:
 
 
 def reported(run) -> bool:
-    return (REPORTS / run.id).exists()
+    """A report of this run exists (not of an earlier run of the same name)."""
+    try:
+        return (REPORTS / run.id).stat().st_mtime >= run.created
+    except OSError:
+        return False
+
+
+@contextmanager
+def _teardown(run):
+    """One command at a time takes a run down: a second `desk down` of it (the first one's caller
+    gave up waiting for a video), or gc and its owner at once, would encode and report it twice."""
+    try:
+        fd = os.open(run.dir / ".teardown", os.O_RDWR | os.O_CREAT, 0o644)
+    except OSError:
+        raise DeskError(f"run {run.id} is gone already") from None
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        yield
+    except BlockingIOError:
+        raise DeskError(f"run {run.id} is being taken down by another desk command") from None
+    finally:
+        os.close(fd)
 
 
 def finish(run, keep: bool = False, diff: bool = False, report: bool = True,
-           running: bool = False, stopped: bool = False) -> tuple[Path | None, list[Path]]:
+           running: bool = False, stopped: bool = False, unless=None) -> tuple[Path | None, list[Path]]:
     """Stop recording, write the report, keep the videos with it and destroy the run (unless
     `running`: a scenario run kept for testing by hand). `stopped`: report on a run whose VM is
-    gone too, from what its directory holds."""
+    gone too, from what its directory holds. `unless`: asked just before the run is destroyed;
+    true leaves it as it is (gc, when its owner came back meanwhile)."""
     from . import record, runs
 
-    try:
-        record.stop(run)
-    except Exception as e:  # noqa: BLE001 - a video that cannot be made must not keep the VM running
-        print(f"[desk] warning: no video ({type(e).__name__}: {e})", file=sys.stderr)
-    out = None
-    if report and (stopped or run.live_domain() is not None):
-        # A report that cannot be written must not keep the VM running.
+    with _teardown(run):
         try:
-            out = collect(run, diff=diff)
-        except Exception as e:  # noqa: BLE001
-            print(f"[desk] warning: no report ({type(e).__name__}: {e})", file=sys.stderr)
-    # Videos outlive the run in its report directory, report or not.
-    videos = record.save_videos(run, out or REPORTS / run.id)
-    if not running:
-        # Like starting one: no other command picks ports or looks for orphans meanwhile. Only
-        # here, so that nobody waits for a report to be written.
-        with runs.state_lock():
-            runs.down(run, keep=keep)
+            record.stop(run)
+        except Exception as e:  # noqa: BLE001 - a video that cannot be made must not keep the VM running
+            print(f"[desk] warning: no video ({type(e).__name__}: {e})", file=sys.stderr)
+        out = None
+        if report and (stopped or run.live_domain() is not None):
+            # A report that cannot be written must not keep the VM running.
+            try:
+                out = collect(run, diff=diff)
+            except Exception as e:  # noqa: BLE001
+                print(f"[desk] warning: no report ({type(e).__name__}: {e})", file=sys.stderr)
+        # Videos outlive the run in its report directory, report or not.
+        try:
+            videos = record.save_videos(run, out or REPORTS / run.id)
+        except OSError as e:
+            videos = []
+            print(f"[desk] warning: videos not kept ({e})", file=sys.stderr)
+        if not running:
+            # Like starting one: no other command picks ports or looks for orphans meanwhile. Only
+            # here, so that nobody waits for a report to be written.
+            with runs.state_lock():
+                if not (unless and unless()):
+                    runs.down(run, keep=keep)
     return out, videos
 
 

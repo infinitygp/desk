@@ -63,17 +63,25 @@ def _flock(path: Path, waiting: str, timeout: float):
                     raise DeskError(f"gave up after {timeout / 60:.0f} min waiting for {waiting}, still held by "
                                     f"{holder}; if that command hangs, stop it and try again") from None
                 time.sleep(0.5)
-        f.seek(0)
-        f.truncate()
-        f.write(f"desk {' '.join(sys.argv[1:4])} (pid {os.getpid()}, since {time.strftime('%H:%M:%S')})")
-        f.flush()
+        _note(f, f"desk {' '.join(sys.argv[1:4])} (pid {os.getpid()}, since {time.strftime('%H:%M:%S')})")
         _locked[path] = 1
         try:
             yield
         finally:
             del _locked[path]
-            f.seek(0)
-            f.truncate()
+            _note(f, "")
+
+
+def _note(f, text: str) -> None:
+    """Who holds the lock, for those who wait. Never the holder's problem: `desk gc` on a full
+    disk still has to get its lock."""
+    try:
+        f.seek(0)
+        f.truncate()
+        f.write(text)
+        f.flush()
+    except OSError:
+        pass
 
 
 def state_lock():
@@ -246,9 +254,25 @@ def _mem_available_mib() -> int:
     return 0
 
 
+def _promised_mib() -> int:
+    """Memory that guests still booting cold will take but have not touched yet: MemAvailable
+    does not show it, and two cold boots started together would each count it as free."""
+    promised = 0
+    for r in all_runs():
+        if r.domain != f"desk-{r.id}" or r.ready:
+            continue
+        dom = r.live_domain()
+        try:
+            if dom is not None:
+                promised += max(0, dom.maxMemory() - dom.memoryStats().get("rss", dom.maxMemory())) // 1024
+        except libvirt.libvirtError:
+            continue  # gone meanwhile
+    return promised
+
+
 def check_memory(spec: ImageSpec) -> None:
     need = spec.memory_mib + HOST_RESERVE_MIB
-    avail = _mem_available_mib()
+    avail = _mem_available_mib() - _promised_mib()
     if avail < need:
         running = [r.id for r in all_runs() if r.live_domain() is not None]
         hint = f"; running desk VMs: {', '.join(running)}" if running else ""
@@ -299,14 +323,13 @@ def abandoned_warmup(name: str, xml: str) -> str | None:
     return None
 
 
-def gc(verbose: bool = True) -> list[str]:
-    """Destroy idle runs, delete stopped ones past the TTL, and kill orphaned desk domains."""
+def gc_idle(verbose: bool = True) -> list[str]:
+    """Take down runs nobody touched for IDLE_TTL, their report written first. Without the state
+    lock: reading a guest's logs and encoding a video take their time, and nobody should wait for
+    that (evidence.finish takes the lock for the moment the domain is destroyed)."""
     from . import evidence
 
     removed = []
-    # Only a domain whose run directory is gone is orphaned; one whose run.json this desk cannot
-    # read (another version wrote it) still belongs to someone.
-    known_disks = {str(d) for d in RUNS.glob("*/disk.qcow2")} if RUNS.exists() else set()
     for run in all_runs():
         live = run.live_domain() is not None
         if run.in_use() or not run.last_used:
@@ -315,14 +338,44 @@ def gc(verbose: bool = True) -> list[str]:
             if not run.last_used:
                 run.touch()
             continue
-        if run.idle() > IDLE_TTL:
-            what = f"{'running' if live else 'stopped'}, idle {run.idle() / 3600:.1f} h"
+        if run.idle() <= IDLE_TTL:
+            continue
+        what = f"{'running' if live else 'stopped'}, idle {run.idle() / 3600:.1f} h"
+        seen = run.last_used
+
+        def still_idle(run=run, seen=seen) -> bool:
+            # Its owner may have come back while the report was written.
+            try:
+                return not run.in_use() and load(run.id).last_used == seen
+            except DeskError:
+                return False  # gone: somebody else took it down
+
+        try:
             # Whoever left it may still want what it showed: the report keeps the screenshots,
             # the timeline and, while the guest runs, its logs.
-            run.log_event(gc=f"destroyed by desk gc ({what})")
-            report, _ = evidence.finish(run, stopped=not evidence.reported(run))
-            known_disks.discard(str(run.dir / "disk.qcow2"))
-            removed.append(f"{run.id} ({what})" + (f"; report: {report / 'report.md'}" if report else ""))
+            run.log_event(gc=f"desk gc takes the run down ({what})")
+        except OSError:
+            pass  # a full disk is when this must go on
+        try:
+            report, _ = evidence.finish(run, stopped=not evidence.reported(run), unless=lambda: not still_idle())
+        except DeskError:
+            continue  # another command is taking it down already
+        if run.dir.exists():
+            continue  # in use again
+        removed.append(f"{run.id} ({what})" + (f"; report: {report / 'report.md'}" if report else ""))
+    if verbose:
+        for r in removed:
+            print(f"[desk] gc: removed {r}")
+    return removed
+
+
+def gc(verbose: bool = True) -> list[str]:
+    """Kill desk domains nobody owns: those whose run directory is gone, and the guests of
+    warm-ups that were killed. With the state lock held."""
+    removed = []
+    # Only a domain whose run directory is gone is orphaned; one whose run.json this desk cannot
+    # read (another version wrote it) still belongs to someone.
+    known_disks = {str(d) for d in RUNS.glob("*/disk.qcow2")} if RUNS.exists() else set()
     for dom in conn().listAllDomains(libvirt.VIR_CONNECT_LIST_DOMAINS_ACTIVE):
         try:
             name = dom.name()
@@ -433,6 +486,7 @@ def up(spec: ImageSpec, run_id: str | None = None, cold: bool = False, force: bo
 
     for warning in check_usable(spec):
         print(f"[desk] warning: {warning}", file=sys.stderr)
+    gc_idle()
     with ExitStack() as lock:
         lock.enter_context(state_lock())
         gc()

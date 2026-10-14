@@ -1,3 +1,4 @@
+import os
 import tempfile
 import time
 import unittest
@@ -37,22 +38,114 @@ class Gc(unittest.TestCase):
 
     def test_an_idle_run_leaves_a_report_behind(self):
         old, fresh = self.run_idle_for("old", 3), self.run_idle_for("fresh", 0.1)
-        removed = runs.gc(verbose=False)
+        removed = runs.gc_idle(verbose=False)
         self.assertEqual(len(removed), 1)
         self.assertRegex(removed[0], r"^old \(stopped, idle 3\.0 h\); report: .*/reports/old/report\.md$")
         self.assertFalse(old.dir.exists())
         self.assertTrue(fresh.dir.exists())
         report = (self.home / "reports" / "old" / "report.md").read_text()
-        self.assertIn("destroyed by desk gc (stopped, idle 3.0 h)", report)
+        self.assertIn("desk gc takes the run down (stopped, idle 3.0 h)", report)
         self.assertIn("shots/0001.png", report)
         self.assertTrue((self.home / "reports" / "old" / "shots" / "0001.png").exists())
 
     def test_a_run_reported_before_is_not_reported_again(self):
         old = self.run_idle_for("old", 3)
         evidence.collect(old)  # desk down --keep wrote it then
-        runs.gc(verbose=False)
+        runs.gc_idle(verbose=False)
         self.assertFalse(old.dir.exists())
         self.assertEqual([p.name for p in (self.home / "reports").iterdir()], ["old"])
+
+    def test_an_earlier_run_of_the_same_name_does_not_count_as_its_report(self):
+        yesterday = self.home / "reports" / "old"
+        yesterday.mkdir(parents=True)
+        os.utime(yesterday, (time.time() - 86400,) * 2)
+        self.run_idle_for("old", 3)
+        self.assertRegex(runs.gc_idle(verbose=False)[0], "report: ")
+        self.assertEqual(len(list((self.home / "reports").iterdir())), 2)
+
+    def test_a_run_whose_owner_came_back_meanwhile_stays(self):
+        old = self.run_idle_for("old", 3)
+
+        def collect_slowly(run, diff=False):
+            runs.load(run.id).touch()  # desk shot -r old, while the report is written
+            return self.home / "reports" / run.id
+
+        with mock.patch("desk.evidence.collect", collect_slowly):
+            self.assertEqual(runs.gc_idle(verbose=False), [])
+        self.assertTrue((old.dir / "run.json").exists())
+
+    def test_one_teardown_at_a_time(self):
+        old = self.run_idle_for("old", 3)
+
+        def second_down(run, diff=False):
+            with self.assertRaisesRegex(runs.DeskError, "being taken down by another"):
+                evidence.finish(run)
+            return self.home / "reports" / run.id
+
+        with mock.patch("desk.evidence.collect", second_down):
+            evidence.finish(old, stopped=True)
+        self.assertFalse(old.dir.exists())
+        with self.assertRaisesRegex(runs.DeskError, "gone already"):
+            evidence.finish(old)
+
+
+class WarmupDomain:
+    def __init__(self, home: Path):
+        self.xml = (f"<domain><devices><disk device='disk'><source file='{home}/warm/fedora-44-gnome."
+                    "20261013-021139/disk.qcow2'/></disk></devices></domain>")
+        self.destroyed = False
+
+    def name(self):
+        return "desk-warm-fedora-44-gnome-20261013-021139"
+
+    def XMLDesc(self, _flags):
+        return self.xml
+
+    def destroy(self):
+        self.destroyed = True
+
+
+class GcWarmups(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.home = Path(tmp.name)
+        self.dom = WarmupDomain(self.home)
+        conn = mock.Mock()
+        conn.listAllDomains.return_value = [self.dom]
+        for target, value in (("desk.runs.RUNS", self.home / "runs"), ("desk.runs.HOME", self.home),
+                              ("desk.config.WARM", self.home / "warm"), ("desk.runs.conn", lambda: conn)):
+            patch = mock.patch(target, value)
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def test_spared_while_somebody_warms_the_image(self):
+        import fcntl
+
+        with open(self.home / ".lock-fedora-44-gnome", "a+") as warming:
+            fcntl.flock(warming, fcntl.LOCK_EX)
+            self.assertEqual(runs.gc(verbose=False), [])
+        self.assertFalse(self.dom.destroyed)
+
+    def test_destroyed_when_nobody_does(self):
+        self.assertEqual(runs.gc(verbose=False), ["abandoned warm-up domain desk-warm-fedora-44-gnome-20261013-021139"])
+        self.assertTrue(self.dom.destroyed)
+
+
+class ColdReason(unittest.TestCase):
+    def test_no_warm_state_and_an_outdated_one(self):
+        from desk.config import load_image
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            spec = load_image("fedora-44-gnome")
+            with mock.patch("desk.config.WARM", home / "warm"), mock.patch("desk.config.BASE", home / "base"):
+                self.assertIn("no warm state", runs.cold_reason(spec))
+                (home / "warm" / "fedora-44-gnome").mkdir(parents=True)
+                (home / "warm" / "fedora-44-gnome" / "memory.save").write_bytes(b"")
+                (home / "warm" / "fedora-44-gnome" / "meta.json").write_text('{"base": "/some/other/build"}')
+                (home / "base" / "fedora-44-gnome").mkdir(parents=True)
+                self.assertIn("predates its base image", runs.cold_reason(spec))
 
 
 class Locks(unittest.TestCase):
