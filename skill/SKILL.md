@@ -5,7 +5,8 @@ description: Test desktop applications and system packages (rpm, Arch packages, 
 
 # desk: disposable desktop VMs
 
-`desk` (on PATH; source and image definitions in `~/work/github/infinitygp/desk`)
+`desk` (on PATH; `desk doctor` prints where its source and image definitions are, and where
+runs and reports are kept on this host)
 starts a throwaway VM from a golden image with a logged-in desktop in about two seconds, and
 drives it like a person would: real mouse and keyboard input from outside the guest, the screen
 as PNG, and the accessibility tree as text. Nothing in the guest can hide the screen or block
@@ -22,7 +23,7 @@ desk a11y                           # focused window as text: @refs, roles, name
 desk click @e7                      # click an element from that listing (real mouse click)
 desk click --name "Log in"          # or find it by name on the fly
 desk type 'Zażółć gęślą jaźń'       # real key presses, Polish letters included
-desk shot                           # -> /var/lib/vmlab/runs/<id>/shots/0001.png 1280x800; Read it
+desk shot                           # prints the PNG's path and size (.../shots/0001.png 1280x800); Read it
 desk down                           # destroy the VM and its files (--keep to keep them)
 ```
 
@@ -55,7 +56,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk exec --gui --wait -- CMD` | Run inside the session and return its output and exit code: what only the desktop session sees (windows, FindWindow, UI Automation, the session's environment) |
 | `desk exec --env NAME=VALUE ...` | Environment for the command (with or without `--gui`, repeatable) |
 | `desk exec --agent -- CMD` | Run as root through qemu-guest-agent; works without guest networking |
-| `desk push [--root] LOCAL REMOTE`, `desk pull [--root] REMOTE LOCAL` | Copy files (scp) as the desktop user; `--root` for `/root`, `/etc` and the like |
+| `desk push [--root] LOCAL REMOTE`, `desk pull [--root] REMOTE LOCAL` | Copy files (scp) as the desktop user; `--root` for `/root`, `/etc` and the like; stopped after 600 s (exit 124; `--timeout S`, 0: no limit) |
 | `desk diff [--all]` | Files changed in the guest since the image it started from: added, changed, removed (~30 s) |
 | `desk report [--diff]` | Write the evidence report now (see below) |
 | `desk ls`, `desk down [ID] [--all] [--keep] [--diff] [--no-report]`, `desk gc` | List (with who holds each run), destroy (writing the report first), clean up idle runs |
@@ -65,6 +66,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk browser viewport WxH\|reset` | Pages at WxH CSS pixels (a phone: `390x700`) through Firefox's responsive design mode; prints the `desk shot --region` of the page area |
 | `desk browser console [--errors] [--all]` | Web console of every page since the run started (see Pitfalls) |
 | `desk record start [--fps N]`, `desk record stop`, `desk up --record` | Record the screen as a WebM video, kept with the report |
+| `desk doctor` | What this host has: where desk keeps its files, which host tools are missing (with the command that installs them), which images are built |
 
 Action commands (`click`, `type`, `key`, `scroll`, `action`, ...) accept `--shot` to screenshot
 once the screen settles. With one argument, `desk exec -- 'a && b | grep x'` goes through the
@@ -72,6 +74,11 @@ guest shell; `--root` and `--gui` apply to the whole snippet.
 
 ## Pitfalls
 
+- Exit code 1 means the check failed: a scenario step, `desk find` with no match, `desk wait` on a
+  screen that keeps changing, a failing selftest. Exit code 2 means desk itself could not do what
+  was asked (no such run, a host tool or libvirt failing, the guest unreachable); its one line
+  says why. A 2 is never a finding about the product under test: fix the cause or report it as
+  the harness's, and do not count the test as failed.
 - Your own shell tool may stop a command after about 10 minutes, whatever `desk exec --timeout`
   says. For longer guest work (an upgrade, a big build, a slow backup) run the desk command in
   the background with your tool's background option and wait for it to finish, or start it
@@ -116,14 +123,15 @@ guest shell; `--root` and `--gui` apply to the whole snippet.
 
 ## Evidence report
 
-`desk down` first writes `/var/lib/vmlab/reports/<run>/report.md` and prints its path: failed
+`desk down` first writes `reports/<run>/report.md` under desk's home and prints its path: failed
 units (now, and every unit failure since the start, before reboots too), SELinux denials, crashes,
 journal warnings, package changes and Firefox console errors since the run started, plus a
 timeline of every desk command with its exit code and the screenshots taken. `desk down --diff`
 adds the files the run changed. Without `--keep`, `desk down` deletes the run's directory (disk,
 snapshots, extra disks); screenshots and logs stay in the report. Point the user to the report
 and summarise what it found; read `journal.txt` / `avc.txt` next to it before blaming the product
-for a warning.
+for a warning. A report that says "NOT CHECKED" could not ask the guest (it was unreachable):
+that is no clean bill, so say that the guest's logs were not looked at.
 
 Record a video (`desk up --record`, or `desk record start` before the interesting part) when the
 user will want to see the flow itself: a walkthrough of a feature, an installer, a bug that needs
@@ -134,14 +142,20 @@ itself after 30 minutes (`--limit`).
 
 ## Images
 
-`desk image list` shows them. `fedora-44-gnome` is the default; `fedora-45-gnome` is the next
+`desk image list` shows them and which of them this host has built: a host keeps the images it
+tests on, not all of them. When the image a test needs is not built, build that one
+(`desk image build NAME`, then `desk image warm NAME`; 10-25 minutes and 5-25 GB, so not the
+others along with it); a variant (`-pl`, `-cockpit`) only needs `desk image warm NAME` once its
+base is there, and without a warm state a run still starts, cold, in ~20 s.
+`fedora-44-gnome` is the default; `fedora-45-gnome` is the next
 Fedora release (beta until it is out); `fedora-44-gnome-pl` is the same
 system in Polish (UI, Firefox, formats) for testing Polish interfaces; `fedora-44-cockpit` has
 Cockpit open in Firefox, logged in as tester with administrative access (see below); `arch-gnome` is Arch Linux
 (rolling, pacman, no SELinux) with the newest GNOME and libraries; `windows-11` is Windows 11
 Enterprise (evaluation) for Windows builds and installers; `openwrt-25.12` is OpenWrt 25.12 without
-a desktop, for OpenWrt packages and LuCI apps (see below). Images are reinstalled automatically
-(`desk maintain`, weekly); if `desk up` prints a warning about a failed maintenance or a licence
+a desktop, for OpenWrt packages and LuCI apps (see below). Images are as old as their last build
+(`desk image list` shows the date) unless the host renews them with `desk maintain`, by hand or
+from its weekly timer; if `desk up` prints a warning about a failed maintenance or a licence
 running out, pass it on to the user.
 
 ### Windows guests
@@ -274,7 +288,9 @@ need quotes, or give a list), `expect_absent` (after a reload, first
 `expect` something that is always there, or the check passes on a half-loaded page), `reboot = true`,
 `wait = true` (screen still) or `wait = 2` (seconds), `until = true` on an `exec`/`root` step
 (repeat it every 2 s until it gives the expected `rc`/`output`, `timeout` 120 s by default: a
-service coming up), `clock = "+1d"` (or `"reset"`),
+service coming up; an `exec`/`root` step that runs out of its `timeout`, 600 s without `until`, is
+stopped in the guest and fails as "still running"), `timeout` on a `click` (how long to wait for
+the element, 60 s by default), `clock = "+1d"` (or `"reset"`),
 `disk_add = "8G:data"`, `disk_rm = "data"` (top-level `disks = ["8G:data"]` plugs them in before
 the first step), `console_errors = 0` (at most that many new errors in Firefox's web console since
 the start or the previous such step; end a UI scenario with one). In a scenario's report every
@@ -282,7 +298,8 @@ console message is tagged with the step running when it was logged (`[before the
 what the warm state and setup logged; a page logs a moment after the step that opened it, so look
 at the step before as well), so no extra step is needed just to separate setup noise. Every step takes `name` for the
 report, and `soft = true` for an independent check whose failure should not stop the steps after it.
-`desk scenario check FILE` validates a file without starting anything. When a scenario fails,
+`desk scenario check FILE` validates a file without starting anything: the image, every value's
+type, and options a step would not read (`rc` on a `click`). When a scenario fails,
 look at the failure screenshot and the report before changing the scenario: a failing step is
 usually a real finding. A failed `exec`/`root` step prints the end of its stdout and stderr, where
 the cause usually is. `desk scenario run FILE --keep` writes the report and leaves the run running
@@ -414,12 +431,13 @@ desk forward 80                               # LuCI: http://127.0.0.1:PORT/, lo
   runs alone. Only one run per image is restored from the warm state (~2 s); further ones boot
   cold (~20 s). Each takes ~4 GB RAM;
   `desk up` refuses when the host is short of memory. Runs idle for 2 h are destroyed by the
-  next `desk up` or `desk gc` (`DESK_TTL` seconds to change).
+  next `desk up` or `desk gc` (`DESK_TTL` seconds to change), their report written first.
 - The image is a clean Workstation install: anything the product needs beyond its declared
   dependencies is missing there, exactly as on a user's machine. Report that rather than
   silently installing it; install it afterwards only to continue the test.
-- `desk selftest <image>` checks the image and the harness end to end. `desk maintain` keeps
-  the images current (rebuilds, selftests, switches builds) and runs weekly from a timer. After
-  changing an image definition in `images/<name>/` of the source repository, run
-  `desk maintain --only <name>`: it rebuilds what changed and switches only after the selftest
-  passes (`desk image build --force` / `desk image warm --force` switch without testing).
+- `desk selftest <image>` checks the image and the harness end to end. `desk maintain` renews
+  the images that are built (rebuilds, selftests, switches builds) when it is run, by hand or
+  from the weekly timer a host may have (`desk doctor` says). After changing an image definition
+  in `images/<name>/` of the source repository, run `desk maintain --only <name>`: it rebuilds what
+  changed and switches only after the selftest passes (`desk image build --force` /
+  `desk image warm --force` switch without testing).

@@ -18,15 +18,18 @@ Agent instructions: [skill/SKILL.md](skill/SKILL.md), linked as `~/.agents/skill
 ## Layout
 
 ```text
-bin/desk             entry point (system python3 + python3-libvirt)
+bin/desk             entry point (the system's python3 with the distribution's libvirt bindings)
 skill/SKILL.md       agent skill
 desk/                harness code (guest_a11y.py runs inside the guest)
 tests/               unit tests
 images/<name>/       image.toml, kickstart, provision.sh
-/var/lib/vmlab/      base/, warm/, runs/, reports/, maintain/, cache/, logs/, keys/  (DESK_HOME)
+<home>/              base/, warm/, runs/, reports/, maintain/, cache/, logs/, keys/  (see Host setup)
 ```
 
 ## Images
+
+A host keeps the images it tests on: none is required, and nothing builds them unasked.
+`desk image list` and `desk doctor` show which are there.
 
 | Image | Install | Notes |
 |---|---|---|
@@ -93,14 +96,22 @@ Runs pin the builds they start from, so a new build never disturbs a running or 
 changed. New builds are selftested next to the current ones and become current only when every
 member of the family passes; otherwise the current builds stay, and `desk up` and
 `desk image list` show the failure. Reports and screenshots of failures go to
-`/var/lib/vmlab/maintain/<date>/` (an install that hangs: `logs/build-<image>-stuck.png`).
-An install may take 3 hours before it counts as stuck; the whole run 12 hours.
+`<home>/maintain/<date>/` (an install that hangs: `logs/build-<image>-stuck.png`, with its serial
+console in `logs/build-<image>.log`). An install may take 3 hours before it counts as stuck; the
+whole run 12 hours. An install is kept only if it powered off by itself and, where the image
+names an `install_marker` (Windows: `firstboot.ps1` reports on the serial console), said that its
+setup succeeded.
+
+Maintenance is an offer, not a duty: it only touches images that are built, and it runs when
+somebody runs it. A host that should renew its images by itself gets the weekly timer; one
+without it has images as old as their last build.
 
 Builds of images removed from `images/` are not deleted automatically.
 
 ```bash
 bin/desk maintain --dry-run         # what is due
-bin/desk maintain --install-timer   # weekly, Monday 03:00 (systemd user timer, needs lingering)
+bin/desk maintain --only windows-11 # one image family, now
+bin/desk maintain --install-timer   # optional: weekly, Monday 03:00 (systemd user timer, needs lingering)
 systemctl --user list-timers desk-maintain.timer
 journalctl --user -u desk-maintain  # output of the last runs
 ```
@@ -154,6 +165,18 @@ whose focus is not in a text field is refused. Walks of the tree stop after 20 s
 `desk forward` keeps an SSH tunnel per guest port in a background process
 (`python -m desk.forward`), restarted when SSH drops, stopped by `desk down`.
 
+## Exit codes, locks, limits
+
+- 0: done. 1: the check a command stands for failed (a scenario step, `selftest`, `find`,
+  `wait`, `doctor`). 2: desk could not do what was asked; one line says why, also when a host tool,
+  libvirt or the disk failed (`DESK_DEBUG=1` adds the traceback). 130: interrupted. `desk exec`
+  passes on the guest command's code, 124 when it ran out of time (`push`/`pull` too).
+- The state lock (`<home>/.lock`) is held while a domain is started or destroyed, not while a
+  guest boots or a report is written, so a cold boot does not hold up other runs. A command that
+  waits for a lock says who holds it and gives up after 15 minutes (an image's lock: 6 hours).
+- What a command in the guest may take is enforced in the guest (`timeout`, a watchdog on
+  BusyBox and Windows), for `desk exec`, `desk wait --until-exec` and scenario steps alike.
+
 ## Scenarios
 
 `desk scenario run FILE` runs a repeatable end-to-end test described in TOML (format in
@@ -172,6 +195,8 @@ Projects keep theirs in `test/desk/`.
 the start across reboots, SELinux denials, coredumps, journal warnings, package changes with dnf's
 UTC times made local, timeline with screenshots); `--diff` adds the files the run changed,
 from `virt-diff` against the image the run started from. Reports are pruned after 14 days.
+`desk gc` (and so every `desk up`) writes the report of an idle run before destroying it. When
+the guest could not be asked, the report says "NOT CHECKED" instead of counting nothing.
 
 `desk record start|stop` (or `desk up --record`) takes screenshots at a steady rate (4 fps) in a
 background process; unchanged frames are hard links, so a still screen costs nothing. Stopping
@@ -188,9 +213,30 @@ boots; it installs the shell extension, the Polish (programmer's) layout and a11
 bin/desk selftest fedora-44-gnome --reboot            # end to end in a real run, ~1 min
 ```
 
-## Host requirements
+## Host setup
 
-Fedora with `/dev/kvm`, `libvirt-daemon-driver-qemu`, `libvirt-client`, `python3-libvirt`,
-`passt`, `virt-install`, `edk2-ovmf`, `guestfs-tools`, `gstreamer1-plugins-good` (videos),
-`qemu-device-display-virtio-gpu-pci` and `python3-pillow` (several monitors); the user in the `kvm` group.
-`/var/lib/vmlab` is a dedicated XFS disk labelled `svirt_home_t`.
+Arch Linux and Fedora, and what is built on them (CachyOS, EndeavourOS, ...). `bin/desk doctor`
+checks the host and prints the one command that installs what is missing; it needs only Python's
+libvirt bindings to run.
+
+| | Arch | Fedora |
+|---|---|---|
+| To start runs | `libvirt` `libvirt-python` `qemu-system-x86` `qemu-hw-display-virtio-vga` `qemu-img` `edk2-ovmf` `passt` `openssh` | `libvirt-daemon-driver-qemu` `python3-libvirt` `qemu-system-x86-core` `qemu-device-display-virtio-vga` `qemu-img` `edk2-ovmf` `passt` `openssh-clients` |
+| To build images | `virt-install` `curl`; `arch-gnome`: `openssl`; `openwrt-*`: `gptfdisk` `parted` `libguestfs`; `windows-11`: `7zip` `libisoburn` | `virt-install` `curl`; `arch-gnome`: `openssl`; `openwrt-*`: `gdisk` `parted` `libguestfs`; `windows-11`: `7zip` `xorriso` |
+| Single features | `python-pillow` (crops, several monitors), `qemu-hw-display-virtio-gpu-pci` (`--resolution`, `--displays`), `guestfs-tools` (`desk diff`), `gstreamer` `gst-plugins-base` `gst-plugins-good` (`desk record`) | `python3-pillow`, `qemu-device-display-virtio-gpu-pci`, `guestfs-tools`, `gstreamer1` `gstreamer1-plugins-base` `gstreamer1-plugins-good` |
+
+The user needs `/dev/kvm` (the `kvm` group where it is not open to everybody); VMs run under
+`qemu:///session`, so nothing runs as root.
+
+Where images, runs and reports live is the host's own business, outside the repository:
+`~/.local/share/desk` unless `~/.config/desk/config.toml` says otherwise, or `$DESK_HOME`.
+
+```toml
+# ~/.config/desk/config.toml
+home = "/srv/desk"           # a file system with reflinks (btrfs, XFS) and room: 5-25 GiB an image
+uri = "qemu:///session"      # the default
+```
+
+Snapshots, warm-ups and `desk diff` copy disks as reflinks; on a file system without them every
+copy is a full one and `desk diff` does not work (`desk doctor` says which it is). With SELinux
+enforcing (Fedora) the default home works as it is: libvirt labels what its VMs use.
