@@ -262,8 +262,9 @@ def _wait_exec(run: runs.Run, args) -> None:
     start, out = time.monotonic(), b""
     while True:
         try:
-            r = guest.ssh_run(run.ssh_port, spec.root_user if args.root else run.user, spec.cmd(args.until_exec),
-                              capture=True, timeout=max(5, min(60, deadline - time.monotonic())))
+            limit = max(5, min(60, deadline - time.monotonic()))
+            r = guest.ssh_run(run.ssh_port, spec.root_user if args.root else run.user,
+                              guest.command(spec, [args.until_exec], limit=limit), capture=True, timeout=limit + 30)
             out = r.stdout + r.stderr
             if r.returncode == 0:
                 run.log_event(rc=0)
@@ -493,18 +494,7 @@ def cmd_exec(args) -> None:
         print(started + ("" if changed else "; nothing new on screen yet (slow start? check with desk shot)"))
         return
     spec = runs.spec_for(run)
-    if spec.family == "windows":
-        prefix = "".join(f"$env:{k} = '{v.replace(chr(39), chr(39) * 2)}'; " for k, v in env.items())
-        script = prefix + guest.remote_command(argv)
-        if limit:
-            # Processes outlive a closed SSH session on Windows, so a watchdog in the guest
-            # ends the command and everything it started.
-            script = (f"$deskWatch = Start-Process powershell.exe -WindowStyle Hidden -PassThru -ArgumentList "
-                      f"'-NoProfile', '-Command', \"Start-Sleep {limit:.0f}; taskkill.exe /T /F /PID $PID\"; "
-                      f"try {{ {script}\n}} finally {{ Stop-Process -Id $deskWatch.Id -Force -ErrorAction Ignore }}")
-        command = spec.cmd(script)
-    else:
-        command = guest.remote_command(argv, env=env, limit=limit, shell=spec.shell)
+    command = guest.command(spec, argv, env=env, limit=limit)
     start = time.monotonic()
     try:
         # The guest stops the command first; SSH's timeout is the fallback.
@@ -584,7 +574,8 @@ def cmd_scenario(args) -> None:
     path = Path(args.file)
     if args.action == "check":
         data = scenario.load(path)
-        print(f"{path}: image {data['image']}, {len(data.get('step', []))} steps")
+        image = load_image(args.image or data["image"]).name
+        print(f"{path}: image {image}, {len(data.get('step', []))} steps")
         for i, step in enumerate(data.get("step", []), 1):
             action, arg = scenario.describe(step)
             print(f"  {i:>2}. {step.get('name') or (action + ' ' + arg).strip()}")

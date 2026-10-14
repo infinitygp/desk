@@ -59,6 +59,22 @@ def remote_command(argv: list[str], gui: bool = False, wait: bool = False,
     return cmd
 
 
+def command(spec, argv: list[str], env: dict[str, str] | None = None, limit: float | None = None) -> str:
+    """`argv` (one element: a shell snippet) as it is sent over SSH to this kind of guest, stopped
+    in the guest after `limit` seconds: closing the SSH connection would leave it running there."""
+    if spec.family != "windows":
+        return remote_command(argv, env=env, limit=limit, shell=spec.shell)
+    script = "".join(f"$env:{k} = '{v.replace(chr(39), chr(39) * 2)}'; " for k, v in (env or {}).items())
+    script += remote_command(argv)
+    if limit:
+        # Processes outlive a closed SSH session on Windows, so a watchdog in the guest ends the
+        # command and everything it started.
+        script = (f"$deskWatch = Start-Process powershell.exe -WindowStyle Hidden -PassThru -ArgumentList "
+                  f"'-NoProfile', '-Command', \"Start-Sleep {limit:.0f}; taskkill.exe /T /F /PID $PID\"; "
+                  f"try {{ {script}\n}} finally {{ Stop-Process -Id $deskWatch.Id -Force -ErrorAction Ignore }}")
+    return spec.cmd(script)
+
+
 def ssh_run(port: int, user: str, command: str, *, capture: bool = False, input: bytes | None = None,
             timeout: float | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(

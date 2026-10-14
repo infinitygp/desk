@@ -63,6 +63,20 @@ class WindowsCommands(unittest.TestCase):
         encoded = command.split("-EncodedCommand ")[1].split(";")[0]
         self.assertIn('Write-Output "Zażółć"', base64.b64decode(encoded).decode("utf-16-le"))
 
+    def test_a_time_limit_is_kept_in_the_guest(self):
+        import base64
+
+        from desk import guest
+
+        self.assertEqual(guest.command(load_image("fedora-44-gnome"), ["make check"], limit=90),
+                         "timeout -k 5 90 bash -c 'make check'")
+        self.assertIn("setsid sh -c", guest.command(load_image("openwrt-25.12"), ["apk update"], limit=90))
+        command = guest.command(load_image("windows-11"), ["msiexec /i a.msi"], env={"WHO": "o'k"}, limit=90)
+        script = base64.b64decode(command.split("-EncodedCommand ")[1].split(";")[0]).decode("utf-16-le")
+        self.assertIn("$env:WHO = 'o''k'; msiexec /i a.msi", script)
+        self.assertIn('"Start-Sleep 90; taskkill.exe /T /F /PID $PID"', script)
+        self.assertIn("finally { Stop-Process -Id $deskWatch.Id", script)
+
 
 if __name__ == "__main__":
     unittest.main()

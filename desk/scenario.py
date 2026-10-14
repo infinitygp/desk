@@ -198,16 +198,20 @@ def _shell(run, spec, step: dict, as_root: bool) -> str:
     limit = step.get("timeout", 120 if step.get("until") else 600)
     deadline = time.monotonic() + limit
     while True:
+        # Stopped in the guest when its time is up, as `desk exec` does: one that hangs would
+        # otherwise go on running there under the steps that follow.
+        attempt = max(5, deadline - time.monotonic()) if step.get("until") else limit
+        start = time.monotonic()
         try:
-            r = guest.ssh_run(run.ssh_port, user, spec.cmd(command), capture=True,
-                              timeout=max(5, deadline - time.monotonic()) if step.get("until") else limit)
-        except subprocess.TimeoutExpired:
-            if not step.get("until"):
-                raise
-            r = subprocess.CompletedProcess([], 124, b"", b"(the command itself did not finish)")
+            r = guest.ssh_run(run.ssh_port, user, guest.command(spec, [command], limit=attempt), capture=True,
+                              timeout=attempt + 30)
+        except subprocess.TimeoutExpired as e:
+            r = subprocess.CompletedProcess([], 124, e.stdout or b"", e.stderr or b"")
         out, err = r.stdout.decode(errors="replace"), r.stderr.decode(errors="replace")
         problem = None
-        if r.returncode != step.get("rc", 0):
+        if r.returncode != step.get("rc", 0) and time.monotonic() - start >= attempt:
+            problem = f"still running after {attempt:.0f}s, stopped"
+        elif r.returncode != step.get("rc", 0):
             problem = f"exit {r.returncode}"
         elif "output" in step and step["output"] not in out:
             problem = f"output lacks {step['output']!r}"
