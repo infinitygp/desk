@@ -1,7 +1,12 @@
+import subprocess
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
+from desk.config import DeskError
 from desk.evidence import (
     format_changes,
+    guest_problems,
     local_dnf_times,
     parse_virt_diff,
     unit_failures,
@@ -63,6 +68,30 @@ class WindowsNoise(unittest.TestCase):
         ch = parse_virt_diff(sample)
         self.assertEqual(ch.added, ["/DeskTest/hello.txt", "/Windows/System32/config/SOFTWARE"])
         self.assertEqual(ch.hidden, 3)
+
+
+class GuestProblems(unittest.TestCase):
+    RUN = SimpleNamespace(image="fedora-44-gnome", ssh_port=1, since=0.0)
+
+    def collect(self, returncode: int, stdout: bytes, stderr: bytes = b"") -> dict:
+        answer = subprocess.CompletedProcess([], returncode, stdout, stderr)
+        with mock.patch("desk.evidence.guest.ssh_run", return_value=answer):
+            return guest_problems(self.RUN)
+
+    def test_sections(self):
+        self.assertEqual(self.collect(0, b"=== failed\n=== journal\nline one\nline two\n"),
+                         {"failed": "", "journal": "line one\nline two"})
+
+    def test_a_lost_connection_is_not_a_clean_guest(self):
+        with self.assertRaisesRegex(DeskError, "no SSH connection.*Connection refused"):
+            self.collect(255, b"", b"ssh: connect to host 127.0.0.1 port 1: Connection refused")
+        # Cut off half way: what came through would read as "nothing else was wrong".
+        with self.assertRaisesRegex(DeskError, "no SSH connection"):
+            self.collect(255, b"=== failed\n")
+
+    def test_no_output_is_not_a_clean_guest(self):
+        with self.assertRaisesRegex(DeskError, "gave nothing.*bash: not found"):
+            self.collect(127, b"", b"bash: not found")
 
 
 if __name__ == "__main__":

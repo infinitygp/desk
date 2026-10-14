@@ -113,6 +113,7 @@ def _lines(run, spec, script: str, cursor: str = "") -> set[str]:
     else:
         r = guest.ssh_run(run.ssh_port, spec.root_user, f"C={shlex.quote(cursor)} bash -s",
                           input=script.replace("{user}", run.user).encode(), capture=True, timeout=60)
+    guest.connected(r, "asking the guest what is running")
     return {ln.strip() for ln in r.stdout.decode(errors="replace").splitlines() if ln.strip()}
 
 

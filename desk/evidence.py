@@ -232,6 +232,7 @@ def guest_problems(run) -> dict[str, str]:
     else:
         r = guest.ssh_run(run.ssh_port, spec.root_user, f"bash -s -- {int(run.since)}",
                           input=GUEST_SCRIPT.encode(), capture=True, timeout=120)
+    guest.connected(r, "collecting the guest's logs")
     sections, current = {}, None
     for line in r.stdout.decode(errors="replace").splitlines():
         if line.startswith("=== "):
@@ -239,6 +240,10 @@ def guest_problems(run) -> dict[str, str]:
             sections[current] = []
         elif current:
             sections[current].append(line)
+    if not sections:
+        # The script prints a heading for every section, found something or not.
+        raise DeskError(f"collecting the guest's logs gave nothing (exit {r.returncode}): "
+                        + (r.stderr.decode(errors="replace").strip()[-300:] or "no output"))
     out = {k: "\n".join(v).strip() for k, v in sections.items()}
     return openwrt_sections(out, run.since) if spec.family == "openwrt" else out
 
@@ -373,6 +378,7 @@ def collect(run, diff: bool = False) -> Path:
             problems = guest_problems(run)
         except (DeskError, subprocess.TimeoutExpired) as e:
             problems = {"error": str(e)}
+            print(f"[desk] warning: the report has no guest logs: {e}", file=sys.stderr)
         if family == "linux" and problems.get("packages"):
             problems["packages"] = local_dnf_times(problems["packages"])
         for key in ("journal", "avc", "packages"):
@@ -416,6 +422,9 @@ def collect(run, diff: bool = False) -> Path:
     md.append("")
     if not live:
         md.append("- the VM was not running, so no guest logs were collected")
+    elif "error" in problems:
+        # Not "0 failed units": nothing was looked at.
+        md.append(f"- NOT CHECKED: the guest's logs could not be collected ({problems['error']})")
     else:
         failed = problems.get("failed", "")
         openwrt = family == "openwrt"
@@ -454,8 +463,8 @@ def collect(run, diff: bool = False) -> Path:
                       + ("\n\n```\n" + "\n".join(errs[:20]) + "\n```\n" if errs else ""))
         pkgs = problems.get("packages", "")
         md.append("- package changes:" + (f"\n\n```\n{pkgs}\n```\n" if pkgs else " none"))
-    if "error" in problems or "diff error" in problems:
-        md.append(f"- collection problems: {problems.get('error', '')} {problems.get('diff error', '')}".rstrip())
+    if "diff error" in problems:
+        md.append(f"- changed files not listed: {problems['diff error']}")
     if changes is not None:
         md += ["", "## Files changed since the image", "", "```", format_changes(changes, limit=100), "```",
                "", "Full list in files.txt, raw virt-diff output in virt-diff.txt."]

@@ -81,6 +81,7 @@ def console(run, everything: bool = False) -> list[str]:
     spec.need_desktop("desk browser")
     r = guest.ssh_run(run.ssh_port, spec.root_user, f"S={int(run.since)} bash -s", input=JOURNAL.encode(),
                       capture=True, timeout=60)
+    guest.connected(r, "reading the web console")
     return parse(r.stdout.decode(errors="replace"), everything)
 
 
