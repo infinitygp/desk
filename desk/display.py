@@ -216,8 +216,10 @@ def click(dom, x: int, y: int, button: str = "left", count: int = 1, run=None) -
     time.sleep(0.1)
     for _ in range(count):
         p.button(button, True)
-        time.sleep(0.1)
-        p.button(button, False)
+        try:
+            time.sleep(0.1)
+        finally:
+            p.button(button, False)
         time.sleep(0.08)
 
 
@@ -231,16 +233,20 @@ def drag(dom, x1: int, y1: int, x2: int, y2: int, steps: int = 30, run=None) -> 
     p.move(x1, y1)
     time.sleep(0.1)
     p.button("left", True)
-    time.sleep(0.15)
-    for i in range(1, steps + 1):
-        p.move(x1 + (x2 - x1) * i // steps, y1 + (y2 - y1) * i // steps)
-        time.sleep(0.02)
-    # A last wiggle over the target, then let go.
-    for dx in (2, -2, 0):
-        p.move(min(max(x2 + dx, 0), p.width - 1), y2)
-        time.sleep(0.06)
-    time.sleep(0.2)
-    p.button("left", False)
+    try:
+        time.sleep(0.15)
+        for i in range(1, steps + 1):
+            p.move(x1 + (x2 - x1) * i // steps, y1 + (y2 - y1) * i // steps)
+            time.sleep(0.02)
+        # A last wiggle over the target, then let go.
+        for dx in (2, -2, 0):
+            p.move(min(max(x2 + dx, 0), p.width - 1), y2)
+            time.sleep(0.06)
+        time.sleep(0.2)
+    finally:
+        # Also when a point on the way is off the screen or the command is interrupted: a
+        # button left down would turn every later pointer move into a drag.
+        p.button("left", False)
     time.sleep(0.1)
 
 
@@ -275,9 +281,13 @@ def chord(dom, codes: list[str], hold_ms: int = 40, gap_ms: int = 40) -> None:
     queues timed events; so once this returns the guest has every key and the next action
     (a click moving focus, say) cannot overtake the typing.
     """
-    qmp(dom, "input-send-event", events=[_key_event(c, True) for c in codes])
-    time.sleep(hold_ms / 1000)
-    qmp(dom, "input-send-event", events=[_key_event(c, False) for c in reversed(codes)])
+    try:
+        qmp(dom, "input-send-event", events=[_key_event(c, True) for c in codes])
+        time.sleep(hold_ms / 1000)
+    finally:
+        # Released whatever happened to the press (an unknown key among them, an interrupt): a
+        # modifier left down would change every key and click after it.
+        qmp(dom, "input-send-event", events=[_key_event(c, False) for c in reversed(codes)])
     time.sleep(gap_ms / 1000)
 
 
