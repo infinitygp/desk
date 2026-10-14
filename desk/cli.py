@@ -1056,7 +1056,36 @@ def _text_args(argv: list[str]) -> list[str]:
     return argv
 
 
+def explain(e: Exception) -> str | None:
+    """One line for a failure of something desk relies on (a host tool, libvirt, the disk); None
+    for what desk does not expect, which is a bug and keeps its traceback."""
+    import errno
+
+    import libvirt
+
+    if isinstance(e, subprocess.CalledProcessError):
+        tool = Path(str(e.cmd[0] if isinstance(e.cmd, (list, tuple)) else e.cmd)).name
+        said = e.stderr.decode(errors="replace") if isinstance(e.stderr, bytes) else e.stderr or ""
+        return f"{tool} failed (exit {e.returncode})" + (f": {said.strip()[-500:]}" if said.strip() else "")
+    if isinstance(e, subprocess.TimeoutExpired):
+        tool = Path(str(e.cmd[0] if isinstance(e.cmd, (list, tuple)) else e.cmd)).name
+        what = "the guest did not answer over SSH" if tool == "ssh" else f"{tool} did not finish"
+        return f"{what} within {e.timeout:.0f}s"
+    if isinstance(e, libvirt.libvirtError):
+        return f"libvirt: {e}"
+    if isinstance(e, FileNotFoundError) and e.filename and "/" not in str(e.filename):
+        return f"{e.filename} is not installed on this host (desk doctor lists what is missing)"
+    if isinstance(e, OSError) and e.errno == errno.ENOSPC:
+        return f"no space left on the disk{f' ({e.filename})' if e.filename else ''}; desk gc frees what is unused"
+    if isinstance(e, OSError) and e.strerror:
+        return f"{e.strerror}{f': {e.filename}' if e.filename else ''}"
+    return None
+
+
 def main(argv: list[str] | None = None) -> None:
+    """Exit codes: 0 done; 1 the check a command stands for failed (a scenario step, selftest,
+    find, wait); 2 desk could not do what was asked; 130 interrupted. `desk exec` passes the
+    guest command's own code on."""
     argv = _text_args(sys.argv[1:] if argv is None else argv)
     args = build_parser().parse_args(argv)
     try:
@@ -1066,3 +1095,11 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(2)
     except KeyboardInterrupt:
         sys.exit(130)
+    except Exception as e:  # noqa: BLE001 - never exit 1, which callers read as a failed test
+        message = explain(e)
+        if message is None or os.environ.get("DESK_DEBUG"):
+            import traceback
+
+            traceback.print_exc()
+        print(f"desk: {message or f'internal error ({type(e).__name__}: {e})'}", file=sys.stderr)
+        sys.exit(2)

@@ -188,12 +188,12 @@ def load_image(name: str) -> ImageSpec:
     if not spec.is_file():
         known = ", ".join(sorted(p.name for p in IMAGES_DIR.iterdir() if (p / "image.toml").is_file()))
         raise DeskError(f"unknown image {name!r} (known: {known or 'none'})")
-    with spec.open("rb") as f:
-        data = tomllib.load(f)
+    data = _toml(spec)
     if "base" in data:
         parent_dir = IMAGES_DIR / data["base"]
-        with (parent_dir / "image.toml").open("rb") as f:
-            parent = tomllib.load(f)
+        if not (parent_dir / "image.toml").is_file():
+            raise DeskError(f"{name}: its base image {data['base']!r} does not exist")
+        parent = _toml(parent_dir / "image.toml")
         if "base" in parent:
             raise DeskError(f"{name}: a variant must be based on an installed image, not on another variant")
         # Inherit everything; the parent's file references stay relative to the parent.
@@ -209,7 +209,19 @@ def load_image(name: str) -> ImageSpec:
         data = {**parent, **data}
     for key in ("base_version", "warm_version"):
         data.pop(key, None)
-    return ImageSpec(name=name, dir=d, **data)
+    try:
+        return ImageSpec(name=name, dir=d, **data)
+    except TypeError as e:
+        # An unknown or a missing setting.
+        raise DeskError(f"{spec}: {str(e).replace('ImageSpec.__init__() ', '')}") from None
+
+
+def _toml(path: Path) -> dict:
+    try:
+        with path.open("rb") as f:
+            return tomllib.load(f)
+    except tomllib.TOMLDecodeError as e:
+        raise DeskError(f"{path}: not valid TOML: {e}") from None
 
 
 def list_images() -> list[str]:
