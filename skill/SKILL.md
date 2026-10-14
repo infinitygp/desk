@@ -46,7 +46,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk key COMBO...` | `super`, `enter`, `esc`, `tab`, `ctrl+alt+t`, `shift+f10`, `alt+f4`, `f5`, letters |
 | `desk snapshot save NAME`, `desk snapshot restore NAME`, `desk snapshot list`, `desk snapshot delete NAME` | Save the running guest (~3-5 s) and go back to it (~1-3 s) |
 | `desk up IMAGE --resolution WxH --scale N --displays N`, `desk display [--resolution WxH] [--scale N]` | Monitors: mode, scaling in percent, several displays (see below) |
-| `desk focus NAME` | Bring a window to the front by application or title (keys go to the focused window) |
+| `desk focus NAME` | Bring a window to the front by application or title (keys go to the focused window); on Windows it fails when Windows keeps the window behind the one in front |
 | `desk scenario run FILE [--keep]`, `desk scenario check FILE` | Run a repeatable test from a TOML file (see below) |
 | `desk wait [--change] [--timeout S]` | Until the screen is still; `--change` first waits for it to change at all |
 | `desk wait --until-exec CMD [--root] [--timeout S]` | Run CMD in the guest every 2 s until it exits 0 (a service up, a file written; default 120 s), instead of a polling loop |
@@ -61,7 +61,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk report [--diff]` | Write the evidence report now (see below) |
 | `desk ls`, `desk down [ID] [--all] [--keep] [--diff] [--no-report]`, `desk gc` | List (with who holds each run), destroy (writing the report first), clean up idle runs |
 | `desk view` | Tell the user how to watch the run live (VNC through an SSH tunnel) |
-| `desk forward PORT[:LOCAL]`, `desk forward`, `desk forward --stop PORT\|all`, `desk up IMAGE --forward PORT` | Reach a guest port from the host (127.0.0.1, the same number when free, else printed) for as long as the run exists, across reboots and snapshot restores |
+| `desk forward PORT[:LOCAL]`, `desk forward`, `desk forward --stop PORT\|all`, `desk up IMAGE --forward PORT` | Reach a guest port from the host (127.0.0.1, the same number when free, else printed) for as long as the run exists, across reboots and snapshot restores; a port already forwarded keeps its local port (`--stop` it first to move it) |
 | `desk browser open URL\|/PATH` | Open an address in Firefox's current tab, as a link from another program would; a path is opened on the site shown now (`/podman`, `/system/services`). Exits 1 and says what Firefox shows instead when the page did not load (server not found, connection refused, a certificate warning) |
 | `desk browser viewport WxH\|reset` | Pages at WxH CSS pixels (a phone: `390x700`) through Firefox's responsive design mode; prints the `desk shot --region` of the page area |
 | `desk browser console [--errors] [--all]` | Web console of every page since the run started (see Pitfalls) |
@@ -216,7 +216,7 @@ Runs start at 1280x800, 100 %, one monitor. To test layouts and DPI handling:
 - `desk up IMAGE --resolution 1920x1080` (boots cold: the monitor offers that mode),
   `desk display --resolution WxH` switches among the modes it offers.
 - `--scale 150` on `desk up` or `desk display`: Windows applies it by signing in again (a reboot,
-  ~70 s); GNOME at once, fractional scales too. Coordinates from `desk a11y` stay screen pixels.
+  ~70 s; desk checks the session's DPI afterwards); GNOME at once, fractional scales too. Coordinates from `desk a11y` stay screen pixels.
 - `desk up windows-11 --displays 2` (Windows only; boots cold, ~5 min): monitors side by side,
   left to right, top-aligned. Screenshots show them as one picture, and `desk a11y`, `desk click X Y`
   and `desk drag` use the same coordinates, across monitors too. On the primary monitor input
