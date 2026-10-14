@@ -1,9 +1,17 @@
 #!/usr/bin/python3
-# System Python on purpose: the libvirt bindings come from the python3-libvirt RPM.
+# The system's Python on purpose: libvirt's bindings come from the distribution's package.
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from desk.cli import main  # noqa: E402
+try:
+    from desk.cli import main  # noqa: E402
+except ModuleNotFoundError as e:
+    if e.name not in ("libvirt", "libvirt_qemu"):
+        raise
+    # Not even `desk doctor` runs without them.
+    print("desk: Python's libvirt bindings are missing for /usr/bin/python3: sudo pacman -S libvirt-python (Arch) "
+          "or sudo dnf install python3-libvirt (Fedora); then `desk doctor` lists the rest", file=sys.stderr)
+    sys.exit(2)
 
 main()

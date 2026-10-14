@@ -708,6 +708,12 @@ def cmd_maintain(args) -> None:
     sys.exit(0 if maintain.maintain(only=args.only, dry_run=args.dry_run) else 1)
 
 
+def cmd_doctor(args) -> None:
+    from . import doctor
+
+    sys.exit(0 if doctor.run() else 1)
+
+
 def cmd_selftest(args) -> None:
     from .selftest import run_selftest
 
@@ -935,6 +941,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reboot", action="store_true", help="also reboot the guest and check it comes back")
     p.add_argument("--keep", action="store_true", help="keep the run afterwards")
     p.set_defaults(func=cmd_selftest)
+
+    sub.add_parser("doctor", help="what desk needs on this host, what is missing and how to install it; "
+                   "where images and runs are kept").set_defaults(func=cmd_doctor)
 
     p = sub.add_parser("focus", help="bring a window to the front by application or title")
     p.add_argument("query")
