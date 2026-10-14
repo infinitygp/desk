@@ -20,10 +20,18 @@ def request(run, timeout: float = 60, **req) -> dict:
             chunks = []
             while chunk := s.recv(65536):
                 chunks.append(chunk)
+    except TimeoutError as e:
+        # Connected or not, it is there but busy: one request at a time, and a large window's
+        # tree or a program it waits for can take longer than this.
+        raise DeskError(f"the in-session agent did not answer {req.get('cmd')!r} within {timeout:.0f}s; it may still "
+                        "be working on it or on an earlier request") from e
     except OSError as e:
         raise DeskError(f"in-session agent not reachable ({e}); is the desktop session logged in?") from e
     raw = b"".join(chunks).decode("utf-8-sig")
-    out = json.loads(raw) if raw else {"error": "empty reply"}
+    try:
+        out = json.loads(raw) if raw else {"error": "the in-session agent closed the connection without an answer"}
+    except ValueError:
+        raise DeskError(f"the in-session agent's answer was cut off after {len(raw)} characters") from None
     if isinstance(out, dict) and out.get("error"):
         raise DeskError(out["error"])
     return out

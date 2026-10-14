@@ -91,31 +91,46 @@ def connected(r: subprocess.CompletedProcess, what: str) -> subprocess.Completed
     return r
 
 
+def _why(r: subprocess.CompletedProcess | None) -> str:
+    """What the last attempt of a wait said: a refused key, a refused connection and a guest that
+    does not answer are different problems."""
+    if r is None:
+        return "the guest accepted the connection but did not answer"
+    said = (r.stderr or b"").decode(errors="replace").strip().splitlines()
+    return said[-1][-200:] if said else f"exit {r.returncode}"
+
+
 def wait_ssh(port: int, user: str, timeout: float = 180) -> None:
     deadline = time.monotonic() + timeout
+    last = None
     while time.monotonic() < deadline:
         try:
             # `exit 0` means the same in POSIX shells and in PowerShell (Windows guests).
-            if ssh_run(port, user, "exit 0", capture=True, timeout=15).returncode == 0:
+            last = ssh_run(port, user, "exit 0", capture=True, timeout=15)
+            if last.returncode == 0:
                 return
         except subprocess.TimeoutExpired:
-            pass
+            last = None
         time.sleep(2)
-    raise DeskError(f"SSH on port {port} not reachable after {timeout:.0f}s")
+    raise DeskError(f"SSH on port {port} not reachable after {timeout:.0f}s: {_why(last)}")
 
 
 def wait_ready(port: int, user: str, ready: str, timeout: float = 300) -> None:
     deadline = time.monotonic() + timeout
+    last = None
     while time.monotonic() < deadline:
         # While a guest reboots, passt still accepts the connection and SSH then hangs waiting for
         # the banner; a timeout there just means "not yet".
         try:
-            if ssh_run(port, user, ready, capture=True, timeout=20).returncode == 0:
+            last = ssh_run(port, user, ready, capture=True, timeout=20)
+            if last.returncode == 0:
                 return
         except subprocess.TimeoutExpired:
-            pass
+            last = None
         time.sleep(2)
-    raise DeskError(f"guest not ready after {timeout:.0f}s: {ready[:200]}")
+    # 255 is ssh's own failure; anything else is the check answering "not yet".
+    why = _why(last) if last is None or last.returncode == 255 else f"the check still exits {last.returncode}"
+    raise DeskError(f"guest not ready after {timeout:.0f}s ({why}): {ready[:200]}")
 
 
 def scp(port: int, src: str, dst: str) -> int:
