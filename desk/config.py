@@ -7,8 +7,30 @@ from pathlib import Path
 PROJECT = Path(__file__).resolve().parent.parent
 IMAGES_DIR = PROJECT / "images"
 
-HOME = Path(os.environ.get("DESK_HOME", "/var/lib/vmlab"))
-URI = os.environ.get("DESK_URI", "qemu:///session")
+# What differs from host to host lives outside the repository: where images and runs are kept
+# (`home`), which libvirt to use (`uri`). The environment wins over the file.
+CONFIG_FILE = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "desk" / "config.toml"
+
+
+def _local() -> dict:
+    try:
+        with CONFIG_FILE.open("rb") as f:
+            data = tomllib.load(f)
+    except FileNotFoundError:
+        return {}
+    except (OSError, tomllib.TOMLDecodeError) as e:
+        raise SystemExit(f"desk: {CONFIG_FILE}: {e}") from None
+    unknown = set(data) - {"home", "uri"}
+    if unknown or not all(isinstance(v, str) for v in data.values()):
+        raise SystemExit(f"desk: {CONFIG_FILE} takes home = \"/path\" and uri = \"qemu:///session\" "
+                         f"(got {sorted(data)})")
+    return data
+
+
+LOCAL = _local()
+HOME = Path(os.environ.get("DESK_HOME") or LOCAL.get("home")
+            or Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "desk").expanduser()
+URI = os.environ.get("DESK_URI") or LOCAL.get("uri") or "qemu:///session"
 
 BASE = HOME / "base"
 WARM = HOME / "warm"
