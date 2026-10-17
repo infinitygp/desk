@@ -308,7 +308,13 @@ window, similar names on screen and, on GNOME, the overview or a notification ba
 windows: a typo, the wrong window in front or a prompt of the system shows there without a
 screenshot. `desk scenario run FILE --keep` writes the report and leaves the run running
 (it prints the `DESK_RUN` to use) to go on by hand from where the scenario stopped; `desk down` it
-afterwards (left alone, it is destroyed after 2 h idle). A `type` step refuses, like `desk type`,
+afterwards (left alone, it is destroyed after 2 h idle). While writing a scenario, fix the failed
+step in the file and try it again in that run with `desk -r ID scenario run FILE --from N`: steps
+N.. only, no build and no new run, seconds instead of the whole scenario; the run stays, and its
+report (`desk down`) counts each step's last attempt. Finish with one whole run from the start,
+which is what the scenario has to pass. `scenario check` and `run` warn about fixed waits
+(`wait = 2`, `sleep` in a command): they fail on a busy host and waste time on an idle one, so
+`expect` what should appear, or repeat a check with `until = true`. A `type` step refuses, like `desk type`,
 when a browser's focus is not in a text field; `anywhere = true` types anyway (page shortcuts).
 If the run itself cannot start, `desk` exits 2 and names a screenshot of what the screen showed
 then (`runs/<id>/failed-start.png`).

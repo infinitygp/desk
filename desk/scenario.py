@@ -3,6 +3,7 @@ host, starts a run and drives it step by step with the same real input as the de
 The result is an exit code and the usual report, with the steps in its timeline."""
 
 import glob
+import re
 import shlex
 import subprocess
 import time
@@ -159,6 +160,21 @@ def _checked(path: Path, where: str, parse, *args) -> None:
         raise DeskError(f"{path}: {where}: {e}") from None
 
 
+def fixed_waits(data: dict) -> list[str]:
+    """Steps that wait a fixed time: too short on a busy host, wasted time on an idle one."""
+    found = []
+    for i, step in enumerate(data.get("step", []), 1):
+        if "wait" in step and step["wait"] is not True:
+            found.append(f"step {i}: wait = {step['wait']} waits a fixed time; expect what should appear "
+                         "(or wait = true for a still screen)")
+        for key in ("exec", "root"):
+            command = step.get(key)
+            if isinstance(command, str) and re.search(r"\bsleep\s+[\d.]", command) and not step.get("until"):
+                found.append(f"step {i}: sleep in {key}; until = true (with rc or output) repeats the "
+                             "check until it holds")
+    return found
+
+
 def describe(step: dict) -> tuple[str, str]:
     action = next(k for k in step if k in ACTIONS)
     value = step[action]
@@ -311,6 +327,7 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
 def run_scenario(path: Path, keep: bool = False, image: str | None = None) -> bool:
     data = load(path)
     spec = load_image(image or data["image"])
+    _warn(data)
     artifacts = _build(data, _repo(path))
     agent, _ = runs.agent_process()
     run = runs.up(spec, label=f"scenario {_repo(path).name}/{path.name}" + (f" ({agent})" if agent else ""))
@@ -329,34 +346,7 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None) -> bo
                     raise DeskError(f"copying {f.name} to the guest failed")
         for d in data.get("disks", []):
             disks.add(run, *disks.parse(d))
-        steps = Steps(spec, run)
-        for i, step in enumerate(data.get("step", []), 1):
-            action, arg = describe(step)
-            label = step.get("name") or f"{action} {arg}".strip()
-            t0 = time.monotonic()
-            try:
-                detail = _step(run, spec, steps, step)
-                passed = True
-            except (StepFailed, DeskError, subprocess.TimeoutExpired) as e:
-                detail, passed = str(e), False
-            run.log_event(step=i, action=label, ok=passed, detail=detail, seconds=round(time.monotonic() - t0, 1))
-            first, *rest = detail.splitlines() or [""]
-            print(f"{'PASS' if passed else 'FAIL'}  {i:>2}. {label[:60]:<60} {time.monotonic() - t0:5.1f}s  "
-                  f"{first[:100]}", flush=True)
-            if not passed and rest:
-                # A command's error is usually at the end of its output.
-                print("\n".join(f"        {line}" for line in rest), flush=True)
-            if not passed:
-                ok = False
-                try:
-                    shot = run.next_shot_path(f"failed-step-{i}")
-                    shot.write_bytes(display.screenshot(run.dom()))
-                    run.log_event(shot=str(shot))
-                except DeskError:
-                    pass  # the VM itself is gone; the report says so
-                # soft: an independent check whose failure should not hide the ones after it.
-                if not step.get("soft"):
-                    break
+        ok = _run_steps(run, spec, data)
     finally:
         report, videos = evidence.finish(run, keep=keep, running=keep)
         if report:
@@ -366,5 +356,65 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None) -> bo
     print("scenario passed" if ok else "scenario FAILED")
     if keep and run.live_domain() is not None:
         print(f"run {run.id} left running: export DESK_RUN={run.id} (fish: set -x DESK_RUN {run.id}); "
-              f"desk down {run.id} when done")
+              f"desk down {run.id} when done; desk scenario run FILE --from N goes on in it")
+    return ok
+
+
+def continue_scenario(path: Path, run, first: int, image: str | None = None) -> bool:
+    """Steps `first`.. of the file in a run that is already there (left by --keep): no build, no
+    new run. While a scenario is being written, a fixed step is tried again without the ones before
+    it; the run stays, and its report (desk down) counts each step's last attempt."""
+    data = load(path)
+    spec = load_image(image or data["image"])
+    if run.image != spec.name:
+        raise DeskError(f"run {run.id} is of {run.image}, the scenario of {spec.name}")
+    total = len(data.get("step", []))
+    if not 1 <= first <= total:
+        raise DeskError(f"--from {first}: the scenario has steps 1 to {total}")
+    _warn(data)
+    run.log_event(scenario=str(path.resolve()), steps=total, first=first)
+    ok = _run_steps(run, spec, data, first)
+    print(f"steps {first}-{total} passed" if ok else "scenario FAILED")
+    print(f"run {run.id} still running: desk down {run.id} writes the report")
+    return ok
+
+
+def _warn(data: dict) -> None:
+    for w in fixed_waits(data):
+        print(f"warning: {w}", flush=True)
+
+
+def _run_steps(run, spec, data: dict, first: int = 1) -> bool:
+    """Steps `first`.. in order, stopping at the first failure that is not soft; whether all passed."""
+    ok = True
+    steps = Steps(spec, run)
+    for i, step in enumerate(data.get("step", []), 1):
+        if i < first:
+            continue
+        action, arg = describe(step)
+        label = step.get("name") or f"{action} {arg}".strip()
+        t0 = time.monotonic()
+        try:
+            detail = _step(run, spec, steps, step)
+            passed = True
+        except (StepFailed, DeskError, subprocess.TimeoutExpired) as e:
+            detail, passed = str(e), False
+        run.log_event(step=i, action=label, ok=passed, detail=detail, seconds=round(time.monotonic() - t0, 1))
+        head, *rest = detail.splitlines() or [""]
+        print(f"{'PASS' if passed else 'FAIL'}  {i:>2}. {label[:60]:<60} {time.monotonic() - t0:5.1f}s  "
+              f"{head[:100]}", flush=True)
+        if not passed and rest:
+            # A command's error is usually at the end of its output.
+            print("\n".join(f"        {line}" for line in rest), flush=True)
+        if not passed:
+            ok = False
+            try:
+                shot = run.next_shot_path(f"failed-step-{i}")
+                shot.write_bytes(display.screenshot(run.dom()))
+                run.log_event(shot=str(shot))
+            except DeskError:
+                pass  # the VM itself is gone; the report says so
+            # soft: an independent check whose failure should not hide the ones after it.
+            if not step.get("soft"):
+                break
     return ok

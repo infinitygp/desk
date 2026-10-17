@@ -409,13 +409,16 @@ def collect(run, diff: bool = False) -> Path:
     events = _log(run)
     # Scenario steps; `desk clock --step` logged its step size as "step" before it had a name of its own.
     stepped = [ev for ev in events if "step" in ev and "ok" in ev]
-    scenario = next((ev for ev in events if "scenario" in ev), None)
+    # The latest start: `scenario run --from N` goes on in the same run, maybe with a changed file.
+    scenario = next((ev for ev in reversed(events) if "scenario" in ev), None)
     if scenario:
-        failed = [ev for ev in stepped if not ev["ok"]]
-        total = scenario.get("steps", len(stepped))
+        # Each step's last attempt; the timeline below keeps every one.
+        last = sorted({ev["step"]: ev for ev in stepped}.values(), key=lambda ev: ev["step"])
+        failed = [ev for ev in last if not ev["ok"]]
+        total = scenario.get("steps", len(last))
         md += ["## Scenario", "", f"- file: `{scenario['scenario']}`",
-               f"- result: {'FAILED' if failed or len(stepped) < total else 'passed'}, "
-               f"{len(stepped) - len(failed)} of {total} steps passed"]
+               f"- result: {'FAILED' if failed or len(last) < total else 'passed'}, "
+               f"{len(last) - len(failed)} of {total} steps passed"]
         for ev in failed:
             first, _, rest = ev["detail"].partition("\n")
             md.append(f"- failed at step {ev['step']} ({ev['action']}): {first}"

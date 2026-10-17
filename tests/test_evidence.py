@@ -127,6 +127,36 @@ class Report(unittest.TestCase):
         self.assertIn("clock +3d in steps of 1d", md)
         self.assertIn("clock +1d in steps of 6h", md)
 
+    def test_scenario_continued_with_from_counts_each_steps_last_attempt(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+
+        from desk import evidence
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            run_dir.mkdir()
+            events = [
+                {"t": 100.0, "scenario": "/x/a.toml", "steps": 3},
+                {"t": 101.0, "step": 1, "action": "gui app", "ok": True, "detail": "", "seconds": 1.0},
+                {"t": 102.0, "step": 2, "action": "click Sav", "ok": False, "detail": "element 'Sav' did not appear",
+                 "seconds": 1.0},
+                # desk scenario run a.toml --from 2, after fixing the step
+                {"t": 110.0, "scenario": "/x/a.toml", "steps": 3, "first": 2},
+                {"t": 111.0, "step": 2, "action": "click Save", "ok": True, "detail": "", "seconds": 1.0},
+                {"t": 112.0, "step": 3, "action": "expect Saved", "ok": True, "detail": "", "seconds": 1.0},
+            ]
+            (run_dir / "log.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
+            run = mock.Mock(id="r1", dir=run_dir, image="fedora-44-gnome", created=99.0, ready=0.0)
+            run.live_domain.return_value = None
+            with mock.patch.object(evidence, "REPORTS", Path(tmp) / "reports"):
+                md = (evidence.collect(run) / "report.md").read_text()
+        self.assertIn("result: passed, 3 of 3 steps passed", md)
+        self.assertNotIn("failed at step", md)
+        self.assertIn("step 2 FAILED", md)  # the timeline keeps the first attempt
+
 
 class StepLabels(unittest.TestCase):
     def test_messages_go_to_the_step_running_then(self):

@@ -144,6 +144,14 @@ console_errors = 0
         self.assertEqual(scenario.tail(out).splitlines(), [f"line {i}" for i in range(25, 40)])
 
 
+class FixedWaits(unittest.TestCase):
+    def test_flags_fixed_waits_but_not_polling(self):
+        data = {"step": [{"wait": 2}, {"wait": True}, {"exec": "sleep 1; pgrep -x app"},
+                         {"exec": "sleep 1; test -f x", "until": True}, {"root": "systemctl start x"}]}
+        found = scenario.fixed_waits(data)
+        self.assertEqual([w.split(":")[0] for w in found], ["step 1", "step 3"])
+
+
 class SplitWindows(unittest.TestCase):
     def test_paths_keep_their_backslashes(self):
         self.assertEqual(scenario.split_windows(r'C:\desk\app.exe --dir C:\Users\tester'),

@@ -212,7 +212,8 @@ whose focus is not in a text field is refused. Walks of the tree stop after 20 s
 `desk scenario run FILE` runs a repeatable end-to-end test described in TOML (format in
 `skill/SKILL.md`): build on the host, copy the artifacts in, start a run, steps with the same real
 input as the CLI (`desk/steps.py`), report with the steps in its timeline, exit code 0/1.
-Projects keep theirs in `test/desk/`.
+Projects keep theirs in `test/desk/`. `--from N` runs steps N.. in a run left by `--keep`, for
+trying a fixed step again without the ones before it.
 
 ## Watching
 

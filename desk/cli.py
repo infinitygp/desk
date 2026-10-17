@@ -580,7 +580,12 @@ def cmd_scenario(args) -> None:
         for i, step in enumerate(data.get("step", []), 1):
             action, arg = scenario.describe(step)
             print(f"  {i:>2}. {step.get('name') or (action + ' ' + arg).strip()}")
+        for w in scenario.fixed_waits(data):
+            print(f"warning: {w}")
         return
+    if args.from_step:
+        run = runs.resolve(args.run)
+        sys.exit(0 if scenario.continue_scenario(path, run, args.from_step, image=args.image) else 1)
     sys.exit(0 if scenario.run_scenario(path, keep=args.keep, image=args.image) else 1)
 
 
@@ -991,6 +996,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--keep", action="store_true",
                    help="leave the run running afterwards (report written), to go on testing by hand")
     p.add_argument("--image", help="another image than the file names")
+    p.add_argument("--from", dest="from_step", type=int, metavar="N",
+                   help="run steps N.. in the run already there (-r / $DESK_RUN, e.g. left by --keep): "
+                        "no build, no new run; it stays running")
     p.set_defaults(func=cmd_scenario)
 
     p = sub.add_parser("display", help="show or change the run's monitors: resolution, scaling")
