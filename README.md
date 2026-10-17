@@ -235,7 +235,8 @@ encodes them with GStreamer to WebM (VP9) with the wall-clock time in a bar belo
 and `desk down` copies the videos next to the report.
 
 Provisioning (`provision.sh`, `files/`) runs before the warm state is saved and after cold
-boots; it installs the shell extension, the Polish (programmer's) layout and a11y settings.
+boots; it installs the shell extension, the Polish (programmer's) layout and a11y settings, and
+masks GNOME Software, whose banners and prompts came up over the app under test at random.
 
 ## Checks
 

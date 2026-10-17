@@ -423,7 +423,10 @@ desk forward 80                               # LuCI: http://127.0.0.1:PORT/, lo
   real machine (`desk exec --root` does not need it), 1280x800, en_US locale (pl_PL in the -pl
   variant), Polish (programmer's)
   keyboard layout = US plus AltGr letters,
-  animations and screen lock off, session starts on the desktop rather than the overview.
+  animations, screen lock and the hot corner off, session starts on the desktop rather than the
+  overview. GNOME Software is masked, so no update banners or prompts cover the app under test
+  and the overview's search does not list it; to test something about Software itself:
+  `desk exec --root -- systemctl --global unmask gnome-software.service`, then `desk reboot`.
 - Guest clocks are synced on restore; network goes through user-mode networking (outbound
   works, inbound only SSH; `desk forward PORT` makes a guest service reachable from the host).
 - Several runs can exist at once; pass `-r ID` or set `DESK_RUN`. `desk ls` shows who holds each:

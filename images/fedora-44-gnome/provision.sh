@@ -13,10 +13,16 @@ install -D -m 0644 "$FILES"/desk-firefox.js /usr/lib64/firefox/browser/defaults/
 install -D -m 0644 "$FILES"/desk-autoconfig.js /usr/lib64/firefox/defaults/pref/desk-autoconfig.js
 install -D -m 0644 "$FILES"/desk.cfg /usr/lib64/firefox/desk.cfg
 
-# A blinking text cursor would keep the screen from ever settling.
+# A blinking text cursor would keep the screen from ever settling. A pointer passing the top
+# left corner would open the overview over the app under test. GNOME Software is off (below),
+# so the overview's search must not ask it.
 cat > /etc/dconf/db/local.d/01-desk-provision <<'CONF'
 [org/gnome/desktop/interface]
 cursor-blink=false
+enable-hot-corners=false
+
+[org/gnome/desktop/search-providers]
+disabled=['org.gnome.Software.desktop']
 
 [org/gnome/shell]
 enabled-extensions=['desk-helper@desk.local']
@@ -27,7 +33,7 @@ dconf update
 # Polish text with real key presses while every US key stays where it was. GNOME copied
 # the layout into the user's settings at first login, so set it there as well.
 localectl set-x11-keymap pl
-as_tester() { runuser -u tester -- env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus "$@"; }
+as_tester() { runuser -u tester -- env XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus "$@"; }
 as_tester gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'pl')]"
 
 # The accessibility tree (`desk a11y`). GTK4 exposes it regardless; Gecko, Chromium/Electron
@@ -49,12 +55,13 @@ if systemctl cat mcelog.service >/dev/null 2>&1; then
 fi
 systemctl reset-failed
 
-# GNOME Software's update notifications pop up at random moments over the app under test.
-install -d -o tester -g tester /home/tester/.config/autostart
-printf '[Desktop Entry]\nType=Application\nName=GNOME Software\nHidden=true\n' \
-    > /home/tester/.config/autostart/org.gnome.Software.desktop
-chown tester:tester /home/tester/.config/autostart/org.gnome.Software.desktop
-pkill -u tester -f '[g]nome-software --gapplication-service' || true
+# GNOME Software's update banners and prompts pop up at random moments over the app under test.
+# GNOME 50 starts it as a user service of every session (gnome-session-services.target) and on
+# D-Bus activation; masking stops both. Stopped now too: this session already runs it.
+systemctl --global mask gnome-software.service
+as_tester systemctl --user daemon-reload
+as_tester systemctl --user stop gnome-software.service || true
+if pgrep -x gnome-software; then echo "gnome-software still runs" >&2; exit 1; fi
 
 # `desk reboot` reboots even when apps with unsaved work block shutdown (and reports them);
 # logind only lets root override that with this rule, shipped by systemd as an example.

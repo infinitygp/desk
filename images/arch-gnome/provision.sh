@@ -13,7 +13,9 @@ install -D -m 0644 "$FILES"/desk-firefox.js /usr/lib/firefox/browser/defaults/pr
 install -D -m 0644 "$FILES"/desk-autoconfig.js /usr/lib/firefox/defaults/pref/desk-autoconfig.js
 install -D -m 0644 "$FILES"/desk.cfg /usr/lib/firefox/desk.cfg
 
-# Stable screen for screenshots: no lock, blanking, animations or blinking cursor.
+# Stable screen for screenshots: no lock, blanking, animations or blinking cursor, and no
+# overview opened by a pointer passing the top left corner. GNOME Software is off (below),
+# so the overview's search must not ask it.
 mkdir -p /etc/dconf/db/local.d /etc/dconf/profile
 [ -f /etc/dconf/profile/user ] || printf 'user-db:user\nsystem-db:local\n' > /etc/dconf/profile/user
 grep -q '^system-db:local$' /etc/dconf/profile/user || echo 'system-db:local' >> /etc/dconf/profile/user
@@ -31,7 +33,11 @@ disable-lock-screen=true
 [org/gnome/desktop/interface]
 enable-animations=false
 cursor-blink=false
+enable-hot-corners=false
 toolkit-accessibility=true
+
+[org/gnome/desktop/search-providers]
+disabled=['org.gnome.Software.desktop']
 
 [org/gnome/settings-daemon/plugins/power]
 sleep-inactive-ac-type='nothing'
@@ -50,7 +56,7 @@ dconf update
 # that Gecko, Chromium and Qt look for. GNOME copied defaults into the user's settings at first
 # login, so set them there as well.
 localectl set-x11-keymap pl
-as_tester() { runuser -u tester -- env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus "$@"; }
+as_tester() { runuser -u tester -- env XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus "$@"; }
 as_tester gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'pl')]"
 as_tester gsettings set org.gnome.desktop.interface toolkit-accessibility true
 install -d -o tester -g tester /home/tester/.config /home/tester/.config/environment.d
@@ -59,11 +65,15 @@ GNOME_ACCESSIBILITY=1
 QT_LINUX_ACCESSIBILITY_ALWAYS_ON=1
 QT_ACCESSIBILITY=1
 CONF
-# GNOME Software's update notifications pop up at random moments over the app under test.
-install -d /home/tester/.config/autostart
-printf '[Desktop Entry]\nType=Application\nName=GNOME Software\nHidden=true\n' \
-    > /home/tester/.config/autostart/org.gnome.Software.desktop
 chown -R tester:tester /home/tester/.config
+
+# GNOME Software's update banners and prompts pop up at random moments over the app under test.
+# GNOME 50 starts it as a user service of every session (gnome-session-services.target) and on
+# D-Bus activation; masking stops both. Stopped now too: this session already runs it.
+systemctl --global mask gnome-software.service
+as_tester systemctl --user daemon-reload
+as_tester systemctl --user stop gnome-software.service || true
+if pgrep -x gnome-software; then echo "gnome-software still runs" >&2; exit 1; fi
 
 # `desk reboot` reboots even when apps with unsaved work block shutdown (and reports them).
 cat > /etc/polkit-1/rules.d/10-desk-root-ignore-inhibitors.rules <<'RULE'
