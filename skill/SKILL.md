@@ -442,9 +442,12 @@ desk forward 80                               # LuCI: http://127.0.0.1:PORT/, lo
   the scenario, `desk up --label TEXT` (or `$DESK_LABEL`), or by default the coding agent and its
   directory ("claude @ cockpit-example", "(agent gone)" once it has exited). Leave other agents'
   runs alone. Only one run per image is restored from the warm state (~2 s); further ones boot
-  cold (~25 s) from the same disk, so they start with the same files, only without the uptime. Each takes ~4 GB RAM;
-  `desk up` refuses when the host is short of memory. Runs idle for 2 h are destroyed by the
-  next `desk up` or `desk gc` (`DESK_TTL` seconds to change), their report written first.
+  cold (~25 s) from the same disk, so they start with the same files, only without the uptime.
+  Each takes ~4 GB RAM; when the host is short of memory (too little available, or already
+  swapping hard) `desk up` waits up to 10 min for other runs to end, then gives up; scenarios
+  started in parallel wait in line that way instead of slowing each other down. Runs idle for 2 h
+  are destroyed by the next `desk up` or `desk gc` (`DESK_TTL` seconds to change), their report
+  written first.
 - The image is a clean Workstation install: anything the product needs beyond its declared
   dependencies is missing there, exactly as on a user's machine. Report that rather than
   silently installing it; install it afterwards only to continue the test.

@@ -23,6 +23,12 @@ from .virt import (conn, domain_uuid, free_port, lookup, prepare_domain_xml, qem
 IDLE_TTL = int(os.environ.get("DESK_TTL", 2 * 3600))
 # Head room left for the host when deciding whether another VM fits.
 HOST_RESERVE_MIB = 1024
+# Share of the last minute in which every task waited for memory (PSI "full avg60") from which
+# the host counts as short of memory whatever MemAvailable says: it is swapping, and another VM
+# would stall the guests' timing (seen at 5 % with swap full and four VMs).
+THRASH_PERCENT = 5.0
+# How long `desk up` waits for other runs to give memory back before it gives up.
+MEMORY_WAIT = 600
 
 
 # How long a command waits for another one's lock before it gives up and names the holder. The
@@ -270,14 +276,27 @@ def _promised_mib() -> int:
     return promised
 
 
+def _memory_stall_percent() -> float:
+    """PSI "full avg60" of memory, 0 where the kernel has no PSI."""
+    try:
+        for line in Path("/proc/pressure/memory").read_text().splitlines():
+            if line.startswith("full "):
+                return float(dict(kv.split("=") for kv in line.split()[1:])["avg60"])
+    except (OSError, KeyError, ValueError):
+        pass
+    return 0.0
+
+
 def check_memory(spec: ImageSpec) -> None:
     need = spec.memory_mib + HOST_RESERVE_MIB
     avail = _mem_available_mib() - _promised_mib()
-    if avail < need:
+    stall = _memory_stall_percent()
+    if avail < need or stall >= THRASH_PERCENT:
         running = [r.id for r in all_runs() if r.live_domain() is not None]
         hint = f"; running desk VMs: {', '.join(running)}" if running else ""
-        raise DeskError(f"not enough free memory for {spec.name}: {avail} MiB available, "
-                        f"{need} MiB needed{hint} (desk down <id>, or --force)")
+        why = (f"{avail} MiB available, {need} MiB needed" if avail < need else
+               f"the host is swapping: all tasks waited for memory {stall:.0f} % of the last minute")
+        raise DeskError(f"not enough free memory for {spec.name}: {why}{hint} (desk down <id>, or --force)")
 
 
 def warm_meta(spec: ImageSpec) -> dict:
@@ -487,12 +506,27 @@ def up(spec: ImageSpec, run_id: str | None = None, cold: bool = False, force: bo
     for warning in check_usable(spec):
         print(f"[desk] warning: {warning}", file=sys.stderr)
     gc_idle()
-    with ExitStack() as lock:
-        lock.enter_context(state_lock())
-        gc()
-        if not force:
-            check_memory(spec)
-        return _up(spec, run_id, cold, displays, resolution, label, started=lock.close)
+    # Short of memory, wait in line for other runs to end (parallel scenarios) rather than fail;
+    # the lock is let go meanwhile, as ending a run needs it too.
+    deadline = time.monotonic() + MEMORY_WAIT
+    waiting = False
+    while True:
+        with ExitStack() as lock:
+            lock.enter_context(state_lock())
+            gc()
+            try:
+                if not force:
+                    check_memory(spec)
+            except DeskError as e:
+                if time.monotonic() > deadline:
+                    raise
+                if not waiting:
+                    print(f"[desk] {e}; waiting up to {MEMORY_WAIT // 60} min for other runs to end",
+                          file=sys.stderr, flush=True)
+                    waiting = True
+            else:
+                return _up(spec, run_id, cold, displays, resolution, label, started=lock.close)
+        time.sleep(15)
 
 
 def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
