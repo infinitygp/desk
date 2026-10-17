@@ -37,6 +37,10 @@ export default class DeskHelper extends Extension {
                 Main.layoutManager.disconnect(this._startupId);
                 this._startupId = 0;
             });
+        } else {
+            // GNOME 51 loads extensions asynchronously, now and then only after startup-complete,
+            // with the login's overview already open (a fedora-45-gnome warm state kept it).
+            Main.overview.hide();
         }
     }
 
