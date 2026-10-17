@@ -16,4 +16,5 @@ desktop = false
 user = "root"
 ready = "ubus call network.interface.lan status | grep -q '\"up\": true'"
 reboot = "reboot"
+poweroff = "poweroff"
 provision = "provision.sh"

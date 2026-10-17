@@ -111,6 +111,8 @@ def warm_reasons(spec: ImageSpec) -> list[str]:
         reasons.append("base build changed")
     if meta.get("fingerprint") != images.warm_fingerprint(spec):
         reasons.append("image definition changed")
+    if not (cur / images.PROVISIONED).exists():
+        reasons.append("no provisioned disk for cold runs")
     return reasons
 
 

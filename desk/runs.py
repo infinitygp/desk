@@ -544,8 +544,11 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
     disk, nvram = rd / "disk.qcow2", rd / "VARS.qcow2"
     try:
         if cold:
-            qemu_img_overlay(base_dir / "disk.qcow2", disk)
-            reflink_copy(base_dir / "VARS.qcow2", nvram)
+            # The provisioned disk of a current warm build spares provisioning and a relogin, and
+            # gives cold runs the files warm ones start from.
+            fresh = not ((warm_dir / images.PROVISIONED).exists() and warm_is_current(spec))
+            qemu_img_overlay(base_dir / "disk.qcow2" if fresh else warm_dir / images.PROVISIONED, disk)
+            reflink_copy((base_dir if fresh else warm_dir) / "VARS.qcow2", nvram)
             template = (base_dir / "domain.xml").read_text()
         else:
             qemu_img_overlay(warm_dir / "disk.qcow2", disk)
@@ -570,7 +573,8 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
         guest.wait_ssh(run.ssh_port, run.user, timeout=300 if cold else 60)
         if cold:
             guest.wait_ready(run.ssh_port, run.user, spec.cmd(spec.ready))
-            images.provision(spec, run.ssh_port)
+            if fresh:
+                images.provision(spec, run.ssh_port)
             from . import steps
 
             steps.run_prepare(spec, run)

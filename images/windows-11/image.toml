@@ -26,6 +26,8 @@ agent_port = 47011
 ready = "try { (New-Object Net.Sockets.TcpClient).Connect('127.0.0.1', 47011); exit 0 } catch { exit 1 }"
 sync = "Write-VolumeCache -DriveLetter C"
 reboot = "shutdown.exe /r /t 0 /f"
+# A full shutdown: without /hybrid, the next boot does not resume a hibernated kernel.
+poweroff = "shutdown.exe /s /t 0 /f"
 boot_id = "(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToFileTimeUtc()"
 layout = "pl"
 provision = "provision.ps1"

@@ -513,9 +513,12 @@ def _finalize(spec: ImageSpec, name: str) -> None:
 
 # A provisioning script that runs longer than this is taken to hang.
 PROVISION_TIMEOUT = 3600
+# In a warm build: the disk as provisioning left it after a clean shutdown. The warm state boots
+# it once more; cold runs boot it too, so both start from the same files (runs.up).
+PROVISIONED = "provisioned.qcow2"
 
 
-def provision(spec: ImageSpec, port: int) -> None:
+def provision(spec: ImageSpec, port: int, relogin: bool = True) -> None:
     if not spec.provision_scripts:
         return
     if spec.files and spec.family == "windows":
@@ -563,7 +566,7 @@ def provision(spec: ImageSpec, port: int) -> None:
             guest.wait_ssh(port, spec.user, timeout=300)
         if r.returncode != 0:
             raise DeskError(f"{script} failed ({r.returncode}): {r.stderr.decode(errors='replace')}")
-    if spec.relogin:
+    if relogin and spec.relogin:
         # GDM now and then does not log in automatically after a restart (seen on Ubuntu 26.04,
         # one warm-up in four), so give it a second restart before failing.
         # Windows relogs by rebooting, which takes minutes on a fresh install; a second reboot
@@ -582,6 +585,22 @@ def provision(spec: ImageSpec, port: int) -> None:
                 if attempt == 2:
                     raise
                 _log("session did not come back after relogin, restarting the display manager again")
+
+
+def _power_off(dom, spec: ImageSpec, port: int, timeout: float = 600) -> None:
+    try:
+        guest.ssh_run(port, spec.root_user, spec.cmd(spec.poweroff), capture=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        pass  # the shutdown took the connection down with it
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            if not dom.isActive():
+                return
+        except libvirt.libvirtError:
+            return  # a transient domain is gone once it has shut down
+        time.sleep(2)
+    raise DeskError(f"the guest did not power off within {timeout:.0f}s after provisioning")
 
 
 def _boot_and_wait_ssh(dom, port: int, spec: ImageSpec, wd: Path, timeout: float = 300) -> bool:
@@ -603,8 +622,8 @@ def _boot_and_wait_ssh(dom, port: int, spec: ImageSpec, wd: Path, timeout: float
 
 
 def warm(spec: ImageSpec, force: bool = False, promote_it: bool = True) -> str:
-    """Boot the base image, provision it and save the running, logged-in desktop as a new warm
-    build; returns its version."""
+    """Boot the base image, provision it and shut it down (the disk cold runs boot), boot that
+    disk and save the running, logged-in desktop as a new warm build; returns its version."""
     if not spec.base_xml.exists():
         raise DeskError(f"base image {spec.name} not built yet (desk image build {spec.name})")
     link = WARM / spec.name
@@ -615,8 +634,8 @@ def warm(spec: ImageSpec, force: bool = False, promote_it: bool = True) -> str:
     wd = vspec.warm_dir
     wd.mkdir(parents=True)
 
-    disk, nvram = wd / "disk.qcow2", wd / "VARS.qcow2"
-    qemu_img_overlay(base_dir / "disk.qcow2", disk)
+    disk, nvram, provisioned = wd / "disk.qcow2", wd / "VARS.qcow2", wd / PROVISIONED
+    qemu_img_overlay(base_dir / "disk.qcow2", provisioned)
     reflink_copy(base_dir / "VARS.qcow2", nvram)
     nvram.chmod(0o644)
     port = free_port()
@@ -624,14 +643,16 @@ def warm(spec: ImageSpec, force: bool = False, promote_it: bool = True) -> str:
     # Runs restored from this state inherit the name; the version keeps it apart from the
     # previous build's runs while a new build is tested.
     name = f"desk-warm-{spec.name}-{vspec.warm_version}"
-    xml = prepare_domain_xml(
-        (base_dir / "domain.xml").read_text(), name=name, disk=disk, nvram=nvram, ssh_port=port,
-        console_log=wd / "console.log",
-        agent_ports=agent_ports, sound=spec.sound,
-    )
-    _log(f"booting {name}")
-    dom = conn().createXML(xml, 0)
-    try:
+
+    def boot(on: Path) -> None:
+        nonlocal dom
+        xml = prepare_domain_xml(
+            (base_dir / "domain.xml").read_text(), name=name, disk=on, nvram=nvram, ssh_port=port,
+            console_log=wd / "console.log",
+            agent_ports=agent_ports, sound=spec.sound,
+        )
+        _log(f"booting {name} from {on.name}")
+        dom = conn().createXML(xml, 0)
         if not _boot_and_wait_ssh(dom, port, spec, wd):
             # QEMU itself may die under the guest (it segfaulted in its AHCI emulation while
             # Windows was on a SATA disk); one more attempt is cheap.
@@ -640,7 +661,17 @@ def warm(spec: ImageSpec, force: bool = False, promote_it: bool = True) -> str:
             if not _boot_and_wait_ssh(dom, port, spec, wd):
                 raise DeskError(f"the guest went away while booting twice; last screen: {wd / 'last-boot.png'}")
         guest.wait_ready(port, spec.user, spec.cmd(spec.ready))
-        provision(spec, port)
+
+    dom = None
+    try:
+        boot(provisioned)
+        # A clean shutdown instead of a relogin: the next boot starts its session with
+        # everything provisioning installed, the way a cold run does.
+        provision(spec, port, relogin=False)
+        _power_off(dom, spec, port)
+        provisioned.chmod(0o444)
+        qemu_img_overlay(provisioned, disk)
+        boot(disk)
         if spec.prepare:
             _log(f"preparing the session ({spec.prepare})")
             steps.run_prepare(spec, steps.Target(id=name, dir=wd, ssh_port=port, user=spec.user,
@@ -664,7 +695,7 @@ def warm(spec: ImageSpec, force: bool = False, promote_it: bool = True) -> str:
         # Best effort only: the original error is what matters, and the domain may be gone
         # already (a guest that powered itself off takes its transient domain with it).
         try:
-            if dom.isActive():
+            if dom is not None and dom.isActive():
                 # What the screen showed is usually the quickest explanation of a failed warm-up.
                 (wd / "failed.png").write_bytes(display.screenshot(dom))
                 _log(f"screen at failure: {wd / 'failed.png'}")

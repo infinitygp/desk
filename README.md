@@ -9,7 +9,8 @@ mouse/keyboard input, for testing desktop apps and system packages end to end.
 - In band: SSH as the desktop user, qemu-guest-agent as root.
 - Accessibility tree (AT-SPI) with refs that map to screen pixels; a GNOME Shell extension in
   the image supplies window positions, which AT-SPI on Wayland does not know.
-- Golden image -> warm state (saved RAM of a logged-in desktop) -> per-run qcow2 overlay.
+- Golden image -> provisioned disk -> warm state (saved RAM of a logged-in desktop) -> per-run
+  qcow2 overlay.
   `desk up` restores in seconds, `desk down` discards everything.
 
 Agent instructions: [skill/SKILL.md](skill/SKILL.md).
@@ -93,7 +94,7 @@ router services listen.
 
 ```bash
 bin/desk image build fedora-44-gnome   # unattended install, ~10 min, needs network
-bin/desk image warm fedora-44-gnome    # boot, provision, save the running desktop
+bin/desk image warm fedora-44-gnome    # boot, provision, shut down, boot again, save the desktop
 bin/desk image shot windows-11         # look at a graphical installer while it runs
 bin/desk image list                    # state, build date, last selftest, licence, problems
 ```
@@ -234,8 +235,11 @@ background process; unchanged frames are hard links, so a still screen costs not
 encodes them with GStreamer to WebM (VP9) with the wall-clock time in a bar below the picture,
 and `desk down` copies the videos next to the report.
 
-Provisioning (`provision.sh`, `files/`) runs before the warm state is saved and after cold
-boots; it installs the shell extension, the Polish (programmer's) layout and a11y settings, and
+Provisioning (`provision.sh`, `files/`) runs in the warm-up's first boot, which then shuts down
+cleanly: that disk (`provisioned.qcow2` in the warm build) is what the warm state boots before it
+is saved, and what cold runs boot, so both start from the same files and cold runs skip
+provisioning and the relogin (with no current warm build they boot the base disk and provision
+it). It installs the shell extension, the Polish (programmer's) layout and a11y settings, and
 masks GNOME Software, whose banners and prompts came up over the app under test at random.
 
 ## Checks

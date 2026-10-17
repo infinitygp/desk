@@ -433,7 +433,7 @@ desk forward 80                               # LuCI: http://127.0.0.1:PORT/, lo
   the scenario, `desk up --label TEXT` (or `$DESK_LABEL`), or by default the coding agent and its
   directory ("claude @ cockpit-example", "(agent gone)" once it has exited). Leave other agents'
   runs alone. Only one run per image is restored from the warm state (~2 s); further ones boot
-  cold (~20 s). Each takes ~4 GB RAM;
+  cold (~25 s) from the same disk, so they start with the same files, only without the uptime. Each takes ~4 GB RAM;
   `desk up` refuses when the host is short of memory. Runs idle for 2 h are destroyed by the
   next `desk up` or `desk gc` (`DESK_TTL` seconds to change), their report written first.
 - The image is a clean Workstation install: anything the product needs beyond its declared

@@ -150,6 +150,8 @@ class ImageSpec:
     # Run before saving the warm state; returns once the guest has settled down.
     idle: str | None = None
     reboot: str = "systemctl reboot --check-inhibitors=no"
+    # Ends the warm-up's first boot, after provisioning, with a clean shutdown.
+    poweroff: str = "systemctl poweroff --check-inhibitors=no"
     boot_id: str = "cat /proc/sys/kernel/random/boot_id"
     # `desk maintain` reinstalls the image once its base is this many days old (none: only when
     # its definition changes).

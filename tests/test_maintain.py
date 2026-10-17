@@ -103,6 +103,9 @@ class Due(unittest.TestCase):
         warm = self.build("warm", base=str(base), fingerprint=images.warm_fingerprint(self.spec))
         self.assertEqual(maintain.warm_reasons(self.spec), ["no warm state"])  # no saved memory yet
         (warm / "memory.save").write_bytes(b"")
+        # Made before cold runs booted the provisioned disk.
+        self.assertEqual(maintain.warm_reasons(self.spec), ["no provisioned disk for cold runs"])
+        (warm / images.PROVISIONED).write_bytes(b"")
         self.assertEqual(maintain.warm_reasons(self.spec), [])
         self.build("base")
         self.assertEqual(maintain.warm_reasons(self.spec), ["base build changed"])
