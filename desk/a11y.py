@@ -142,8 +142,8 @@ def _visible_point(run, spec: dict) -> tuple[int, int]:
     """Fresh screen position (layouts move) where a click reaches the element itself, not a sticky
     bar or toast over it; scrolls it into view first if needed."""
     # A page still building moves what it has already drawn; wait for it, briefly.
-    display.wait_stable(run.dom(), timeout=2, frames=2)
-    size = display.png_size(display.screenshot(run.dom()))
+    png, _ = display.wait_stable(run.dom(), timeout=2, frames=2)
+    size = display.png_size(png)
     point, covered = _point(run, spec, size)
     # Scrolled away: the toolkit scrolls it into view. Covered by a sticky bar: to the top, then
     # the bottom edge of the view, away from it.
@@ -277,8 +277,10 @@ def role_hint(snap: dict, query: str, role: str | None, exact: bool) -> str:
     return f" with role {role!r}; there is: {', '.join(others[:6])}" if others else ""
 
 
-def locate_name(run, query: str, role: str | None = None, exact: bool = False) -> tuple[int, int]:
-    snap = snapshot(run, limit=2000, save=False)
+def locate_name(run, query: str, role: str | None = None, exact: bool = False,
+                snap: dict | None = None) -> tuple[int, int]:
+    """`snap`: a listing just taken that holds the element, instead of a new one."""
+    snap = snap or snapshot(run, limit=2000, save=False)
     hits = _matches(snap, query, role, exact)
     if not hits:
         snap = snapshot(run, all_windows=True, limit=2000, save=False)

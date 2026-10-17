@@ -32,6 +32,8 @@ class Steps:
         self.spec, self.target = spec, target
         # Web console errors already checked by a scenario's console_errors step.
         self.console_seen = 0
+        # The latest listing in which wait_for found what it waited for.
+        self.snap: dict | None = None
 
     def gui(self, *argv: str, env: dict[str, str] | None = None) -> None:
         """Start a program in the desktop session and wait until the screen has changed."""
@@ -60,6 +62,7 @@ class Steps:
             except DeskError:
                 hits = []  # the window is still coming up
             if hits:
+                self.snap = snap
                 return hits[0]
             if time.monotonic() > deadline:
                 raise DeskError(f"{role or 'element'} {name!r} did not appear within {timeout:.0f}s"
@@ -89,7 +92,8 @@ class Steps:
 
     def click(self, name: str, role: str | None = None, exact: bool = True, timeout: float = 60) -> None:
         self.wait_for(name, role, exact, timeout)
-        x, y = a11y.locate_name(self.target, name, role, exact)
+        # The listing that found it; _visible_point looks the position up again anyway.
+        x, y = a11y.locate_name(self.target, name, role, exact, snap=self.snap)
         display.click(self.target.dom(), x, y, run=self.target)
 
     def focus(self, query: str) -> str:

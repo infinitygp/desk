@@ -46,7 +46,7 @@ skill/SKILL.md       agent skill
 desk/                harness code (guest_a11y.py runs inside the guest)
 tests/               unit tests
 images/<name>/       image.toml, kickstart, provision.sh
-<home>/              base/, warm/, runs/, reports/, maintain/, cache/, logs/, keys/  (see Host setup)
+<home>/              base/, warm/, runs/, reports/, maintain/, cache/, logs/, keys/, ssh/  (see Host setup)
 ```
 
 ## Images

@@ -6,7 +6,7 @@ import shlex
 import subprocess
 import time
 
-from .config import SSH_KEY, DeskError
+from .config import HOME, SSH_KEY, DeskError
 from .virt import agent
 
 _SSH_OPTS = [
@@ -19,10 +19,16 @@ _SSH_OPTS = [
     "-o", "ServerAliveInterval=30",
     "-o", "ServerAliveCountMax=4",
     "-o", "BatchMode=yes",
+    # One connection per guest and user, kept for a minute: a click by name takes several
+    # commands, and a new connection costs ~0.2 s and fails now and then under load.
+    "-o", "ControlMaster=auto",
+    "-o", f"ControlPath={HOME / 'ssh'}/%C",
+    "-o", "ControlPersist=60",
 ]
 
 
 def ssh_argv(port: int, user: str, tty: bool = False) -> list[str]:
+    (HOME / "ssh").mkdir(exist_ok=True)
     return ["ssh", *_SSH_OPTS, *(["-t"] if tty else []), "-p", str(port), f"{user}@127.0.0.1"]
 
 
@@ -142,6 +148,7 @@ COPY_TIMEOUT = 600.0
 
 def scp(port: int, src: str, dst: str, timeout: float | None = COPY_TIMEOUT) -> int:
     """scp's exit code; 124 when it was stopped after `timeout` seconds (None: no limit)."""
+    (HOME / "ssh").mkdir(exist_ok=True)
     try:
         return subprocess.run(["scp", *_SSH_OPTS, "-r", "-P", str(port), src, dst], timeout=timeout).returncode
     except subprocess.TimeoutExpired:
