@@ -96,13 +96,15 @@ def _resolution(text: str | None) -> tuple[int, int] | None:
 
 
 def cmd_up(args) -> None:
-    from . import disks, forward, monitors
+    from . import disks, forward, monitors, usb
 
     resolution = _resolution(args.resolution)
     spec = load_image(args.image)
     # Whatever can be refused without a VM is refused before one is started.
     monitors.check(spec, args.displays, resolution, args.scale)
     extra_disks = [disks.parse(item) for item in args.disk or []]
+    for query in args.usb or []:
+        usb.usable(query)
     run = runs.up(spec, run_id=args.name, cold=args.cold, force=args.force, label=args.label,
                   displays=args.displays, resolution=resolution)
     try:
@@ -111,6 +113,9 @@ def cmd_up(args) -> None:
         run.log_event(argv=sys.argv[1:])
         for size, name in extra_disks:
             disks.add(run, size, name)
+        for query in args.usb or []:
+            d = usb.add(run, query)
+            print(f"USB device {d['id']} {d['name']} handed to the guest")
         if args.record:
             record.start(run)
         forwards = [(port, forward.start(run, port)) for port in args.forward or []]
@@ -658,6 +663,25 @@ def cmd_disk(args) -> None:
                   + ("plugged in" if d["attached"] else "not plugged in"))
 
 
+def cmd_usb(args) -> None:
+    from . import usb
+
+    if args.usb_cmd == "ls":
+        for d in usb.listing():
+            where = f"in run {d['run']}" if d["run"] else ("free" if d["access"] else
+                                                          "free, but not yours to open (desk usb add says how)")
+            print(f"{d['id']}\t{d['bus']}.{d['dev']}\t{d['name'] or '-'}\t{where}")
+        return
+    run = runs.resolve(args.run)
+    if args.usb_cmd == "add":
+        d = usb.add(run, args.device)
+        print(f"USB device {d['id']} {d['name']} handed to the guest (the host does without it until "
+              "desk usb rm or desk down)")
+    else:
+        d = usb.remove(run, args.device)
+        print(f"USB device {d['id']} back with the host")
+
+
 def cmd_clock(args) -> None:
     from . import clock
 
@@ -819,6 +843,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--scale", type=int, help="scaling in percent, e.g. 150 (Windows: signs in again)")
     p.add_argument("--disk", action="append", metavar="SIZE[:NAME]", help="extra empty disk, e.g. 10G:backup "
                    "(repeatable; desk disk)")
+    p.add_argument("--usb", action="append", metavar="VENDOR:PRODUCT|BUS.DEVICE",
+                   help="hand a host USB device to the guest (repeatable; desk usb)")
     p.add_argument("--forward", action="append", type=_port_arg, metavar="PORT",
                    help="reach this guest port from the host (repeatable; desk forward)")
     p.set_defaults(func=cmd_up)
@@ -1028,6 +1054,15 @@ def build_parser() -> argparse.ArgumentParser:
     dp.add_argument("name")
     dsub.add_parser("ls", help="the run's extra disks")
     p.set_defaults(func=cmd_disk)
+
+    p = sub.add_parser("usb", help="hand host USB devices to the running guest")
+    usub = p.add_subparsers(dest="usb_cmd", required=True)
+    up_ = usub.add_parser("add", help="plug a host USB device into the guest (the host does without it)")
+    up_.add_argument("device", help="VENDOR:PRODUCT (1209:0001) or BUS.DEVICE (3.7), as desk usb ls shows")
+    up_ = usub.add_parser("rm", help="give a USB device back to the host")
+    up_.add_argument("device")
+    usub.add_parser("ls", help="host USB devices and the runs they are in")
+    p.set_defaults(func=cmd_usb)
 
     p = sub.add_parser("clock", help="show or move the guest's clock (schedules, expiry, retention)")
     p.add_argument("value", nargs="?", help="+3d, -2h30m (s m h d w), '2026-12-24 23:59' (guest local time), "

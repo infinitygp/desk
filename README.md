@@ -165,6 +165,11 @@ guest's memory is saved (the VM stops for a few seconds), disk and firmware vari
 copies, and the run carries on restored from the saved memory. Restoring destroys the domain,
 puts the copies back and restores the memory. Snapshots live in `runs/<id>/snapshots/`.
 
+`desk usb add|rm|ls` (desk/usb.py) hands host USB devices to a run as `<hostdev type='usb'>` by
+bus and device number, plugged into the guest's xHCI controller; QEMU runs as the user
+(qemu:///session), so `desk usb add` checks the device node is the user's to open and otherwise
+prints the udev rule that gives it to the kvm group.
+
 `desk disk add|rm|ls` hot-plugs empty qcow2 disks (`runs/<id>/disks/NAME.qcow2`) as virtio-blk
 into the spare PCIe root ports, serial = name; snapshots copy them along.
 Firefox in the Linux images writes every page's console and uncaught errors to its output, so to

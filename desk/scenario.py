@@ -10,7 +10,7 @@ import time
 import tomllib
 from pathlib import Path
 
-from . import a11y, browser, clock, disks, display, evidence, guest, record, runs
+from . import a11y, browser, clock, disks, display, evidence, guest, record, runs, usb
 from .config import DeskError, load_image
 from .steps import Steps
 
@@ -107,7 +107,7 @@ def load(path: Path) -> dict:
         raise DeskError(f"{path}: {e.strerror}") from None
     except tomllib.TOMLDecodeError as e:
         raise DeskError(f"{path}: not valid TOML: {e}") from None
-    unknown = set(data) - {"image", "record", "build", "disks", "step"}
+    unknown = set(data) - {"image", "record", "build", "disks", "usb", "step"}
     if unknown:
         raise DeskError(f"{path}: unknown keys {sorted(unknown)}")
     if not _text(data.get("image")):
@@ -118,6 +118,11 @@ def load(path: Path) -> dict:
         raise DeskError(f"{path}: disks is a list like [\"8G:data\"]")
     for d in data.get("disks", []):
         _checked(path, "disks", disks.parse, d)
+    devices = data.get("usb", [])
+    if not isinstance(devices, list) or not all(isinstance(d, str) and (usb.ID.fullmatch(d.lower()) or
+                                                                        usb.ADDRESS.fullmatch(d))
+                                                for d in devices):
+        raise DeskError(f"{path}: usb is a list like [\"0fd9:0084\"] (VENDOR:PRODUCT or BUS.DEVICE)")
     build = data.get("build", {})
     if not isinstance(build, dict) or set(build) - {"run", "artifacts"}:
         raise DeskError(f"{path}: [build] takes run and artifacts")
@@ -346,6 +351,8 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None) -> bo
                     raise DeskError(f"copying {f.name} to the guest failed")
         for d in data.get("disks", []):
             disks.add(run, *disks.parse(d))
+        for device in data.get("usb", []):
+            usb.add(run, device)
         ok = _run_steps(run, spec, data)
     finally:
         report, videos = evidence.finish(run, keep=keep, running=keep)

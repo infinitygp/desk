@@ -1,4 +1,4 @@
-# desk: Monitors, extra disks, the guest clock, system upgrades
+# desk: Monitors, extra disks, USB devices, the guest clock, system upgrades
 
 Part of the desk skill ([SKILL.md](SKILL.md)); the commands and pitfalls there apply.
 
@@ -25,6 +25,18 @@ disk would be. Linux sees it as `/dev/disk/by-id/virtio-backup`; on Windows it i
 serial number `backup`, online but not initialized (`Initialize-Disk`, `New-Partition`,
 `Format-Volume`). `desk disk rm NAME` unplugs and deletes it; the guest is not asked, so unmount
 first unless pulling a disk out is what you test. `desk disk ls` lists them; snapshots include them.
+
+## Host USB devices
+
+For hardware the product talks to (a Stream Deck, a phone, a dongle, a USB stick): `desk usb ls`
+lists the host's devices (VENDOR:PRODUCT, BUS.DEVICE, name, the run that has it), and
+`desk usb add 0fd9:0084` (or `desk up IMAGE --usb 0fd9:0084`, in a scenario `usb = ["0fd9:0084"]`)
+plugs it into the guest's USB controller as it is. The host does without it until `desk usb rm` or
+`desk down`, so hand over only the device the user named: a phone given to the guest is gone from
+the host's adb meanwhile. QEMU runs as the desk user, so the device node must be the user's to
+open; otherwise `desk usb add` refuses and prints a udev rule as a fish command with sudo: give it
+to the user to run. A device that re-enumerates (a firmware update, a phone switching USB mode)
+gets a new device number on the host: `desk usb add` it again.
 
 ## Guest clock
 

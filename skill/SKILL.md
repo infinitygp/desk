@@ -23,8 +23,9 @@ Read the file for your task before you start:
 - Windows guests (`windows-11`): [windows.md](windows.md)
 - Cockpit plugins, also on phone-sized screens: [cockpit.md](cockpit.md)
 - OpenWrt packages and LuCI apps: [openwrt.md](openwrt.md)
-- Monitors (resolution, scaling, several displays), extra disks, the guest clock (timers, expiry,
-  retention), surviving a Fedora upgrade: [system.md](system.md)
+- Monitors (resolution, scaling, several displays), extra disks, host USB devices (hardware the
+  product talks to), the guest clock (timers, expiry, retention), surviving a Fedora upgrade:
+  [system.md](system.md)
 
 ## Loop
 
@@ -79,6 +80,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk browser viewport WxH\|reset` | Pages at WxH CSS pixels (a phone: `390x700`) through Firefox's responsive design mode; prints the `desk shot --region` of the page area |
 | `desk browser console [--errors] [--all]` | Web console of every page since the run started (see Pitfalls) |
 | `desk record start [--fps N]`, `desk record stop`, `desk up --record` | Record the screen as a WebM video, kept with the report |
+| `desk usb ls`, `desk usb add VENDOR:PRODUCT\|BUS.DEVICE`, `desk usb rm ...`, `desk up IMAGE --usb ...` | Hand a host USB device to the guest ([system.md](system.md)) |
 | `desk doctor` | What this host has: where desk keeps its files, which host tools are missing (with the command that installs them), which images are built |
 
 Action commands (`click`, `type`, `key`, `scroll`, `action`, ...) accept `--shot` to screenshot
@@ -220,7 +222,7 @@ service coming up; an `exec`/`root` step that runs out of its `timeout`, 600 s w
 stopped in the guest and fails as "still running"), `timeout` on a `click` (how long to wait for
 the element, 60 s by default), `clock = "+1d"` (or `"reset"`),
 `disk_add = "8G:data"`, `disk_rm = "data"` (top-level `disks = ["8G:data"]` plugs them in before
-the first step), `console_errors = 0` (at most that many new errors in Firefox's web console since
+the first step, `usb = ["0fd9:0084"]` hands host USB devices over), `console_errors = 0` (at most that many new errors in Firefox's web console since
 the start or the previous such step; end a UI scenario with one). In a scenario's report every
 console message is tagged with the step running when it was logged (`[before the first step]` for
 what the warm state and setup logged; a page logs a moment after the step that opened it, so look
