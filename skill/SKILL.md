@@ -303,7 +303,9 @@ report, and `soft = true` for an independent check whose failure should not stop
 type, and options a step would not read (`rc` on a `click`). When a scenario fails,
 look at the failure screenshot and the report before changing the scenario: a failing step is
 usually a real finding. A failed `exec`/`root` step prints the end of its stdout and stderr, where
-the cause usually is. `desk scenario run FILE --keep` writes the report and leaves the run running
+the cause usually is. An element that did not appear (`expect`, `click`) comes with the focused window,
+similar names on screen and, on GNOME, the overview or a notification banner over the windows:
+a typo, the wrong window in front or a prompt of the system shows there without a screenshot. `desk scenario run FILE --keep` writes the report and leaves the run running
 (it prints the `DESK_RUN` to use) to go on by hand from where the scenario stopped; `desk down` it
 afterwards (left alone, it is destroyed after 2 h idle). A `type` step refuses, like `desk type`,
 when a browser's focus is not in a text field; `anywhere = true` types anyway (page shortcuts).

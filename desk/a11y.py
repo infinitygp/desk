@@ -1,5 +1,6 @@
 """Accessibility tree of the guest desktop, with refs (@e1...) that map to screen pixels."""
 
+import difflib
 import json
 import os
 import shlex
@@ -190,6 +191,35 @@ def _matches(snap: dict, query: str, role: str | None, exact: bool) -> list[dict
         return any((h.casefold() == q) if exact else (q in h.casefold()) for h in hay)
 
     return [n for n in snap["nodes"] if match(n)]
+
+
+def explain_missing(run, snap: dict | None, query: str) -> str:
+    """For a failure message: the focused window, names close to the one looked for, and what of
+    the desktop lies over the windows (the overview, a notification), one line each."""
+    lines = []
+    if snap is not None:
+        top = next((t for t in snap["tops"] if t["focus"]), None)
+        lines.append(f"focused window: {json.dumps(top['title'], ensure_ascii=False)} ({top['app']})"
+                     if top else "no window has the focus")
+        names = {}
+        for n in snap["nodes"]:
+            for h in (n["name"], n.get("text"), n.get("value")):
+                if h and len(h) <= 2 * len(query) + 20:
+                    names.setdefault(h, n["role"])
+        close = difflib.get_close_matches(query, list(names), n=3, cutoff=0.6)
+        if close:
+            lines.append("similar: " + ", ".join(f"{names[c]} {json.dumps(c, ensure_ascii=False)}" for c in close))
+    if not run.agent_port:
+        try:
+            shell = _helper(run, "shell", "{}")
+        except DeskError:
+            shell = {}
+        if shell.get("overview"):
+            lines.append("the overview is open over the windows")
+        if banner := shell.get("banner"):
+            lines.append(f"a notification of {banner['source'] or 'the system'} is on screen: "
+                         f"{json.dumps(banner['title'], ensure_ascii=False)}")
+    return "".join(f"\n{line}" for line in lines)
 
 
 def find(run, query: str, role: str | None = None, exact: bool = False,

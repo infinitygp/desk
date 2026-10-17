@@ -2,7 +2,7 @@
 
 Usage: snapshot JSON_OPTS | resolve JSON_SPEC | scroll JSON_SPEC [HOW] | action JSON_SPEC [NAME] |
 set-text JSON_SPEC TEXT | edit JSON_SPEC | read JSON_SPEC | focused JSON | page JSON |
-clipboard JSON_TEXT | rdm JSON | focus JSON_QUERY
+clipboard JSON_TEXT | rdm JSON | focus JSON_QUERY | shell JSON
 Prints one JSON document. Needs DBUS_SESSION_BUS_ADDRESS of the graphical session.
 """
 
@@ -53,6 +53,17 @@ def shell_windows() -> list[dict]:
         raise LookupError("the desk shell extension (org.desk.Helper) does not answer, so windows cannot be placed "
                           f"on the screen: {e.message}. The session may still be starting (desk wait --ready); "
                           "otherwise GNOME Shell did not load the extension") from None
+
+
+def shell(_opts) -> dict:
+    """The overview and the notification banner shown now ({} from an older shell extension)."""
+    try:
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        res = bus.call_sync("org.desk.Helper", "/org/desk/Helper", "org.desk.Helper", "GetShell",
+                            None, GLib.VariantType("(s)"), Gio.DBusCallFlags.NONE, 2000, None)
+        return json.loads(res.unpack()[0])
+    except GLib.Error:
+        return {}
 
 
 def focus(query: str) -> dict:
@@ -782,6 +793,8 @@ def main() -> None:
             out = clipboard(arg)
         elif cmd == "rdm":
             out = rdm(arg)
+        elif cmd == "shell":
+            out = shell(arg)
         else:
             out = {"error": f"unknown command {cmd}"}
     except (LookupError, GLib.Error) as e:

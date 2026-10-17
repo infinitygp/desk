@@ -1,9 +1,12 @@
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 from desk.a11y import (
     _matches,
     _on_screen,
     center,
+    explain_missing,
     format_node,
     format_snapshot,
     pick,
@@ -143,6 +146,25 @@ class Roles(unittest.TestCase):
 
     def test_uncovered_preferred(self):
         self.assertEqual(pick(self.snap, _matches(self.snap, "Save", None, True), "Save")["ref"], "e4")
+
+
+KEYPAD = {"tops": [{"title": "Keypad", "app": "keypad", "focus": True, "start": 0}],
+            "nodes": [node("e1", 0, "button", "Choose an action for Key 1"), node("e2", 0, "label", "Volume")]}
+
+
+class ExplainMissing(unittest.TestCase):
+    def test_names_focus_and_similar_names(self):
+        run = SimpleNamespace(agent_port=47011)  # Windows: no shell to ask
+        out = explain_missing(run, KEYPAD, "Choose an action for Key 2").splitlines()
+        self.assertEqual(out[1:], ['focused window: "Keypad" (keypad)',
+                                   'similar: button "Choose an action for Key 1"'])
+
+    def test_names_what_the_shell_shows(self):
+        shell = {"overview": True, "banner": {"title": "Critical Updates Available", "body": "", "source": "Software"}}
+        with mock.patch("desk.a11y._helper", return_value=shell):
+            out = explain_missing(SimpleNamespace(agent_port=0), None, "OK")
+        self.assertEqual(out.splitlines()[1:], ["the overview is open over the windows",
+                                                'a notification of Software is on screen: "Critical Updates Available"'])
 
 
 if __name__ == "__main__":

@@ -52,15 +52,18 @@ class Steps:
     def wait_for(self, name: str, role: str | None = None, exact: bool = True, timeout: float = 60) -> dict:
         """Until an element with this name (or value or text) is in the focused window."""
         deadline = time.monotonic() + timeout
+        snap = None
         while True:
             try:
-                hits = a11y.find(self.target, name, role, exact, save=False)
+                snap = a11y.snapshot(self.target, limit=2000, save=False)
+                hits = a11y._matches(snap, name, role, exact)
             except DeskError:
                 hits = []  # the window is still coming up
             if hits:
                 return hits[0]
             if time.monotonic() > deadline:
-                raise DeskError(f"{role or 'element'} {name!r} did not appear within {timeout:.0f}s")
+                raise DeskError(f"{role or 'element'} {name!r} did not appear within {timeout:.0f}s"
+                                + a11y.explain_missing(self.target, snap, name))
             time.sleep(1)
 
     def first(self, *candidates: tuple[str, str | None], timeout: float = 60, exact: bool = True) -> int:

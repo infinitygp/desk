@@ -17,6 +17,9 @@ const IFACE = `
     <method name="SetClipboard">
       <arg type="s" direction="in" name="text"/>
     </method>
+    <method name="GetShell">
+      <arg type="s" direction="out" name="json"/>
+    </method>
   </interface>
 </node>`;
 
@@ -85,6 +88,21 @@ export default class DeskHelper extends Extension {
             hit.unminimize();
         hit.activate(global.get_current_time());
         return hit.get_title() ?? '';
+    }
+
+    // What of the shell itself lies over the windows: the overview, a notification banner.
+    // A failed test step names them, so a prompt of the system is not taken for a bug.
+    GetShell() {
+        let banner = null;
+        try {
+            // Private: the notification whose banner is shown now (GNOME 50's messageTray.js).
+            const n = Main.messageTray._notification;
+            if (n)
+                banner = {title: n.title ?? '', body: n.body ?? '', source: n.source?.title ?? ''};
+        } catch (e) {
+            logError(e, 'desk-helper: notification banner');
+        }
+        return JSON.stringify({overview: Main.overview.visible, banner});
     }
 
     // The clipboard, which only the compositor can set without a focused window of its own
