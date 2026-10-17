@@ -198,9 +198,10 @@ def run_selftest(image: str, reboot: bool = False, keep: bool = False, spec: Ima
 
     def package():
         # A package file through the host, the way a project tests its own build: fetched from
-        # the feed in the guest, pulled, pushed back and installed from the file.
+        # the feed in the guest, pulled, pushed back and installed from the file. The package
+        # index lives in RAM (/var is /tmp), so a booted router has none until apk update.
         pkg = sc["package"]
-        _ssh(run, f"cd /tmp && apk fetch {pkg} >/dev/null")
+        _ssh(run, f"apk update >/dev/null && cd /tmp && apk fetch {pkg} >/dev/null")
         name = _ssh(run, f"cd /tmp && ls {pkg}-*.apk").split()[0]
         with tempfile.TemporaryDirectory() as tmp:
             _check(guest.scp(run.ssh_port, f"{run.user}@127.0.0.1:/tmp/{name}", tmp) == 0, "pulling the package failed")
