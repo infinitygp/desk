@@ -42,7 +42,7 @@ same image definitions, so switching between them rebuilds nothing.
 ```text
 bin/desk             entry point of a checkout (the system's python3 with the distribution's libvirt bindings)
 scripts/             build.py makes desk.pyz, the release; pyz_main.py is its entry point
-skill/SKILL.md       agent skill
+skill/               agent skill: SKILL.md, and a file per task it points to
 desk/                harness code (guest_a11y.py runs inside the guest)
 tests/               unit tests
 images/<name>/       image.toml, kickstart, provision.sh

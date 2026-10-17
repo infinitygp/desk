@@ -13,6 +13,19 @@ as PNG, and the accessibility tree as text. Nothing in the guest can hide the sc
 that input, so it works for any toolkit, login screens, installers, polkit dialogs, reboots and
 crashes alike. Every run is a copy-on-write overlay; `desk down` throws all changes away.
 
+Checks that need no desktop and no real boot (an rpm installing with its scriptlets, a CLI, a
+systemd unit) run faster in a container: `podman run --rm -v "$PWD:/src:Z" fedora:44 dnf install
+-y /src/foo.rpm`, with `--systemd=always` for units. desk is for what a user meets on a real OS:
+the desktop, a boot, SELinux, polkit, reboots.
+
+Read the file for your task before you start:
+
+- Windows guests (`windows-11`): [windows.md](windows.md)
+- Cockpit plugins, also on phone-sized screens: [cockpit.md](cockpit.md)
+- OpenWrt packages and LuCI apps: [openwrt.md](openwrt.md)
+- Monitors (resolution, scaling, several displays), extra disks, the guest clock (timers, expiry,
+  retention), surviving a Fedora upgrade: [system.md](system.md)
+
 ## Loop
 
 ```bash
@@ -45,7 +58,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk type TEXT [--anywhere]` | Type with real key presses: ASCII and Polish letters; text starting with a dash works. In a browser it refuses when no text field has the focus (the page would take the keys as shortcuts); `--anywhere` types anyway |
 | `desk key COMBO...` | `super`, `enter`, `esc`, `tab`, `ctrl+alt+t`, `shift+f10`, `alt+f4`, `f5`, letters |
 | `desk snapshot save NAME`, `desk snapshot restore NAME`, `desk snapshot list`, `desk snapshot delete NAME` | Save the running guest (~3-5 s) and go back to it (~1-3 s) |
-| `desk up IMAGE --resolution WxH --scale N --displays N`, `desk display [--resolution WxH] [--scale N]` | Monitors: mode, scaling in percent, several displays (see below) |
+| `desk up IMAGE --resolution WxH --scale N --displays N`, `desk display [--resolution WxH] [--scale N]` | Monitors: mode, scaling in percent, several displays ([system.md](system.md)) |
 | `desk focus NAME` | Bring a window to the front by application or title (keys go to the focused window); on Windows it fails when Windows keeps the window behind the one in front |
 | `desk scenario run FILE [--keep]`, `desk scenario check FILE` | Run a repeatable test from a TOML file (see below) |
 | `desk wait [--change] [--timeout S]` | Until the screen is still; `--change` first waits for it to change at all |
@@ -119,8 +132,9 @@ guest shell; `--root` and `--gui` apply to the whole snippet.
   itself. Plain `desk exec` and scenario `exec`/`root` steps hand the snippet over unseen.
 - `dnf` prints its progress on stderr even with `-q`; add `>/dev/null 2>&1` and check the result with
   `rpm -q` / `rpm -V` instead of reading the transaction log.
-- Web UIs on `https://localhost` with a self-signed certificate (Cockpit) show Firefox's warning on
-  every new run: `desk click --name Advanced`, then `desk click --name Proceed` (it scrolls itself).
+- Web UIs on `https://localhost` with a self-signed certificate (a Cockpit installed by the test
+  itself; `fedora-44-cockpit`'s Firefox trusts its own) show Firefox's warning on every new run:
+  `desk click --name Advanced`, then `desk click --name Proceed` (it scrolls itself).
 
 ## Evidence report
 
@@ -151,79 +165,13 @@ base is there, and without a warm state a run still starts, cold, in ~20 s.
 `fedora-44-gnome` is the default; `fedora-45-gnome` is the next
 Fedora release (beta until it is out); `fedora-44-gnome-pl` is the same
 system in Polish (UI, Firefox, formats) for testing Polish interfaces; `fedora-44-cockpit` has
-Cockpit open in Firefox, logged in as tester with administrative access (see below); `arch-gnome` is Arch Linux
+Cockpit open in Firefox, logged in as tester with administrative access; `arch-gnome` is Arch Linux
 (rolling, pacman, no SELinux) with the newest GNOME and libraries; `windows-11` is Windows 11
 Enterprise (evaluation) for Windows builds and installers; `openwrt-25.12` is OpenWrt 25.12 without
-a desktop, for OpenWrt packages and LuCI apps (see below). Images are as old as their last build
+a desktop, for OpenWrt packages and LuCI apps. Images are as old as their last build
 (`desk image list` shows the date) unless the host renews them with `desk maintain`, by hand or
 from its weekly timer; if `desk up` prints a warning about a failed maintenance or a licence
 running out, pass it on to the user.
-
-### Windows guests
-
-- `desk exec -- CMD` runs PowerShell as `tester`, who is an administrator with a full token, so
-  `--root` changes nothing; `desk exec --agent -- CMD` runs as SYSTEM (session 0, no desktop).
-  Quoting is safe: commands reach PowerShell encoded.
-- Open Win32 menus (context menus, a window's system menu) show up as a focused window "menu"
-  whose `menu item`s, disabled ones marked, `desk click --name ... --role "menu item"` clicks;
-  they come from MSAA, as UI Automation does not see them.
-- The desktop is a window too: `desk a11y --all` lists its icons as `list item`s under
-  "Program Manager" with their positions (read through MSAA, since UI Automation shows the icon
-  view empty), so `desk click --name "Recycle Bin" --role "list item"`, `desk drag` an icon and
-  `desk find NAME --all --role "list item"` to read where it ended up all work. The wallpaper is
-  the fixed Windows 11 default (no Spotlight), so screenshots of the desktop are comparable.
-- `desk exec --gui -- app.exe ARGS` starts the program on the desktop (through an agent in the
-  user's session) and brings its window to the front, as starting it from the Start menu would.
-- `desk a11y` / `find` / `click --name` use UI Automation; names are the ones Narrator would read
-  (Calculator: "Seven", "Multiply by", "Equals"; result "Display is 42").
-- Installers: `desk push setup.msi C:/Users/tester/Downloads/` then
-  `desk exec -- 'Start-Process msiexec -ArgumentList "/i C:\Users\tester\Downloads\setup.msi /qn" -Wait'`,
-  or run the installer UI with `exec --gui` and click through it. UAC prompts do not appear for
-  `tester` over SSH, but do for programs started on the desktop: handle them like any dialog.
-- Background helpers started with `exec --gui` (a test tone, a mock server) get a console window
-  that covers the desktop, since Windows Terminal ignores `-WindowStyle Hidden`: start them as
-  `desk exec --gui -- conhost.exe --headless powershell.exe -NoProfile -Command "..."`.
-- What only the desktop session sees (FindWindow, UI Automation, the session's environment):
-  `desk exec --gui --wait -- powershell.exe -NoProfile -Command "..."` returns the output and exit
-  code, with no console window; other desk commands (a11y, clicks) work while it runs. UTF-8 output comes through as it is (Rust, or PowerShell after
-  `[Console]::OutputEncoding = [Text.Encoding]::UTF8`); console tools' OEM code page is converted.
-- Windows PowerShell 5.1 writes files in the ANSI code page by default: use
-  `Set-Content -Encoding UTF8` / `Get-Content -Encoding UTF8` for text with Polish letters.
-- If `desk a11y` says a window's contents are "not available through UI Automation", a popup of
-  that app is in the way (Notepad's first-run tip does this): look at a screenshot, close it.
-- Dialogs owned by elevated processes (UAC, the Windows Firewall "allow access" prompt) are not in
-  the tree at all; they are on screen, so click them by pixels from a screenshot. Classic Win32
-  installers (NSIS, Inno) are readable: buttons, fields and texts show up as usual.
-- A clean Windows has no Visual C++ runtime. A program that needs `VCRUNTIME140.dll` dies before
-  showing anything (exit code 0xC0000135, or a "System Error" dialog); check with
-  `Start-Process <exe> -PassThru -Wait` and the exit code when something silently does not start.
-- Settings tests switch often, without clicking through the Settings app:
-  `desk win theme dark|light` (apps and system, applied at once) and
-  `desk win taskbar [--edge bottom|top|left|right] [--size default|small] [--align left|center]
-  [--autohide on|off]` (restarts Explorer, ~5 s). Auto-hide only works with the taskbar at the bottom.
-- Windows enables some features for a share of machines only (Controlled Feature Rollout). The
-  image opts in to "Get the latest updates as soon as they're available" and forces on, with
-  ViVeTool: taskbar position (59213768) and taskbar size (61090762). Everything else is as a
-  fresh install of that build has it; if the app's behaviour depends on a feature outside that
-  list, say so in the report instead of assuming users see the same.
-- The report reads the event log (service failures, application errors and crashes, MSI
-  installs); a "Network List Service terminated" entry comes from restoring the saved state, not
-  from the app under test. `desk diff` works on NTFS too.
-
-## Monitors: resolution, scaling, several displays
-
-Runs start at 1280x800, 100 %, one monitor. To test layouts and DPI handling:
-
-- `desk up IMAGE --resolution 1920x1080` (boots cold: the monitor offers that mode),
-  `desk display --resolution WxH` switches among the modes it offers.
-- `--scale 150` on `desk up` or `desk display`: Windows applies it by signing in again (a reboot,
-  ~70 s; desk checks the session's DPI afterwards); GNOME at once, fractional scales too. Coordinates from `desk a11y` stay screen pixels.
-- `desk up windows-11 --displays 2` (Windows only; boots cold, ~5 min): monitors side by side,
-  left to right, top-aligned. Screenshots show them as one picture, and `desk a11y`, `desk click X Y`
-  and `desk drag` use the same coordinates, across monitors too. On the primary monitor input
-  comes from outside the guest as usual; on the others the in-session agent moves the pointer
-  (Windows maps QEMU's tablet onto the primary monitor only), so elevated windows there do not
-  get clicks. `desk display` prints the monitors.
 
 ## Snapshots
 
@@ -232,27 +180,6 @@ a bug that takes setup to reach), `desk snapshot save NAME` there and `desk snap
 before each attempt, instead of a new run and the setup all over again. Restoring puts back
 memory, disk and screen exactly (programs opened later are gone) and syncs the clock. Each
 snapshot keeps the guest's memory on disk (2.5-4 GB) until `desk snapshot delete` or `desk down`.
-
-## Extra disks
-
-For backup targets, a second data disk or a disk to fill up: `desk disk add 10G --name backup`
-(or `desk up IMAGE --disk 10G:backup`) plugs an empty, thin disk into the running guest, as a USB
-disk would be. Linux sees it as `/dev/disk/by-id/virtio-backup`; on Windows it is the disk with
-serial number `backup`, online but not initialized (`Initialize-Disk`, `New-Partition`,
-`Format-Volume`). `desk disk rm NAME` unplugs and deletes it; the guest is not asked, so unmount
-first unless pulling a disk out is what you test. `desk disk ls` lists them; snapshots include them.
-
-## Guest clock
-
-For what depends on time (schedules, timers, expiry, retention): `desk clock +3d` (also `-2h30m`;
-units s m h d w) or `desk clock '2026-12-24 23:59'` (guest local time, Europe/Warsaw) moves the
-guest's clock, which keeps running from there; `desk clock` shows it. The guest's own time sync is
-switched off (timedatectl / w32time) and desk keeps the offset across snapshot restores and
-`desk reboot`. `desk clock reset` goes back to the host's time and turns time sync on again.
-Timers that were due in the skipped time fire right after the jump, as after a suspend, but each
-only once however many of its times were skipped. To let a daily job run for every day, move in
-steps: `desk clock +3d --step 1d` jumps a day at a time, waits each time until what the timers
-started has finished, and prints which units ran (in a scenario: `clock = "+3d"`, `step = "1d"`).
 
 ## Scenarios: repeatable tests
 
@@ -333,88 +260,6 @@ then (`runs/<id>/failed-start.png`).
    `desk reboot` and check what remains or comes back (autostart, enabled units, timers);
    `desk diff` shows exactly which files the package left behind.
 7. `desk down --diff` and hand over the report.
-
-### Surviving a system upgrade
-
-Whether a package still works after the user upgrades Fedora: install it on the older release's
-image (`fedora-44-gnome`, `fedora-44-cockpit`), check it works, then upgrade like a user would and
-check again (package still installed, services and timers still enabled, the UI still works):
-
-```bash
-desk exec --root -- 'dnf system-upgrade download -y --releasever=45'
-desk reboot --command 'dnf offline reboot -y' --timeout 3600   # boots into the upgrade, then the new system
-```
-
-In a scenario: `root = "dnf system-upgrade download -y --releasever=45"` (with `timeout = 1800`),
-then `reboot = "dnf offline reboot -y"` with `timeout = 3600`. After the reboot only the desktop
-session is back: programs open before it have to be started again; on `fedora-44-cockpit` a
-`prepare = true` step (or `desk prepare`) opens Firefox logged in to Cockpit again. The upgrade itself
-takes about 10 minutes (download ~2 min, offline upgrade and boot ~7 min).
-`fedora-45-gnome` is the next release itself (a beta until it is out).
-
-### Cockpit plugins
-
-Use `fedora-44-cockpit` to test what the plugin does: Firefox shows Cockpit at
-`https://localhost:9090`, logged in with administrative access. Install the plugin's package with
-`desk exec --root -- dnf install -y /tmp/foo.rpm`, then press F5 in Firefox: the new entry appears
-in Cockpit's menu without logging in again. After `desk reboot` (or when Cockpit asks to log in
-again) run `desk prepare`, in a scenario `prepare = true`: it opens Firefox at Cockpit, logs in and
-turns on administrative access, whichever of that is missing. To get administrative access back
-in the middle of a test (after limiting it, or on a page that asks for it) without leaving the page:
-`desk prepare admin`, in a scenario `prepare = "admin"`; it waits for sudo's password prompt and
-types the password again when sudo answers "Sorry, try again"; a sudo dialog the plugin itself
-opened is used as it is. `desk browser open /podman` opens a Cockpit page (a path is taken on the
-site shown now; a whole address needs `https://`) without typing into the address bar.
-`desk reboot --prepare` reboots and logs in again in one go. Test packaging and dependencies on `fedora-44-gnome`
-instead, where Cockpit is not installed, as on a fresh Workstation: a plugin that depends only on
-`cockpit-bridge` installs there without the web console a user needs to reach it.
-
-### Cockpit on phones
-
-- `desk browser viewport 390x700` gives pages 390x700 CSS pixels through Firefox's responsive
-  design mode (Firefox's window cannot get that narrow) and prints the `desk shot --region` of the
-  page area; `desk browser viewport reset` closes the mode. Cockpit collapses its menu at that
-  width, so the plugin's iframe gets the whole width. The screen is 800 pixels high: taller
-  viewports run past its bottom (`desk display --resolution` to a taller mode the monitor offers).
-- The plugin's iframe is same-origin, so the web console (`desk key ctrl+shift+k`) can measure it:
-  `[...document.querySelectorAll('iframe')].find(i => i.src.includes('<plugin>')).contentDocument`.
-- Desktop regression check: the same crop before and after a change, compared on the host with
-  `magick compare -fuzz 2%`.
-- A browser on the host: `desk forward 9090` prints the local address of the guest's Cockpit (its
-  certificate comes from the image's own CA, so accept it). Clicking "Turn on administrative access"
-  does nothing in a headless browser; set localStorage `superuser:tester`=`sudo` and
-  `superuser-key`=`superuser:tester` on the login page before logging in.
-
-### OpenWrt packages and LuCI apps
-
-`openwrt-25.12` is the OpenWrt 25.12 release image for x86-64 (apk, BusyBox ash, procd, LuCI), as
-root (password `root`), without a desktop: the screen is the text console (`desk shot` shows boot
-messages and kernel panics, `desk key`/`type` reach it), and a11y, clicks by name, `desk browser`
-and `exec --gui` refuse. Build the package with the OpenWrt SDK for x86-64 of the same release on
-the host (or in CI), not in the guest; packages built that way are unsigned:
-
-```bash
-desk up openwrt-25.12                         # ~1 s from the warm state
-desk push bin/packages/x86_64/base/foo-1.0-r1.apk /tmp/
-desk exec -- 'apk update && apk add --allow-untrusted /tmp/foo-1.0-r1.apk'   # dependencies from the feeds
-desk exec -- '/etc/init.d/foo status; logread -e foo; uci show foo'
-desk forward 80                               # LuCI: http://127.0.0.1:PORT/, log in as root / root
-```
-
-- Commands run in ash as root: no bash, no systemd. Services: `/etc/init.d/foo
-  start|stop|restart|status|enabled`, `ubus call service list`; logs: `logread`, kept across
-  reboots in `/desk/syslog`; configuration: `uci show|set|commit`.
-- In a scenario: `image = "openwrt-25.12"`, `[build] artifacts =
-  ["bin/packages/x86_64/*/luci-app-foo-*.apk"]` (copied to `/tmp/desk/`), then
-  `root = "apk update && apk add --allow-untrusted /tmp/desk/luci-app-foo-*.apk"` and
-  `root = "/etc/init.d/foo running"` with `until = true`.
-- LuCI pages are tested with a browser on the host (agent-browser) at the address `desk forward 80`
-  prints. A page that embeds another guest port (luci-app-ttyd's terminal on 7681) needs that port
-  forwarded too, under the same number (`desk forward 7681`, which takes it when it is free);
-  forwards lead to the router's LAN address, where such services listen.
-- The report lists services procd keeps that are not running, crash loops (before reboots too),
-  warnings and errors from the log, segfaults, and packages installed or removed since the warm
-  state. `desk clock` works (it stops sysntpd until `desk clock reset`).
 
 ## Judging screenshots
 
