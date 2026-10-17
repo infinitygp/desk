@@ -1,0 +1,13 @@
+{
+  "policies": {
+    "OverrideFirstRunPage": "",
+    "OverridePostUpdatePage": "",
+    "DontCheckDefaultBrowser": true,
+    "DisableTelemetry": true,
+    "DisableFirefoxStudies": true,
+    "OfferToSaveLogins": false,
+    "UserMessaging": {"SkipOnboarding": true, "MoreFromMozilla": false, "FeatureRecommendations": false,
+                      "ExtensionRecommendations": false, "UrlbarInterventions": false},
+    "Preferences": {"browser.sessionstore.resume_from_crash": {"Value": false, "Status": "default"}}
+  }
+}

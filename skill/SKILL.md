@@ -436,6 +436,12 @@ desk forward 80                               # LuCI: http://127.0.0.1:PORT/, lo
   overview. GNOME Software is masked, so no update banners or prompts cover the app under test
   and the overview's search does not list it; to test something about Software itself:
   `desk exec --root -- systemctl --global unmask gnome-software.service`, then `desk reboot`.
+  Maintenance timers (fstrim, logrotate, plocate, dnf-makecache, raid-check, unbound-anchor; on
+  Arch the keyring sync and shadow) are disabled, since after the clock catches up on restore they
+  ran at random moments of a test; when the test is about one of them, `systemctl start` its
+  service (the product's own timers are untouched, and `desk clock --step` runs them). Firefox
+  starts without first-run tabs, the default browser question, offers to save passwords, studies
+  or tips (`/etc/firefox/policies/policies.json`).
 - Guest clocks are synced on restore; network goes through user-mode networking (outbound
   works, inbound only SSH; `desk forward PORT` makes a guest service reachable from the host).
 - Several runs can exist at once; pass `-r ID` or set `DESK_RUN`. `desk ls` shows who holds each:

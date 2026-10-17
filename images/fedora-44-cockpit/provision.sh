@@ -22,21 +22,14 @@ systemctl enable --now cockpit.socket
 # A Cockpit already running (provisioning again after a cold boot) picks up the certificate.
 systemctl try-restart cockpit.service
 
-# Firefox trusts the CA above, so the login page opens without the certificate warning, and
-# no first-run pages (the privacy notice comes with telemetry), offers to save the password or
-# other tabs get in the way of the page under test.
-install -d /etc/firefox/policies
-cat > /etc/firefox/policies/policies.json <<'JSON'
-{
-  "policies": {
-    "Certificates": {"Install": ["/etc/cockpit/desk-ca.pem"]},
-    "OverrideFirstRunPage": "",
-    "OverridePostUpdatePage": "",
-    "DontCheckDefaultBrowser": true,
-    "DisableTelemetry": true,
-    "OfferToSaveLogins": false,
-    "UserMessaging": {"SkipOnboarding": true, "MoreFromMozilla": false, "FeatureRecommendations": false},
-    "Preferences": {"browser.sessionstore.resume_from_crash": {"Value": false, "Status": "default"}}
-  }
-}
-JSON
+# Firefox trusts the CA above, so the login page opens without the certificate warning; the rest
+# of its policies come from fedora-44-gnome's provisioning.
+python3 - <<'PY'
+import json
+path = "/etc/firefox/policies/policies.json"
+with open(path) as f:
+    data = json.load(f)
+data["policies"]["Certificates"] = {"Install": ["/etc/cockpit/desk-ca.pem"]}
+with open(path, "w") as f:
+    json.dump(data, f, indent=2)
+PY

@@ -12,6 +12,9 @@ install -D -m 0644 "$FILES"/desk-firefox.js /usr/lib/firefox/browser/defaults/pr
 # The thrown object and stack of uncaught exceptions as well (desk.cfg, Firefox's autoconfig).
 install -D -m 0644 "$FILES"/desk-autoconfig.js /usr/lib/firefox/defaults/pref/desk-autoconfig.js
 install -D -m 0644 "$FILES"/desk.cfg /usr/lib/firefox/desk.cfg
+# No first-run tabs (the privacy notice comes with telemetry), default browser question, offers
+# to save passwords, studies or tips in the way of the page under test.
+install -D -m 0644 "$FILES"/desk-firefox-policies.json /etc/firefox/policies/policies.json
 
 # Stable screen for screenshots: no lock, blanking, animations or blinking cursor, and no
 # overview opened by a pointer passing the top left corner. GNOME Software is off (below),
@@ -74,6 +77,13 @@ systemctl --global mask gnome-software.service
 as_tester systemctl --user daemon-reload
 as_tester systemctl --user stop gnome-software.service || true
 if pgrep -x gnome-software; then echo "gnome-software still runs" >&2; exit 1; fi
+
+# Maintenance timers catch up after the clock jumps forward on restore, each after a random delay,
+# so they would run at random moments of a test (the keyring's sync over the network, shadow's
+# checks). A test of one of them starts it by hand.
+for t in archlinux-keyring-wkd-sync.timer shadow.timer; do
+    if systemctl cat "$t" >/dev/null 2>&1; then systemctl disable --now "$t"; fi
+done
 
 # `desk reboot` reboots even when apps with unsaved work block shutdown (and reports them).
 cat > /etc/polkit-1/rules.d/10-desk-root-ignore-inhibitors.rules <<'RULE'

@@ -12,6 +12,9 @@ install -D -m 0644 "$FILES"/desk-firefox.js /usr/lib64/firefox/browser/defaults/
 # The thrown object and stack of uncaught exceptions as well (desk.cfg, Firefox's autoconfig).
 install -D -m 0644 "$FILES"/desk-autoconfig.js /usr/lib64/firefox/defaults/pref/desk-autoconfig.js
 install -D -m 0644 "$FILES"/desk.cfg /usr/lib64/firefox/desk.cfg
+# No first-run tabs (the privacy notice comes with telemetry), default browser question, offers
+# to save passwords, studies or tips in the way of the page under test.
+install -D -m 0644 "$FILES"/desk-firefox-policies.json /etc/firefox/policies/policies.json
 
 # A blinking text cursor would keep the screen from ever settling. A pointer passing the top
 # left corner would open the overview over the app under test. GNOME Software is off (below),
@@ -54,6 +57,13 @@ if systemctl cat mcelog.service >/dev/null 2>&1; then
     systemctl disable --now mcelog.service
 fi
 systemctl reset-failed
+
+# Maintenance timers catch up after the clock jumps forward on restore, each after a random delay,
+# so they ran at random moments of a test: fstrim, plocate's indexing, logrotate, dnf's metadata. A test of one of them starts it by hand.
+for t in dnf-makecache.timer fstrim.timer logrotate.timer plocate-updatedb.timer raid-check.timer \
+         unbound-anchor.timer; do
+    if systemctl cat "$t" >/dev/null 2>&1; then systemctl disable --now "$t"; fi
+done
 
 # GNOME Software's update banners and prompts pop up at random moments over the app under test.
 # GNOME 50 starts it as a user service of every session (gnome-session-services.target) and on
