@@ -45,6 +45,17 @@ class RunFile(unittest.TestCase):
             self.assertEqual(shot.clock_offset, -7200.0)  # taken over by the object too
 
 
+class RunNames(unittest.TestCase):
+    def test_only_names_that_stay_in_the_runs_directory(self):
+        for bad in ("a/b", "../x", "", ".hidden", "with space", "x" * 41):
+            with self.subTest(bad=bad), self.assertRaisesRegex(DeskError, "run names are"):
+                runs.up(mock.Mock(), run_id=bad)
+            with self.subTest(bad=bad), self.assertRaisesRegex(DeskError, "run names are"):
+                runs.load(bad)
+        for good in ("ab12cd", "selftest-0f3a9c", "my_run-2", "f44.test"):
+            self.assertEqual(runs._checked_id(good), good)
+
+
 class LiveDomain(unittest.TestCase):
     def test_a_domain_destroyed_meanwhile_is_not_running(self):
         import libvirt

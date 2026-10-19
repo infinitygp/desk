@@ -3,6 +3,7 @@
 import fcntl
 import json
 import os
+import re
 import secrets
 import shutil
 import sys
@@ -227,8 +228,19 @@ class Run:
         return shots / f"{self.shots:04d}{suffix}.png"
 
 
+# A directory under RUNS and part of the domain name: nothing that leads elsewhere.
+RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,39}")
+
+
+def _checked_id(run_id: str) -> str:
+    if not RUN_ID.fullmatch(run_id):
+        raise DeskError(f"run names are letters, digits, -, _ and ., at most 40, starting with a letter or digit "
+                        f"(got {run_id!r})")
+    return run_id
+
+
 def load(run_id: str) -> Run:
-    f = RUNS / run_id / "run.json"
+    f = RUNS / _checked_id(run_id) / "run.json"
     if not f.is_file():
         raise DeskError(f"no run {run_id!r}")
     data = json.loads(f.read_text())
@@ -531,6 +543,8 @@ def up(spec: ImageSpec, run_id: str | None = None, cold: bool = False, force: bo
        displays: int = 1, resolution: tuple[int, int] | None = None, label: str | None = None) -> Run:
     from .maintain import check_usable
 
+    if run_id is not None:
+        _checked_id(run_id)
     for warning in check_usable(spec):
         print(f"[desk] warning: {warning}", file=sys.stderr)
     gc_idle()
