@@ -19,8 +19,6 @@ from .config import HOME, RUNS, Busy, DeskError, ImageSpec, load_image
 from .virt import (conn, domain_uuid, free_port, lookup, prepare_domain_xml, qemu_img_overlay,
                    reflink_copy, uuid_active)
 
-# Runs nobody touched for this long are destroyed by `desk gc` (and by every `desk up`).
-IDLE_TTL = int(os.environ.get("DESK_TTL", 2 * 3600))
 # Head room left for the host when deciding whether another VM fits.
 HOST_RESERVE_MIB = 1024
 # Share of the last minute in which every task waited for memory (PSI "full avg60") from which
@@ -253,6 +251,16 @@ def resolve(run_id: str | None) -> Run:
     return run
 
 
+def idle_ttl() -> int:
+    """Runs nobody touched for this long are destroyed by `desk gc` (and by every `desk up`)."""
+    value = os.environ.get("DESK_TTL", "")
+    try:
+        return int(value) if value else 2 * 3600
+    except ValueError:
+        # Read when needed, not at import: there a bad value would end every command as exit 1.
+        raise DeskError(f"DESK_TTL is a number of seconds (got {value!r})") from None
+
+
 def _mem_available_mib() -> int:
     for line in Path("/proc/meminfo").read_text().splitlines():
         if line.startswith("MemAvailable:"):
@@ -343,12 +351,12 @@ def abandoned_warmup(name: str, xml: str) -> str | None:
 
 
 def gc_idle(verbose: bool = True) -> list[str]:
-    """Take down runs nobody touched for IDLE_TTL, their report written first. Without the state
+    """Take down runs nobody touched for idle_ttl(), their report written first. Without the state
     lock: reading a guest's logs and encoding a video take their time, and nobody should wait for
     that (evidence.finish takes the lock for the moment the domain is destroyed)."""
     from . import evidence
 
-    removed = []
+    ttl, removed = idle_ttl(), []
     for run in all_runs():
         live = run.live_domain() is not None
         if run.in_use() or not run.last_used:
@@ -357,7 +365,7 @@ def gc_idle(verbose: bool = True) -> list[str]:
             if not run.last_used:
                 run.touch()
             continue
-        if run.idle() <= IDLE_TTL:
+        if run.idle() <= ttl:
             continue
         what = f"{'running' if live else 'stopped'}, idle {run.idle() / 3600:.1f} h"
         seen = run.last_used

@@ -6,11 +6,24 @@ from pathlib import Path
 from unittest import mock
 
 from desk import evidence, runs
+from desk.config import DeskError
 
 
 class NoDomains:
     def listAllDomains(self, _flags):
         return []
+
+
+class IdleTtl(unittest.TestCase):
+    def test_seconds_or_the_default(self):
+        with mock.patch.dict(os.environ, {"DESK_TTL": "5"}):
+            self.assertEqual(runs.idle_ttl(), 5)
+        with mock.patch.dict(os.environ, {"DESK_TTL": ""}):
+            self.assertEqual(runs.idle_ttl(), 7200)
+
+    def test_anything_else_is_desks_error_and_only_where_it_is_used(self):
+        with mock.patch.dict(os.environ, {"DESK_TTL": "2h"}), self.assertRaisesRegex(DeskError, "DESK_TTL.*'2h'"):
+            runs.idle_ttl()
 
 
 class Gc(unittest.TestCase):

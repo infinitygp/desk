@@ -217,12 +217,12 @@ def cmd_ls(args) -> None:
 
 
 def cmd_gc(args) -> None:
-    evidence.prune_reports()
     removed = runs.gc_idle()
+    evidence.prune_reports()
     with runs.state_lock():
         removed += runs.gc() + runs.prune_versions()
     if not removed:
-        print(f"nothing to clean (idle limit {runs.IDLE_TTL / 3600:g} h, DESK_TTL to change)")
+        print(f"nothing to clean (idle limit {runs.idle_ttl() / 3600:g} h, DESK_TTL to change)")
 
 
 def cmd_shot(args) -> None:
