@@ -50,10 +50,21 @@ class RunNames(unittest.TestCase):
         for bad in ("a/b", "../x", "", ".hidden", "with space", "x" * 41):
             with self.subTest(bad=bad), self.assertRaisesRegex(DeskError, "run names are"):
                 runs.up(mock.Mock(), run_id=bad)
-            with self.subTest(bad=bad), self.assertRaisesRegex(DeskError, "run names are"):
-                runs.load(bad)
         for good in ("ab12cd", "selftest-0f3a9c", "my_run-2", "f44.test"):
             self.assertEqual(runs._checked_id(good), good)
+
+    def test_runs_named_before_the_check_are_still_found_but_nothing_outside(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch("desk.runs.RUNS", Path(tmp) / "runs"):
+            old = runs.Run(id="my test", image="fedora-44-gnome", domain="desk-my test", ssh_port=1, user="tester",
+                           created=1.0)
+            old.dir.mkdir(parents=True)
+            old.save()
+            self.assertEqual([r.id for r in runs.all_runs()], ["my test"])
+            with mock.patch.object(runs.Run, "hold"), mock.patch.object(runs.Run, "log_event"):
+                self.assertEqual(runs.resolve("my test").id, "my test")
+            for bad in ("../runs/my test", "..", "."):
+                with self.subTest(bad=bad), self.assertRaisesRegex(DeskError, "no run"):
+                    runs.resolve(bad)
 
 
 class LiveDomain(unittest.TestCase):

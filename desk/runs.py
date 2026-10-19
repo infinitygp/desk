@@ -240,7 +240,7 @@ def _checked_id(run_id: str) -> str:
 
 
 def load(run_id: str) -> Run:
-    f = RUNS / _checked_id(run_id) / "run.json"
+    f = RUNS / run_id / "run.json"
     if not f.is_file():
         raise DeskError(f"no run {run_id!r}")
     data = json.loads(f.read_text())
@@ -265,6 +265,9 @@ def resolve(run_id: str | None) -> Run:
     """Explicit id, then $DESK_RUN, then the only active run. Counts as activity for gc."""
     run_id = run_id or os.environ.get("DESK_RUN")
     if run_id:
+        # A directory in RUNS, not further: runs named before names were checked still resolve.
+        if "/" in run_id or run_id in (".", ".."):
+            raise DeskError(f"no run {run_id!r}")
         run = load(run_id)
     else:
         active = [r for r in all_runs() if r.live_domain() is not None]
