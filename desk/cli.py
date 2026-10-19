@@ -590,7 +590,7 @@ def cmd_scenario(args) -> None:
         for w in scenario.fixed_waits(data):
             print(f"warning: {w}")
         return
-    if args.from_step:
+    if args.from_step is not None:
         run = runs.resolve(args.run)
         sys.exit(0 if scenario.continue_scenario(path, run, args.from_step, image=args.image) else 1)
     sys.exit(0 if scenario.run_scenario(path, keep=args.keep, image=args.image) else 1)

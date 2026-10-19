@@ -41,6 +41,20 @@ class WaitUntilExec(unittest.TestCase):
         self.assertEqual(e.exception.code, 1)
 
 
+class ScenarioFrom(unittest.TestCase):
+    def test_from_0_is_refused_not_a_fresh_run(self):
+        args = SimpleNamespace(file="a.toml", action="run", from_step=0, run=None, image=None, keep=False)
+        data = {"image": "a", "step": [{}]}
+        with mock.patch("desk.cli.runs.resolve", return_value=mock.Mock(image="a")), \
+                mock.patch("desk.scenario.load", return_value=data), \
+                mock.patch("desk.scenario.load_image", return_value=mock.Mock()) as image, \
+                mock.patch("desk.scenario.run_scenario") as fresh, \
+                self.assertRaisesRegex(cli.DeskError, "--from 0"):
+            image.return_value.name = "a"
+            cli.cmd_scenario(args)
+        fresh.assert_not_called()
+
+
 class Failures(unittest.TestCase):
     def test_what_desk_relies_on_gets_one_line(self):
         self.assertEqual(explain(subprocess.CalledProcessError(1, ["qemu-img", "create"], stderr=b"No space left\n")),
