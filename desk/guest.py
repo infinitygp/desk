@@ -91,12 +91,16 @@ def ssh_run(port: int, user: str, command: str, *, capture: bool = False, input:
     )
 
 
+class NoConnection(DeskError):
+    """ssh did not reach the guest or lost it: desk could not ask, nothing failed in the guest."""
+
+
 def connected(r: subprocess.CompletedProcess, what: str) -> subprocess.CompletedProcess:
     """ssh exits 255 when it did not reach the guest or lost it: then there is no answer, which
     callers must not read as an empty one (no failed units, no console errors)."""
     if r.returncode == 255:
         why = (r.stderr or b"").decode(errors="replace").strip()[-300:]
-        raise DeskError(f"{what}: no SSH connection to the guest" + (f" ({why})" if why else ""))
+        raise NoConnection(f"{what}: no SSH connection to the guest" + (f" ({why})" if why else ""))
     return r
 
 

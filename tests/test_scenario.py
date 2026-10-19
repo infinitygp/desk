@@ -1,8 +1,11 @@
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
-from desk import scenario
+from desk import guest, scenario
 from desk.config import DeskError
 
 
@@ -150,6 +153,37 @@ class FixedWaits(unittest.TestCase):
                          {"exec": "sleep 1; test -f x", "until": True}, {"root": "systemctl start x"}]}
         found = scenario.fixed_waits(data)
         self.assertEqual([w.split(":")[0] for w in found], ["step 1", "step 3"])
+
+
+class LostConnection(unittest.TestCase):
+    """ssh's 255 is no answer from the guest: desk's failure (exit 2), not a failed step (1)."""
+
+    RUN = SimpleNamespace(ssh_port=1, user="tester")
+    SPEC = SimpleNamespace(root_user="root", family="linux", shell="bash")
+
+    def shell(self, step: dict, *codes: int) -> str:
+        answers = [subprocess.CompletedProcess([], c, b"", b"Connection refused" if c == 255 else b"") for c in codes]
+        with mock.patch("desk.scenario.guest.ssh_run", side_effect=answers), \
+                mock.patch("desk.scenario.time.sleep"):
+            return scenario._shell(self.RUN, self.SPEC, step, as_root=False)
+
+    def test_no_connection_is_not_a_failed_step(self):
+        with self.assertRaisesRegex(guest.NoConnection, "Connection refused"):
+            self.shell({"exec": "true"}, 255)
+
+    def test_until_tries_again_while_the_guest_comes_back(self):
+        self.assertEqual(self.shell({"exec": "true", "until": True}, 255, 255, 0), "")
+
+    def test_a_step_that_expects_255_gets_it(self):
+        self.assertEqual(self.shell({"exec": "reboot", "rc": 255}, 255), "")
+
+    def test_the_steps_stop_with_it(self):
+        run = mock.Mock()
+        with mock.patch("desk.scenario._step", side_effect=guest.NoConnection("no SSH connection")), \
+                mock.patch("desk.scenario.Steps"), mock.patch("desk.scenario.display"), \
+                self.assertRaises(guest.NoConnection):
+            scenario._run_steps(run, self.SPEC, {"step": [{"exec": "true", "soft": True}, {"exec": "true"}]})
+        self.assertTrue(any(c.kwargs.get("ok") is False for c in run.log_event.call_args_list))
 
 
 class SplitWindows(unittest.TestCase):

@@ -239,6 +239,8 @@ def _shell(run, spec, step: dict, as_root: bool) -> str:
         if problem is None:
             return out.strip().splitlines()[-1][:120] if out.strip() else ""
         if not step.get("until") or time.monotonic() + 2 > deadline:
+            if step.get("rc", 0) != 255:
+                guest.connected(r, f"step {command[:60]!r}")
             break
         time.sleep(2)
     if step.get("until"):
@@ -401,11 +403,14 @@ def _run_steps(run, spec, data: dict, first: int = 1) -> bool:
         action, arg = describe(step)
         label = step.get("name") or f"{action} {arg}".strip()
         t0 = time.monotonic()
+        lost = None
         try:
             detail = _step(run, spec, steps, step)
             passed = True
         except (StepFailed, DeskError, subprocess.TimeoutExpired) as e:
             detail, passed = str(e), False
+            # Without the guest no step says anything about the product: desk's failure (exit 2).
+            lost = e if isinstance(e, guest.NoConnection) else None
         run.log_event(step=i, action=label, ok=passed, detail=detail, seconds=round(time.monotonic() - t0, 1))
         head, *rest = detail.splitlines() or [""]
         print(f"{'PASS' if passed else 'FAIL'}  {i:>2}. {label[:60]:<60} {time.monotonic() - t0:5.1f}s  "
@@ -421,6 +426,8 @@ def _run_steps(run, spec, data: dict, first: int = 1) -> bool:
                 run.log_event(shot=str(shot))
             except DeskError:
                 pass  # the VM itself is gone; the report says so
+            if lost:
+                raise lost
             # soft: an independent check whose failure should not hide the ones after it.
             if not step.get("soft"):
                 break

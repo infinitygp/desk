@@ -265,7 +265,7 @@ def _wait_exec(run: runs.Run, args) -> None:
     spec = runs.spec_for(run)
     timeout = args.timeout if args.timeout is not None else 120
     deadline = time.monotonic() + timeout
-    start, out = time.monotonic(), b""
+    start, out, r = time.monotonic(), b"", None
     while True:
         try:
             limit = max(5, min(60, deadline - time.monotonic()))
@@ -278,10 +278,12 @@ def _wait_exec(run: runs.Run, args) -> None:
                 print(f"succeeded after {time.monotonic() - start:.0f}s" + (f": {last[-1][:200]}" if last else ""))
                 return
         except subprocess.TimeoutExpired:
-            out = b"(the command itself did not finish)"
+            r, out = None, b"(the command itself did not finish)"
         if time.monotonic() + 2 > deadline:
             break
         time.sleep(2)
+    if r is not None:
+        guest.connected(r, f"still no answer after {timeout:.0f}s")  # not a command that kept failing
     run.log_event(rc=1)
     tail = out.decode(errors="replace").strip()[-500:]
     print(f"still failing after {timeout:.0f}s" + (f"; last output:\n{tail}" if tail else ""))

@@ -1,9 +1,10 @@
 import errno
 import subprocess
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
-from desk import cli
+from desk import cli, guest
 from desk.cli import _text_args, explain
 
 
@@ -19,6 +20,25 @@ class TextArgs(unittest.TestCase):
                      ["type", "-"]):
             with self.subTest(argv=argv):
                 self.assertEqual(_text_args(argv), argv)
+
+
+class WaitUntilExec(unittest.TestCase):
+    def wait(self, code: int):
+        run = mock.Mock(ssh_port=1, user="tester")
+        answer = subprocess.CompletedProcess([], code, b"", b"Connection refused" if code == 255 else b"")
+        args = SimpleNamespace(timeout=0, root=False, until_exec="test -f /tmp/x")
+        with mock.patch("desk.cli.runs.spec_for"), mock.patch("desk.cli.guest.command", return_value="x"), \
+                mock.patch("desk.cli.guest.ssh_run", return_value=answer):
+            cli._wait_exec(run, args)
+
+    def test_a_guest_that_never_answered_is_not_a_failed_check(self):
+        with self.assertRaisesRegex(guest.NoConnection, "Connection refused"):
+            self.wait(255)
+
+    def test_a_command_that_kept_failing_is(self):
+        with self.assertRaises(SystemExit) as e:
+            self.wait(1)
+        self.assertEqual(e.exception.code, 1)
 
 
 class Failures(unittest.TestCase):
