@@ -1,7 +1,10 @@
 import os
+import shutil
+import subprocess
 import tempfile
 import unittest
 from dataclasses import replace
+from unittest import mock
 from pathlib import Path
 
 from desk import images
@@ -150,6 +153,16 @@ class InstallProblem(unittest.TestCase):
         self.assertIn("did not finish", install_problem(spec, boot))
         # Images without a marker are judged by powering off alone, as before.
         self.assertIsNone(install_problem(load_image("fedora-44-gnome"), ""))
+
+
+
+@unittest.skipIf(shutil.which("curl") is None, "curl not installed")
+class HttpsOnly(unittest.TestCase):
+    def test_plain_http_is_refused_before_anything_is_fetched(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(images, "CACHE", Path(tmp)), \
+                self.assertRaises(subprocess.CalledProcessError) as e:
+            images._fetch_published("http://127.0.0.1:9/x.img", "http://127.0.0.1:9/x.img.SHA256", str.split)
+        self.assertIn("protocol", e.exception.stderr.lower())  # curl's "Protocol "http" not supported or disabled"
 
 
 if __name__ == "__main__":

@@ -188,11 +188,15 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+# Images and the checksums they are checked against come over HTTPS only, redirects included.
+HTTPS_ONLY = ["--proto", "=https", "--proto-redir", "=https"]
+
+
 def _download(url: str, target: Path) -> None:
     _log(f"downloading {url}")
     # Give up on a stalled transfer instead of hanging an unattended build.
-    subprocess.run(["curl", "-fL", "--progress-bar", "--retry", "3", "--speed-limit", "10000", "--speed-time", "300",
-                    "-o", f"{target}.part", url], check=True)
+    subprocess.run(["curl", *HTTPS_ONLY, "-fL", "--progress-bar", "--retry", "3", "--speed-limit", "10000",
+                    "--speed-time", "300", "-o", f"{target}.part", url], check=True)
     Path(f"{target}.part").rename(target)
 
 
@@ -218,7 +222,7 @@ def _fetch_iso(spec: ImageSpec) -> Path:
 def _fetch_published(url: str, sums_url: str, pick) -> Path:
     """`url` into the cache, checked against the checksum published with it (`pick` finds it in
     the sums file); downloaded again only when that checksum changes."""
-    sums = subprocess.run(["curl", "-fsSL", "--retry", "3", "--max-time", "60", sums_url],
+    sums = subprocess.run(["curl", *HTTPS_ONLY, "-fsSL", "--retry", "3", "--max-time", "60", sums_url],
                           capture_output=True, text=True, check=True).stdout
     want = pick(sums)
     target = CACHE / url.rsplit("/", 1)[-1]
