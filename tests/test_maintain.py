@@ -213,6 +213,25 @@ class SelftestStart(unittest.TestCase):
         up.assert_not_called()
         record.assert_not_called()
 
+    def test_a_warm_state_taken_while_waiting_to_start_is_not_the_images_failure(self):
+        from types import SimpleNamespace
+
+        from desk import selftest
+
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "memory.save").write_bytes(b"")
+            spec = SimpleNamespace(name="x", family="linux", base_xml=Path(tmp) / "memory.save", warm_dir=Path(tmp),
+                                   warm_version=None)
+            cold = mock.Mock(id="ab12cd", domain="desk-ab12cd")
+            with mock.patch("desk.selftest.runs.cold_reason", return_value=None), \
+                    mock.patch("desk.selftest.runs.warm_is_current", return_value=True), \
+                    mock.patch("desk.selftest.runs.up", return_value=cold), \
+                    mock.patch("desk.selftest.runs.down") as down, mock.patch("desk.maintain.record") as record, \
+                    self.assertRaisesRegex(Busy, "taken by another run"):
+                selftest.run_selftest("x", spec=spec)
+        down.assert_called_once_with(cold)
+        record.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

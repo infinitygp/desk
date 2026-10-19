@@ -143,6 +143,9 @@ def run_selftest(image: str, reboot: bool = False, keep: bool = False, spec: Ima
         nonlocal run
         run = runs.up(spec, run_id=f"selftest-{secrets.token_hex(3)}", label="selftest")
         cold = run.domain == f"desk-{run.id}"
+        if cold and usable and not spec.warm_version:
+            # The only reason left: another run restored it while this one waited for memory.
+            raise Busy(f"warm state of {spec.name} was taken by another run while the selftest waited to start")
         _check(expect_cold or not cold, "booted cold instead of restoring" + (f": {cold_reason}" if cold_reason else ""))
         return f"run {run.id}" + (f"; {cold_reason}" if cold else "")
 
