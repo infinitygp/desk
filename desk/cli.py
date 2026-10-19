@@ -283,7 +283,8 @@ def _wait_exec(run: runs.Run, args) -> None:
             break
         time.sleep(2)
     if r is not None:
-        guest.connected(r, f"still no answer after {timeout:.0f}s")  # not a command that kept failing
+        user = spec.root_user if args.root else run.user
+        guest.lost(r, run.ssh_port, user, f"still no answer after {timeout:.0f}s")  # not a command that kept failing
     run.log_event(rc=1)
     tail = out.decode(errors="replace").strip()[-500:]
     print(f"still failing after {timeout:.0f}s" + (f"; last output:\n{tail}" if tail else ""))

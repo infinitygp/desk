@@ -110,6 +110,13 @@ def connected(r: subprocess.CompletedProcess, what: str) -> subprocess.Completed
     return r
 
 
+def lost(r: subprocess.CompletedProcess, port: int, user: str, what: str) -> None:
+    """NoConnection when a command's 255 was ssh's own: the guest does not answer `exit 0` either.
+    A program may exit 255 itself (`return -1`), and that is its result, not desk's failure."""
+    if r.returncode == 255 and ssh_run(port, user, "exit 0", capture=True, timeout=30).returncode == 255:
+        connected(r, what)
+
+
 def _why(r: subprocess.CompletedProcess | None) -> str:
     """What the last attempt of a wait said: a refused key, a refused connection and a guest that
     does not answer are different problems."""

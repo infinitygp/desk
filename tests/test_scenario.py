@@ -168,8 +168,13 @@ class LostConnection(unittest.TestCase):
             return scenario._shell(self.RUN, self.SPEC, step, as_root=False)
 
     def test_no_connection_is_not_a_failed_step(self):
+        # The command's 255, then the same from a plain `exit 0`: ssh's own.
         with self.assertRaisesRegex(guest.NoConnection, "Connection refused"):
-            self.shell({"exec": "true"}, 255)
+            self.shell({"exec": "true"}, 255, 255)
+
+    def test_a_program_that_exits_255_itself_is_a_failed_step(self):
+        with self.assertRaisesRegex(scenario.StepFailed, "exit 255"):
+            self.shell({"exec": "myprog --selfcheck"}, 255, 0)
 
     def test_until_tries_again_while_the_guest_comes_back(self):
         self.assertEqual(self.shell({"exec": "true", "until": True}, 255, 255, 0), "")

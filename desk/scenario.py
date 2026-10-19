@@ -240,7 +240,7 @@ def _shell(run, spec, step: dict, as_root: bool) -> str:
             return out.strip().splitlines()[-1][:120] if out.strip() else ""
         if not step.get("until") or time.monotonic() + 2 > deadline:
             if step.get("rc", 0) != 255:
-                guest.connected(r, f"step {command[:60]!r}")
+                guest.lost(r, run.ssh_port, user, f"step {command[:60]!r}")
             break
         time.sleep(2)
     if step.get("until"):

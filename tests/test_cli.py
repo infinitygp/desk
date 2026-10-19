@@ -23,22 +23,24 @@ class TextArgs(unittest.TestCase):
 
 
 class WaitUntilExec(unittest.TestCase):
-    def wait(self, code: int):
+    def wait(self, code: int, probe: int = 0):
         run = mock.Mock(ssh_port=1, user="tester")
-        answer = subprocess.CompletedProcess([], code, b"", b"Connection refused" if code == 255 else b"")
+        answers = [subprocess.CompletedProcess([], c, b"", b"Connection refused" if c == 255 else b"")
+                   for c in (code, probe)]
         args = SimpleNamespace(timeout=0, root=False, until_exec="test -f /tmp/x")
         with mock.patch("desk.cli.runs.spec_for"), mock.patch("desk.cli.guest.command", return_value="x"), \
-                mock.patch("desk.cli.guest.ssh_run", return_value=answer):
+                mock.patch("desk.cli.guest.ssh_run", side_effect=answers):
             cli._wait_exec(run, args)
 
     def test_a_guest_that_never_answered_is_not_a_failed_check(self):
         with self.assertRaisesRegex(guest.NoConnection, "Connection refused"):
-            self.wait(255)
+            self.wait(255, probe=255)
 
     def test_a_command_that_kept_failing_is(self):
-        with self.assertRaises(SystemExit) as e:
-            self.wait(1)
-        self.assertEqual(e.exception.code, 1)
+        for code in (1, 255):  # 255 too when the guest answers otherwise: the program's own
+            with self.subTest(code=code), self.assertRaises(SystemExit) as e:
+                self.wait(code)
+            self.assertEqual(e.exception.code, 1)
 
 
 class ScenarioFrom(unittest.TestCase):
