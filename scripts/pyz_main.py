@@ -37,8 +37,11 @@ def unpack(archive: Path, cache: Path) -> Path:
         shutil.rmtree(tmp, ignore_errors=True)  # the other one was quicker
     cutoff = time.time() - KEEP_DAYS * 86400
     for old in cache.iterdir():
-        if old != target and old.is_dir() and old.stat().st_mtime < cutoff:
-            shutil.rmtree(old, ignore_errors=True)
+        try:
+            if old != target and old.is_dir() and old.stat().st_mtime < cutoff:
+                shutil.rmtree(old, ignore_errors=True)
+        except OSError:
+            continue  # moved or removed meanwhile by another desk that starts
     return target
 
 
@@ -63,4 +66,5 @@ def main() -> None:
     desk()
 
 
-main()
+if __name__ == "__main__":
+    main()

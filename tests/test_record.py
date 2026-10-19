@@ -84,5 +84,15 @@ class FailedEncode(unittest.TestCase):
             self.assertEqual((report, videos), (None, []))
 
 
+
+class Kill(unittest.TestCase):
+    def test_a_recorder_that_ended_meanwhile_does_not_stop_the_teardown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = FakeRun(Path(tmp))
+            with mock.patch("desk.record._pid", return_value=4242), \
+                    mock.patch("desk.record.os.kill", side_effect=ProcessLookupError):
+                record.kill(run)
+
+
 if __name__ == "__main__":
     unittest.main()

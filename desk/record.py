@@ -3,6 +3,7 @@ with GStreamer when the recording stops. Frames that did not change are hard lin
 screen costs no space; the wall-clock time is drawn in a bar below the picture, so the video lines
 up with the report's timeline."""
 
+import contextlib
 import hashlib
 import json
 import os
@@ -68,12 +69,12 @@ def stop(run) -> Path | None:
     """Stop the recorder and encode what it captured; returns the video, if any."""
     pid = _pid(run)
     if pid is not None:
-        os.kill(pid, signal.SIGTERM)
+        _signal(pid, signal.SIGTERM)
         deadline = time.monotonic() + 15
         while _pid(run) is not None and time.monotonic() < deadline:
             time.sleep(0.2)
         if _pid(run) is not None:
-            os.kill(pid, signal.SIGKILL)  # stuck in a screenshot; it must not write while frames are encoded
+            _signal(pid, signal.SIGKILL)  # stuck in a screenshot; it must not write while frames are encoded
     return encode(run)
 
 
@@ -81,7 +82,12 @@ def kill(run) -> None:
     """For runs destroyed without `desk down` (gc): no video, just no stray recorder."""
     pid = _pid(run)
     if pid is not None:
-        os.kill(pid, signal.SIGKILL)
+        _signal(pid, signal.SIGKILL)
+
+
+def _signal(pid: int, sig: int) -> None:
+    with contextlib.suppress(ProcessLookupError):  # it ended by itself meanwhile (its time limit)
+        os.kill(pid, sig)
 
 
 def encode(run) -> Path | None:

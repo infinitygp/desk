@@ -150,5 +150,30 @@ class Release(unittest.TestCase):
         self.assertIn("git pull", r.stderr)
 
 
+
+class Unpack(unittest.TestCase):
+    def test_an_old_build_another_desk_removes_meanwhile_is_skipped(self):
+        import importlib.util
+        from unittest import mock
+
+        spec = importlib.util.spec_from_file_location("pyz_main", ROOT / "scripts" / "pyz_main.py")
+        pyz_main = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(pyz_main)
+        with tempfile.TemporaryDirectory() as tmp:
+            archive, cache = Path(tmp) / "desk.pyz", Path(tmp) / "cache"
+            with zipfile.ZipFile(archive, "w") as z:
+                z.writestr("BUILD.json", json.dumps({"id": "new"}))
+            (cache / "old").mkdir(parents=True)
+            stat = Path.stat
+
+            def gone(path, *args, **kwargs):
+                if path.name == "old":
+                    raise FileNotFoundError(path)
+                return stat(path, *args, **kwargs)
+
+            with mock.patch.object(Path, "stat", gone):
+                self.assertEqual(pyz_main.unpack(archive, cache), cache / "new")
+
+
 if __name__ == "__main__":
     unittest.main()
