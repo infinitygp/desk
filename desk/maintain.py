@@ -162,6 +162,7 @@ def _family(base: str, members: list[str], out: Path, dry_run: bool) -> list[str
         runs.check_memory(specs[base])
         new_base = images.build(specs[base], promote_it=False) if reasons else None
         tested: dict[str, ImageSpec] = {}
+        busy = None
         for m in members:
             spec = replace(specs[m], base_version=new_base) if new_base else specs[m]
             if new_base or plan[m]:
@@ -172,9 +173,20 @@ def _family(base: str, members: list[str], out: Path, dry_run: bool) -> list[str
                     raise
             # Short of memory, the selftest's `desk up` waits for other runs as any does, and gives
             # up as Busy: the family is skipped, not failed.
-            if not run_selftest(m, reboot=True, spec=spec, shots_dir=out / m):
+            try:
+                passed = run_selftest(m, reboot=True, spec=spec, shots_dir=out / m)
+            except Busy as e:
+                if spec.warm_version:
+                    raise
+                # Nothing new of this member to promote: the others' new builds go on without it.
+                busy = e
+                lines.append(f"- {m}: selftest skipped ({e})")
+                continue
+            if not passed:
                 raise SelftestFailed(f"selftest of {m} failed" + (" on the new build" if spec.warm_version else ""))
             tested[m] = spec
+        if busy and not tested:
+            raise busy  # nothing was checked: the family is skipped
         if new_base:
             images.promote(BASE / base, replace(specs[base], base_version=new_base).base_dir)
         for m, spec in tested.items():

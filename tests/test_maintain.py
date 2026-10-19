@@ -154,6 +154,38 @@ class ExitCode(unittest.TestCase):
                 self.maintain(failure)
 
 
+class BusyMember(unittest.TestCase):
+    """A member with nothing new whose warm state another run holds does not cost the others theirs."""
+
+    def family(self, new_variant: bool):
+        from contextlib import nullcontext
+
+        def selftest(m, reboot, spec, shots_dir):
+            if spec.warm_version:
+                return True
+            raise Busy(f"warm state of {m} is in use by another run")
+
+        warm = {"fedora-44-gnome": [], "fedora-44-gnome-pl": ["definition changed"] if new_variant else []}
+        with mock.patch("desk.maintain.runs.image_lock", return_value=nullcontext()), \
+                mock.patch("desk.maintain.runs.check_memory"), \
+                mock.patch("desk.maintain.base_reasons", return_value=[]), \
+                mock.patch("desk.maintain.warm_reasons", side_effect=lambda spec: warm[spec.name]), \
+                mock.patch("desk.maintain.images.warm", return_value="20261019-000000"), \
+                mock.patch("desk.maintain.images.promote") as promote, \
+                mock.patch("desk.selftest.run_selftest", side_effect=selftest):
+            lines = maintain._family("fedora-44-gnome", ["fedora-44-gnome", "fedora-44-gnome-pl"], Path("/x"), False)
+        return lines, promote
+
+    def test_the_new_build_of_another_member_is_promoted(self):
+        lines, promote = self.family(new_variant=True)
+        self.assertIn("- fedora-44-gnome: selftest skipped", "\n".join(lines))
+        self.assertEqual(promote.call_count, 1)
+
+    def test_nothing_tested_at_all_is_skipped(self):
+        with self.assertRaises(Busy):
+            self.family(new_variant=False)
+
+
 class SelftestStart(unittest.TestCase):
     def test_a_host_without_room_is_no_result_rather_than_a_failed_one(self):
         from desk import selftest
