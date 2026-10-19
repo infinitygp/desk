@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest import mock
 
 from desk import images, maintain
-from desk.config import DeskError, load_image
+from desk.config import Busy, DeskError, load_image
 
 DAY = 86400
 
@@ -34,9 +34,10 @@ class Families(unittest.TestCase):
             self.assertNotIn("arch-gnome", fams)
             with self.assertRaises(DeskError):
                 maintain.families()
-            # The unattended run goes on with the rest and ends as failed.
-            with mock.patch("desk.maintain.selected", return_value=[]), mock.patch("desk.maintain._log"):
-                self.assertFalse(maintain.maintain(dry_run=True))
+            # The unattended run goes on with the rest and ends as failed: desk's failure, not a check's.
+            with mock.patch("desk.maintain.selected", return_value=[]), mock.patch("desk.maintain._log"), \
+                    self.assertRaisesRegex(DeskError, "not every image"):
+                maintain.maintain(dry_run=True)
 
 
 class Due(unittest.TestCase):
@@ -132,6 +133,36 @@ class Due(unittest.TestCase):
             self.assertIn("selftest of windows-11 failed", maintain.check_usable(self.spec)[0])
             self.build("warm")
             self.assertEqual(maintain.check_usable(self.spec), [])
+
+
+class ExitCode(unittest.TestCase):
+    """1 is a selftest that failed; what kept desk from looking after an image is desk's."""
+
+    def maintain(self, failure: Exception):
+        with mock.patch("desk.maintain.families", return_value={"x": ["x"]}), \
+                mock.patch("desk.maintain.selected", return_value=["x"]), \
+                mock.patch("desk.maintain._family", side_effect=failure), \
+                mock.patch("desk.maintain._log"):
+            return maintain.maintain(dry_run=True)
+
+    def test_a_failed_selftest_is_a_failed_check(self):
+        self.assertFalse(self.maintain(maintain.SelftestFailed("selftest of x failed on the new build")))
+
+    def test_what_kept_desk_from_it_is_not(self):
+        for failure in (Busy("not enough free memory for x"), DeskError("download failed")):
+            with self.subTest(failure=failure), self.assertRaisesRegex(DeskError, "not every image"):
+                self.maintain(failure)
+
+
+class SelftestStart(unittest.TestCase):
+    def test_a_host_without_room_is_no_result_rather_than_a_failed_one(self):
+        from desk import selftest
+
+        with mock.patch("desk.selftest.runs.up", side_effect=Busy("not enough free memory for fedora-44-gnome")), \
+                mock.patch("desk.maintain.record") as record, \
+                self.assertRaises(Busy):
+            selftest.run_selftest("fedora-44-gnome", spec=load_image("fedora-44-gnome"))
+        record.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -22,7 +22,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from . import images, runs
-from .config import BASE, HOME, LAUNCHER, URI, WARM, DeskError, ImageSpec, list_images, load_image
+from .config import BASE, HOME, LAUNCHER, URI, WARM, Busy, DeskError, ImageSpec, list_images, load_image
 
 MAINTAIN = HOME / "maintain"
 STATUS = MAINTAIN / "status.json"
@@ -176,7 +176,7 @@ def _family(base: str, members: list[str], out: Path, dry_run: bool) -> list[str
             # than fail the selftest (and with it the new build) for a reason that is not the image's.
             _wait_for_memory(spec)
             if not run_selftest(m, reboot=True, spec=spec, shots_dir=out / m):
-                raise DeskError(f"selftest of {m} failed" + (" on the new build" if spec.warm_version else ""))
+                raise SelftestFailed(f"selftest of {m} failed" + (" on the new build" if spec.warm_version else ""))
             tested[m] = spec
         if new_base:
             images.promote(BASE / base, replace(specs[base], base_version=new_base).base_dir)
@@ -186,6 +186,10 @@ def _family(base: str, members: list[str], out: Path, dry_run: bool) -> list[str
         if new_base or any(s.warm_version for s in tested.values()):
             lines.append("  new builds are current")
     return lines
+
+
+class SelftestFailed(DeskError):
+    """The one failure of `desk maintain` that is a check's (exit 1); the others are desk's (2)."""
 
 
 def _wait_for_memory(spec: ImageSpec, timeout: float = MEMORY_WAIT) -> None:
@@ -218,7 +222,7 @@ def maintain(only: str | None = None, dry_run: bool = False) -> bool:
     if not dry_run:
         out.mkdir(parents=True, exist_ok=True)
     report = [f"# desk maintain {time.strftime('%Y-%m-%d %H:%M')}", ""]
-    all_ok = True
+    all_ok, checks_ok = True, True
     broken: dict[str, str] = {}
     fams = families(broken)
     if only in broken:
@@ -242,16 +246,17 @@ def maintain(only: str | None = None, dry_run: bool = False) -> bool:
         t0 = time.monotonic()
         try:
             lines = _family(base, members, out, dry_run)
-            ok, note = True, "ok"
+            ok, note, skipped = True, "ok", False
         except DeskError as e:
-            lines, ok, note = [f"- {base}: {e}"], False, str(e)
+            lines, ok, note, skipped = [f"- {base}: {e}"], False, str(e), isinstance(e, Busy)
+            checks_ok &= not isinstance(e, SelftestFailed)
         except Exception as e:  # noqa: BLE001 - one broken family must not stop the others
             if dry_run:  # nothing is written then, the directory included
                 traceback.print_exc()
             else:
                 (out / f"{base}.traceback").write_text(traceback.format_exc())
             lines, ok, note = [f"- {base}: {type(e).__name__}: {e} (see {base}.traceback)"], False, str(e)
-        skipped = "not enough free memory" in note
+            skipped = False
         # Skipped is not success either: the systemd unit shows it as failed.
         all_ok &= ok
         result = "SKIPPED" if skipped else "done" if ok else "FAILED"
@@ -265,13 +270,20 @@ def maintain(only: str | None = None, dry_run: bool = False) -> bool:
                     continue  # keep showing the earlier failure
                 record(m, "maintain", ok=None if skipped else ok, note=note, report=str(out / "report.md"))
     if dry_run:
-        return all_ok
+        return _outcome(all_ok, checks_ok)
     with runs.state_lock():
         report += [f"gc: removed {p}" for p in runs.prune_versions(verbose=False)]
     (out / "report.md").write_text("\n".join(report) + "\n")
     _log(f"report: {out / 'report.md'}")
     for old in sorted(p for p in MAINTAIN.iterdir() if p.is_dir())[:-KEEP_REPORTS]:
         shutil.rmtree(old, ignore_errors=True)
+    return _outcome(all_ok, checks_ok)
+
+
+def _outcome(all_ok: bool, checks_ok: bool) -> bool:
+    """False (exit 1) when a selftest failed; an error when only desk's own work did."""
+    if checks_ok and not all_ok:
+        raise DeskError("not every image could be looked after; the lines above say why")
     return all_ok
 
 

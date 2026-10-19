@@ -69,6 +69,11 @@ class DeskError(Exception):
     pass
 
 
+class Busy(DeskError):
+    """The host could not give what was asked for in time (memory, a lock): nothing of the image
+    or the product under test was tried."""
+
+
 @dataclass
 class ImageSpec:
     name: str

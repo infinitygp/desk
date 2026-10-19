@@ -15,7 +15,7 @@ from pathlib import Path
 import libvirt
 
 from . import guest, images
-from .config import HOME, RUNS, DeskError, ImageSpec, load_image
+from .config import HOME, RUNS, Busy, DeskError, ImageSpec, load_image
 from .virt import (conn, domain_uuid, free_port, lookup, prepare_domain_xml, qemu_img_overlay,
                    reflink_copy, uuid_active)
 
@@ -66,7 +66,7 @@ def _flock(path: Path, waiting: str, timeout: float):
                     print(f"[desk] waiting for {waiting}: {holder}", file=sys.stderr)
                     told = True
                 if time.monotonic() > deadline:
-                    raise DeskError(f"gave up after {timeout / 60:.0f} min waiting for {waiting}, still held by "
+                    raise Busy(f"gave up after {timeout / 60:.0f} min waiting for {waiting}, still held by "
                                     f"{holder}; if that command hangs, stop it and try again") from None
                 time.sleep(0.5)
         _note(f, f"desk {' '.join(sys.argv[1:4])} (pid {os.getpid()}, since {time.strftime('%H:%M:%S')})")
@@ -296,7 +296,7 @@ def check_memory(spec: ImageSpec) -> None:
         hint = f"; running desk VMs: {', '.join(running)}" if running else ""
         why = (f"{avail} MiB available, {need} MiB needed" if avail < need else
                f"the host is swapping: all tasks waited for memory {stall:.0f} % of the last minute")
-        raise DeskError(f"not enough free memory for {spec.name}: {why}{hint} (desk down <id>, or --force)")
+        raise Busy(f"not enough free memory for {spec.name}: {why}{hint} (desk down <id>, or --force)")
 
 
 def warm_meta(spec: ImageSpec) -> dict:

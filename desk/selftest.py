@@ -10,7 +10,7 @@ import urllib.request
 from pathlib import Path
 
 from . import a11y, display, guest, runs
-from .config import DeskError, ImageSpec, load_image
+from .config import Busy, DeskError, ImageSpec, load_image
 
 
 class Failed(Exception):
@@ -117,6 +117,8 @@ def run_selftest(image: str, reboot: bool = False, keep: bool = False, spec: Ima
         try:
             detail = fn() or ""
             ok = True
+        except Busy:
+            raise  # the host's state, not the image's: no result rather than a failed one
         except (Failed, DeskError) as e:
             detail, ok = str(e), False
             if shots_dir and run is not None and run.live_domain() is not None:
