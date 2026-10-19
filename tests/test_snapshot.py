@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest import mock
 
@@ -22,9 +23,11 @@ class Run:
     def live_domain(self):
         return self
 
-    def save(self, path=None):
-        if path is None:
-            return  # run.json
+    @contextmanager
+    def edit(self):  # run.json
+        yield self
+
+    def save(self, path):
         if self.save_fails:
             raise RuntimeError("no space left on device")
         Path(path).write_text("memory")

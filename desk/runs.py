@@ -151,10 +151,24 @@ class Run:
         return RUNS / self.id
 
     def save(self) -> None:
+        """Write the whole run: only for a new one; later changes go through `edit`."""
         # Atomic: other desk processes read run.json at any time.
         tmp = self.dir / f".run.json.{os.getpid()}"
         tmp.write_text(json.dumps(asdict(self), indent=2))
         os.replace(tmp, self.dir / "run.json")
+
+    @contextmanager
+    def edit(self):
+        """run.json as it is now, written back after the block and taken over by this object.
+        Other commands change it meanwhile (desk shot its count, desk clock the offset), and a
+        copy loaded earlier saved whole would undo what they wrote."""
+        with open(self.dir / ".run.lock", "a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)  # held for one read and one write
+            current = load(self.id)
+            yield current
+            current.save()
+        for f in fields(self):
+            setattr(self, f.name, getattr(current, f.name))
 
     def hold(self) -> None:
         """Mark the run as in use for the lifetime of this process (and of an exec'd ssh)."""
@@ -182,8 +196,8 @@ class Run:
             f.write(json.dumps({"t": time.time(), **event}, ensure_ascii=False) + "\n")
 
     def touch(self) -> None:
-        self.last_used = time.time()
-        self.save()
+        with self.edit() as run:
+            run.last_used = time.time()
 
     def idle(self) -> float:
         return time.time() - (self.last_used or self.created)
@@ -202,8 +216,8 @@ class Run:
         return d
 
     def next_shot_path(self, label: str = "") -> Path:
-        self.shots += 1
-        self.save()
+        with self.edit() as run:
+            run.shots += 1
         shots = self.dir / "shots"
         shots.mkdir(exist_ok=True)
         suffix = f"-{label}" if label else ""
@@ -620,8 +634,8 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
             from . import steps
 
             steps.run_prepare(spec, run)
-            run.ready = time.time()
-            run.save()
+            with run.edit() as r:
+                r.ready = time.time()
     except BaseException:
         # What the screen showed is the best clue to a start that failed (prepare not finding
         # what it waits for, a session that did not come up).

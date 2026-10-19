@@ -26,6 +26,25 @@ class IdleTtl(unittest.TestCase):
             runs.idle_ttl()
 
 
+class RunFile(unittest.TestCase):
+    def test_commands_side_by_side_keep_each_others_changes(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch("desk.runs.RUNS", Path(tmp)):
+            first = runs.Run(id="r1", image="fedora-44-gnome", domain="desk-r1", ssh_port=1, user="tester",
+                             created=1.0)
+            first.dir.mkdir()
+            first.save()
+            # Two commands that loaded the run before either wrote: desk clock and desk shot.
+            clock, shot = runs.load("r1"), runs.load("r1")
+            with clock.edit() as r:
+                r.clock_offset = -7200.0
+            shot.touch()
+            paths = {shot.next_shot_path(), runs.load("r1").next_shot_path()}
+            self.assertEqual(len(paths), 2)
+            saved = runs.load("r1")
+            self.assertEqual((saved.clock_offset, saved.shots), (-7200.0, 2))
+            self.assertEqual(shot.clock_offset, -7200.0)  # taken over by the object too
+
+
 class Gc(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()

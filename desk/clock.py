@@ -78,8 +78,8 @@ def set_time(run, value: str) -> float:
 
 
 def _jump(run, target: float) -> None:
-    run.clock_offset = target - time.time()
-    run.save()
+    with run.edit() as r:
+        r.clock_offset = target - time.time()
     apply(run)
 
 
@@ -178,8 +178,8 @@ def advance(run, value: str, step: str, timeout: float = 600):
 
 
 def reset(run) -> None:
-    run.clock_offset = 0.0
-    run.save()
+    with run.edit() as r:
+        r.clock_offset = 0.0
     apply(run)
     _sync(run, True)
     run.log_event(clock="reset")

@@ -108,8 +108,8 @@ def restore(run, name: str) -> float:
         tmp.chmod(0o644)
         os.replace(tmp, run.dir / f)
     # The clock as it was then too: whether the guest syncs its time is part of its disk.
-    run.clock_offset = meta.get("clock_offset", 0.0)
-    run.save()
+    with run.edit() as r:
+        r.clock_offset = meta.get("clock_offset", 0.0)
     # Extra disks as they were then: the saved guest has exactly those plugged in.
     shutil.rmtree(disks.directory(run), ignore_errors=True)
     if (d / "disks").exists():

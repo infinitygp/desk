@@ -31,11 +31,11 @@ def apply(run, spec: ImageSpec, resolution: tuple[int, int] | None = None, scale
     else:
         spec.need_desktop("desk display")
         _gnome(run, resolution, scale)
-    if scale is not None:
-        run.scale = scale
-    if resolution is not None:
-        run.resolution = list(resolution)
-    run.save()
+    with run.edit() as r:
+        if scale is not None:
+            r.scale = scale
+        if resolution is not None:
+            r.resolution = list(resolution)
 
 
 def _windows(run, spec: ImageSpec, resolution, scale) -> None:
