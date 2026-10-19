@@ -160,6 +160,37 @@ class Report(unittest.TestCase):
         self.assertIn("step 2 FAILED", md)  # the timeline keeps the first attempt
 
 
+class DiffFailure(unittest.TestCase):
+    def test_a_diff_that_fails_leaves_the_rest_of_the_report(self):
+        import tempfile
+
+        from desk import evidence
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            run_dir.mkdir()
+            run = mock.Mock(id="r1", dir=run_dir, image="fedora-44-gnome", created=99.0, ready=0.0)
+            run.live_domain.return_value = None
+            # cp --reflink=always on a file system without reflinks
+            no_reflink = subprocess.CalledProcessError(1, ["cp", "--reflink=always"])
+            with mock.patch.object(evidence, "REPORTS", Path(tmp) / "reports"), \
+                    mock.patch.object(evidence, "file_changes", side_effect=no_reflink):
+                self.assertFalse(evidence.reported(run))
+                md = (evidence.collect(run, diff=True) / "report.md").read_text()
+                self.assertTrue(evidence.reported(run))
+        self.assertIn("reflink", md)
+
+    def test_a_report_directory_without_a_report_is_not_a_report(self):
+        import tempfile
+
+        from desk import evidence
+
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "r1" / "shots").mkdir(parents=True)
+            with mock.patch.object(evidence, "REPORTS", Path(tmp)):
+                self.assertFalse(evidence.reported(mock.Mock(id="r1", created=0.0)))
+
+
 class StepLabels(unittest.TestCase):
     def test_messages_go_to_the_step_running_then(self):
         from desk.evidence import _step_labels

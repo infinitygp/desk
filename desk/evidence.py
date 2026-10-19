@@ -18,6 +18,8 @@ from .config import HOME, DeskError, load_image
 
 REPORTS = HOME / "reports"
 REPORT_RETENTION_DAYS = 14
+# virt-diff starts a libguestfs appliance and reads both disks: ~30 s, minutes for a large run.
+DIFF_TIMEOUT = 600
 
 # Paths every desktop session touches; hidden from `desk diff` unless --all.
 NOISE = (
@@ -178,7 +180,8 @@ def parse_virt_diff(text: str, all_paths: bool = False) -> FileChanges:
 
 
 def _backing_of(disk: Path) -> Path:
-    r = subprocess.run(["qemu-img", "info", "-U", "--output=json", str(disk)], capture_output=True, check=True)
+    r = subprocess.run(["qemu-img", "info", "-U", "--output=json", str(disk)], capture_output=True, check=True,
+                       timeout=60)
     backing = json.loads(r.stdout).get("full-backing-filename")
     if not backing:
         raise DeskError(f"{disk} has no backing image to compare with")
@@ -197,13 +200,13 @@ def file_changes(run, all_paths: bool = False, raw_out: Path | None = None) -> F
         guest.ssh_run(run.ssh_port, spec.root_user, spec.cmd(spec.sync), capture=True, timeout=60)
         dom.suspend()
         try:
-            subprocess.run(["cp", "--reflink=always", str(disk), str(copy)], check=True)
+            subprocess.run(["cp", "--reflink=always", str(disk), str(copy)], check=True, timeout=120)
         finally:
             dom.resume()
         disk = copy
     try:
         r = subprocess.run(["virt-diff", "-a", str(_backing_of(disk)), "-A", str(disk)],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, timeout=DIFF_TIMEOUT)
     finally:
         copy.unlink(missing_ok=True)
     if r.returncode != 0:
@@ -395,7 +398,8 @@ def collect(run, diff: bool = False) -> Path:
         try:
             changes = file_changes(run, raw_out=out / "virt-diff.txt")
             (out / "files.txt").write_text(format_changes(changes, limit=10**6) + "\n")
-        except DeskError as e:
+        except (DeskError, OSError, subprocess.SubprocessError) as e:
+            # Without reflinks, virt-diff or in time: the rest of the report stands.
             problems["diff error"] = str(e)
 
     ended = time.time()
@@ -514,9 +518,10 @@ def collect(run, diff: bool = False) -> Path:
 
 
 def reported(run) -> bool:
-    """A report of this run exists (not of an earlier run of the same name)."""
+    """A report of this run exists (not of an earlier run of the same name, nor the directory of
+    one that could not be written)."""
     try:
-        return (REPORTS / run.id).stat().st_mtime >= run.created
+        return (REPORTS / run.id / "report.md").stat().st_mtime >= run.created
     except OSError:
         return False
 
