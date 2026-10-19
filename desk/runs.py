@@ -205,8 +205,11 @@ class Run:
     def live_domain(self) -> libvirt.virDomain | None:
         # Restored runs of one image share a domain name, so match on this run's disk too.
         d = lookup(self.domain)
-        if d is None or not d.isActive() or str(self.dir / "disk.qcow2") not in d.XMLDesc(0):
-            return None
+        try:
+            if d is None or not d.isActive() or str(self.dir / "disk.qcow2") not in d.XMLDesc(0):
+                return None
+        except libvirt.libvirtError:
+            return None  # destroyed meanwhile by another command (desk down, gc)
         return d
 
     def dom(self) -> libvirt.virDomain:

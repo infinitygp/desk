@@ -45,6 +45,17 @@ class RunFile(unittest.TestCase):
             self.assertEqual(shot.clock_offset, -7200.0)  # taken over by the object too
 
 
+class LiveDomain(unittest.TestCase):
+    def test_a_domain_destroyed_meanwhile_is_not_running(self):
+        import libvirt
+
+        gone = mock.Mock()
+        gone.isActive.side_effect = libvirt.libvirtError("Domain not found: no domain with matching uuid")
+        run = runs.Run(id="r1", image="fedora-44-gnome", domain="desk-r1", ssh_port=1, user="tester", created=1.0)
+        with mock.patch("desk.runs.lookup", return_value=gone):
+            self.assertIsNone(run.live_domain())
+
+
 class Gc(unittest.TestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
