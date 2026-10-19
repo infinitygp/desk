@@ -205,7 +205,8 @@ class SelftestStart(unittest.TestCase):
             (Path(tmp) / "memory.save").write_bytes(b"")
             spec = SimpleNamespace(family="linux", base_xml=Path(tmp) / "memory.save", warm_dir=Path(tmp),
                                    warm_version=None)
-            with mock.patch("desk.selftest.runs.cold_reason", return_value="warm state of x is in use by another run"), \
+            held = "warm state of x is in use by another run"
+            with mock.patch("desk.selftest.runs.cold_reason", return_value=held), \
                     mock.patch("desk.selftest.runs.warm_is_current", return_value=True), \
                     mock.patch("desk.selftest.runs.up") as up, mock.patch("desk.maintain.record") as record, \
                     self.assertRaisesRegex(Busy, "in use by another run"):

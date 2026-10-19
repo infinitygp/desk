@@ -4,8 +4,8 @@ import subprocess
 import tempfile
 import unittest
 from dataclasses import replace
-from unittest import mock
 from pathlib import Path
+from unittest import mock
 
 from desk import images
 from desk.config import load_image
