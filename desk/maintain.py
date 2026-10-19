@@ -33,8 +33,6 @@ WARN_DAYS = 21
 # The weekly timer would otherwise find a build made at 03:10 a few minutes short of its age.
 SLACK_DAYS = 1
 KEEP_REPORTS = 20
-# How long a selftest waits for other VMs to give memory back before the image is skipped.
-MEMORY_WAIT = 600
 
 
 def _log(msg: str) -> None:
@@ -172,9 +170,8 @@ def _family(base: str, members: list[str], out: Path, dry_run: bool) -> list[str
                 except BaseException:
                     _keep_screens(m, out / m)
                     raise
-            # Other runs may have taken the memory since the family started: wait for it rather
-            # than fail the selftest (and with it the new build) for a reason that is not the image's.
-            _wait_for_memory(spec)
+            # Short of memory, the selftest's `desk up` waits for other runs as any does, and gives
+            # up as Busy: the family is skipped, not failed.
             if not run_selftest(m, reboot=True, spec=spec, shots_dir=out / m):
                 raise SelftestFailed(f"selftest of {m} failed" + (" on the new build" if spec.warm_version else ""))
             tested[m] = spec
@@ -190,18 +187,6 @@ def _family(base: str, members: list[str], out: Path, dry_run: bool) -> list[str
 
 class SelftestFailed(DeskError):
     """The one failure of `desk maintain` that is a check's (exit 1); the others are desk's (2)."""
-
-
-def _wait_for_memory(spec: ImageSpec, timeout: float = MEMORY_WAIT) -> None:
-    deadline = time.monotonic() + timeout
-    while True:
-        try:
-            runs.check_memory(spec)
-            return
-        except DeskError:
-            if time.monotonic() > deadline:
-                raise  # "not enough free memory": reported as skipped
-            time.sleep(30)
 
 
 def _keep_screens(image: str, dest: Path) -> None:

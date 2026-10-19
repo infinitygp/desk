@@ -270,7 +270,6 @@ while ($true) {
             }
             'uia' { Invoke-Uia $req.op $req.arg $req.text }
             'focus' { Focus-Window $req.query }
-            'monitors' { @{ ok = $true; monitors = (Get-Monitors) } }
             # WM_SETTINGCHANGE to every window, as Settings sends after a change (theme colours).
             'settingchange' {
                 $r = [UIntPtr]::Zero

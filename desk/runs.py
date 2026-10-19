@@ -360,10 +360,6 @@ def cold_reason(spec: ImageSpec, warm_dir: Path | None = None) -> str | None:
     return None
 
 
-def active_runs_of(image: str) -> list[Run]:
-    return [r for r in all_runs() if r.image == image and r.live_domain() is not None]
-
-
 def abandoned_warmup(name: str, xml: str) -> str | None:
     """The image whose warm-up this domain is, when it is one: a `desk image warm` that was killed
     leaves its guest running. Runs restored from a warm state carry the same domain name, but

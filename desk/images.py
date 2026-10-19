@@ -215,18 +215,24 @@ def _fetch_iso(spec: ImageSpec) -> Path:
     return _fetch(spec, "iso", "iso")
 
 
-def _fetch_cloud_image(spec: ImageSpec) -> Path:
-    """The latest cloud image; downloaded again only when the published checksum changes."""
-    url = spec.cloud_image_url
-    target = CACHE / url.rsplit("/", 1)[-1]
-    sums = subprocess.run(["curl", "-fsSL", "--retry", "3", "--max-time", "60", f"{url}.SHA256"],
+def _fetch_published(url: str, sums_url: str, pick) -> Path:
+    """`url` into the cache, checked against the checksum published with it (`pick` finds it in
+    the sums file); downloaded again only when that checksum changes."""
+    sums = subprocess.run(["curl", "-fsSL", "--retry", "3", "--max-time", "60", sums_url],
                           capture_output=True, text=True, check=True).stdout
-    want = sums.split()[0]
+    want = pick(sums)
+    target = CACHE / url.rsplit("/", 1)[-1]
     if not target.exists() or _sha256(target) != want:
         _download(url, target)
         if _sha256(target) != want:
-            raise DeskError(f"{target} does not match {url}.SHA256")
+            raise DeskError(f"{target} does not match {sums_url}")
     return target
+
+
+def _fetch_cloud_image(spec: ImageSpec) -> Path:
+    """The latest cloud image."""
+    url = spec.cloud_image_url
+    return _fetch_published(url, f"{url}.SHA256", lambda sums: sums.split()[0])
 
 
 def checksum_for(sums: str, name: str) -> str:
@@ -239,17 +245,8 @@ def checksum_for(sums: str, name: str) -> str:
 
 
 def _fetch_disk_image(spec: ImageSpec) -> Path:
-    url = spec.disk_image_url
-    folder, name = url.rsplit("/", 1)
-    sums = subprocess.run(["curl", "-fsSL", "--retry", "3", "--max-time", "60", f"{folder}/sha256sums"],
-                          capture_output=True, text=True, check=True).stdout
-    want = checksum_for(sums, name)
-    target = CACHE / name
-    if not target.exists() or _sha256(target) != want:
-        _download(url, target)
-        if _sha256(target) != want:
-            raise DeskError(f"{target} does not match {folder}/sha256sums")
-    return target
+    folder, name = spec.disk_image_url.rsplit("/", 1)
+    return _fetch_published(spec.disk_image_url, f"{folder}/sha256sums", lambda sums: checksum_for(sums, name))
 
 
 def _render(spec: ImageSpec, template: str) -> str:
