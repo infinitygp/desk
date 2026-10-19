@@ -1,4 +1,5 @@
 import subprocess
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -217,10 +218,11 @@ class UnitFailures(unittest.TestCase):
 
 
 class DnfTimes(unittest.TestCase):
-    def test_utc_becomes_local(self):
-        from datetime import UTC, datetime
-
-        local = datetime(2026, 10, 8, 21, 30, tzinfo=UTC).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+    def test_utc_becomes_the_guests_local_time_whatever_the_hosts(self):
         text = "installed foo-1.0-1.noarch\n 3 dnf install -y /tmp/foo.rpm 2026-10-08 21:30:00     1"
-        self.assertEqual(local_dnf_times(text).splitlines(),
-                         ["installed foo-1.0-1.noarch", f" 3 dnf install -y /tmp/foo.rpm {local}     1"])
+        for host in ("UTC", "America/New_York"):
+            with self.subTest(host=host), mock.patch.dict("os.environ", {"TZ": host}):
+                time.tzset()
+                self.assertEqual(local_dnf_times(text).splitlines(),
+                                 ["installed foo-1.0-1.noarch", " 3 dnf install -y /tmp/foo.rpm 2026-10-08 23:30:00     1"])
+        time.tzset()

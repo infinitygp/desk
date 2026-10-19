@@ -323,14 +323,16 @@ def unit_failures(text: str) -> list[str]:
     return out
 
 
-# dnf5 prints its transaction times in UTC; the report's times are local.
+# dnf5 prints its transaction times in UTC; the report's times are the guest's local ones.
 DNF_TIME = re.compile(r"(?<!\d)(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(?!\d)")
 
 
 def local_dnf_times(text: str) -> str:
+    from .clock import GUEST_TZ
+
     def local(m: re.Match) -> str:
         utc = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
-        return utc.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        return utc.astimezone(GUEST_TZ).strftime("%Y-%m-%d %H:%M:%S")
 
     return "\n".join(DNF_TIME.sub(local, line) if not line.startswith("installed ") else line
                      for line in text.splitlines())
