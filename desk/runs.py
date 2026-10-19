@@ -467,10 +467,13 @@ def prune_versions(verbose: bool = True) -> list[str]:
         used.update(f.parent for f in backing_files(w / "disk.qcow2"))
     for dom in conn().listAllDomains(0):
         try:
-            used.update(Path(s.get("file")).resolve().parent for s in ET.fromstring(dom.XMLDesc(0)).iter("source")
-                        if s.get("file"))
+            sources = [Path(s.get("file")).resolve() for s in ET.fromstring(dom.XMLDesc(0)).iter("source")
+                       if s.get("file")]
         except libvirt.libvirtError:
             continue
+        # The whole chain: a variant's warm-up boots a disk of its own on the base build it was made from.
+        for f in sources:
+            used.update(p.parent for p in backing_files(f) or [f])
     removed = []
     for n in names:
         with image_lock_if_free(n) as free:

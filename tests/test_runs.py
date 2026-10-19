@@ -325,6 +325,26 @@ class PruneVersions(unittest.TestCase):
                     mock.patch("desk.virt.backing_files", return_value=[]), mock.patch("sys.stderr"):
                 self.assertEqual(runs.prune_versions(verbose=False), [])
 
+    def test_the_base_under_a_warm_up_that_runs_stays(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            old, new = (home / "base" / f"fedora-44-gnome.2026100{i}-000000" for i in (1, 2))
+            warming = home / "warm" / "fedora-44-gnome-pl.20261003-000000"
+            for d in (old, new, warming):
+                d.mkdir(parents=True)
+                (d / "disk.qcow2").write_bytes(b"")
+            (home / "base" / "fedora-44-gnome").symlink_to(new)  # rebuilt while the variant warms up
+            xml = f"<domain><devices><disk><source file='{warming / 'disk.qcow2'}'/></disk></devices></domain>"
+            chains = {warming / "disk.qcow2": [warming / "disk.qcow2", old / "disk.qcow2"]}
+            domain = mock.Mock(XMLDesc=lambda _flags: xml)
+            with mock.patch("desk.runs.RUNS", home / "runs"), mock.patch("desk.runs.HOME", home), \
+                    mock.patch("desk.config.BASE", home / "base"), mock.patch("desk.config.WARM", home / "warm"), \
+                    mock.patch("desk.config.list_images", return_value=["fedora-44-gnome"]), \
+                    mock.patch("desk.runs.conn", return_value=mock.Mock(listAllDomains=lambda _f: [domain])), \
+                    mock.patch("desk.virt.backing_files", side_effect=lambda f: chains.get(f, [f])):
+                self.assertEqual(runs.prune_versions(verbose=False), [])
+            self.assertTrue(old.exists())
+
 
 class AbandonedWarmup(unittest.TestCase):
     def xml(self, disk: Path) -> str:
