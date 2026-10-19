@@ -225,15 +225,18 @@ def format_changes(ch: FileChanges, limit: int = 200) -> str:
 
 
 def guest_problems(run) -> dict[str, str]:
+    from .clock import guest_since
+
     spec = load_image(run.image)
+    since = guest_since(run)
     if spec.family == "windows":
-        r = guest.ssh_run(run.ssh_port, spec.root_user, spec.cmd(WINDOWS_SCRIPT.replace("@S@", str(int(run.since)))),
+        r = guest.ssh_run(run.ssh_port, spec.root_user, spec.cmd(WINDOWS_SCRIPT.replace("@S@", str(int(since)))),
                           capture=True, timeout=180)
     elif spec.family == "openwrt":
         r = guest.ssh_run(run.ssh_port, spec.root_user, "sh -s", input=OPENWRT_SCRIPT.encode(), capture=True,
                           timeout=120)
     else:
-        r = guest.ssh_run(run.ssh_port, spec.root_user, f"bash -s -- {int(run.since)}",
+        r = guest.ssh_run(run.ssh_port, spec.root_user, f"bash -s -- {int(since)}",
                           input=GUEST_SCRIPT.encode(), capture=True, timeout=120)
     guest.connected(r, "collecting the guest's logs")
     sections, current = {}, None
@@ -248,7 +251,7 @@ def guest_problems(run) -> dict[str, str]:
         raise DeskError(f"collecting the guest's logs gave nothing (exit {r.returncode}): "
                         + (r.stderr.decode(errors="replace").strip()[-300:] or "no output"))
     out = {k: "\n".join(v).strip() for k, v in sections.items()}
-    return openwrt_sections(out, run.since) if spec.family == "openwrt" else out
+    return openwrt_sections(out, since) if spec.family == "openwrt" else out
 
 
 # Sat Oct 10 00:54:12 2026 daemon.warn odhcpd[2081]: text (logd, in the guest's local time)

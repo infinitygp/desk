@@ -1,5 +1,6 @@
 import subprocess
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -71,7 +72,8 @@ class WindowsNoise(unittest.TestCase):
 
 
 class GuestProblems(unittest.TestCase):
-    RUN = SimpleNamespace(image="fedora-44-gnome", ssh_port=1, since=0.0)
+    RUN = SimpleNamespace(image="fedora-44-gnome", ssh_port=1, since=0.0, clock_offset=0.0,
+                          dir=Path("/nonexistent"))
 
     def collect(self, returncode: int, stdout: bytes, stderr: bytes = b"") -> dict:
         answer = subprocess.CompletedProcess([], returncode, stdout, stderr)

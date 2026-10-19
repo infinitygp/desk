@@ -2,6 +2,7 @@
 `desk clock set +3d`. Time keeps running from there; the guest's own time sync is off until
 `desk clock reset`, and desk keeps the offset across restores and reboots."""
 
+import json
 import re
 import shlex
 import time
@@ -50,6 +51,17 @@ def _sync(run, on: bool) -> None:
 
 def guest_time(run) -> float:
     return guest.agent(run.dom(), "guest-get-time") / 1e9
+
+
+def guest_since(run) -> float:
+    """The run's start on the guest's clock, for what asks the guest for its logs since then: a
+    guest set back (desk clock -2h) stamps what it logs afterwards with times before the start."""
+    try:
+        lines = (run.dir / "log.jsonl").read_text().splitlines()
+    except FileNotFoundError:
+        lines = []
+    offsets = [ev["offset"] for ev in map(json.loads, filter(str.strip, lines)) if "offset" in ev]
+    return run.since + min([0.0, run.clock_offset, *offsets])
 
 
 def apply(run) -> None:

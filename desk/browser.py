@@ -75,11 +75,13 @@ def errors(lines: list[str]) -> list[str]:
 
 
 def console(run, everything: bool = False) -> list[str]:
+    from .clock import guest_since
+
     spec = load_image(run.image)
     if spec.family == "windows":
         raise DeskError("desk browser console reads Firefox on Linux guests")
     spec.need_desktop("desk browser")
-    r = guest.ssh_run(run.ssh_port, spec.root_user, f"S={int(run.since)} bash -s", input=JOURNAL.encode(),
+    r = guest.ssh_run(run.ssh_port, spec.root_user, f"S={int(guest_since(run))} bash -s", input=JOURNAL.encode(),
                       capture=True, timeout=60)
     guest.connected(r, "reading the web console")
     return parse(r.stdout.decode(errors="replace"), everything)

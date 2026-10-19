@@ -1,5 +1,9 @@
+import json
+import tempfile
 import unittest
 from datetime import datetime
+from pathlib import Path
+from types import SimpleNamespace
 
 from desk import clock
 from desk.config import DeskError
@@ -22,6 +26,21 @@ class Parse(unittest.TestCase):
         for bad in ("3d", "+3x", "+", "tomorrow", ""):
             with self.subTest(bad=bad), self.assertRaises(DeskError):
                 clock.parse(bad, 0.0)
+
+
+class GuestSince(unittest.TestCase):
+    def since(self, offset: float, events: list[dict]) -> float:
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "log.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
+            return clock.guest_since(SimpleNamespace(dir=Path(tmp), since=10000.0, clock_offset=offset))
+
+    def test_a_guest_set_back_is_asked_from_earlier(self):
+        # Set back two hours, then reset: what it logged meanwhile is stamped before the start.
+        self.assertEqual(self.since(0.0, [{"clock": "-2h", "offset": -7200}, {"clock": "reset"}]), 2800.0)
+        self.assertEqual(self.since(-60.0, []), 9940.0)
+
+    def test_a_guest_set_forward_is_asked_from_the_start(self):
+        self.assertEqual(self.since(86400.0, [{"clock": "+1d", "offset": 86400}]), 10000.0)
 
 
 class Duration(unittest.TestCase):
