@@ -133,6 +133,10 @@ def run_selftest(image: str, reboot: bool = False, keep: bool = False, spec: Ima
     # A build under test (desk maintain) must restore its warm state; so must any image that has
     # a usable one. Only where none is to be had is a cold boot what the step checks.
     cold_reason = runs.cold_reason(spec) if spec.base_xml.exists() else None
+    usable = (spec.warm_dir / "memory.save").exists() and runs.warm_is_current(spec)
+    if cold_reason and usable and not spec.warm_version:
+        # Held by another run: a cold boot would pass without the restore having been tried.
+        raise Busy(f"{cold_reason}; the selftest restores it, so it runs once that run is down")
     expect_cold = bool(cold_reason) and not spec.warm_version
 
     def start():

@@ -164,6 +164,23 @@ class SelftestStart(unittest.TestCase):
             selftest.run_selftest("fedora-44-gnome", spec=load_image("fedora-44-gnome"))
         record.assert_not_called()
 
+    def test_a_warm_state_another_run_holds_is_not_passed_over_by_a_cold_boot(self):
+        from types import SimpleNamespace
+
+        from desk import selftest
+
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "memory.save").write_bytes(b"")
+            spec = SimpleNamespace(family="linux", base_xml=Path(tmp) / "memory.save", warm_dir=Path(tmp),
+                                   warm_version=None)
+            with mock.patch("desk.selftest.runs.cold_reason", return_value="warm state of x is in use by another run"), \
+                    mock.patch("desk.selftest.runs.warm_is_current", return_value=True), \
+                    mock.patch("desk.selftest.runs.up") as up, mock.patch("desk.maintain.record") as record, \
+                    self.assertRaisesRegex(Busy, "in use by another run"):
+                selftest.run_selftest("x", spec=spec)
+        up.assert_not_called()
+        record.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
