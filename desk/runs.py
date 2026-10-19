@@ -163,8 +163,7 @@ class Run:
         """run.json as it is now, written back after the block and taken over by this object.
         Other commands change it meanwhile (desk shot its count, desk clock the offset), and a
         copy loaded earlier saved whole would undo what they wrote."""
-        with open(self.dir / ".run.lock", "a") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)  # held for one read and one write
+        with _flock(self.dir / ".run.lock", f"another command changing run {self.id}", 60):
             current = load(self.id)
             yield current
             current.save()

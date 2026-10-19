@@ -44,6 +44,24 @@ class RunFile(unittest.TestCase):
             self.assertEqual((saved.clock_offset, saved.shots), (-7200.0, 2))
             self.assertEqual(shot.clock_offset, -7200.0)  # taken over by the object too
 
+    def test_a_command_stuck_with_the_run_file_is_not_waited_for_ever(self):
+        import fcntl
+        import itertools
+
+        from desk.config import Busy
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch("desk.runs.RUNS", Path(tmp)), \
+                mock.patch("desk.runs.HOME", Path(tmp)):
+            run = runs.Run(id="r1", image="fedora-44-gnome", domain="desk-r1", ssh_port=1, user="tester", created=1.0)
+            run.dir.mkdir()
+            run.save()
+            with open(run.dir / ".run.lock", "a+") as other:  # as a stopped desk process holds it
+                fcntl.flock(other, fcntl.LOCK_EX)
+                with mock.patch("desk.runs.time.monotonic", side_effect=itertools.count(0, 30)), \
+                        mock.patch("desk.runs.time.sleep"), mock.patch("sys.stderr"), \
+                        self.assertRaisesRegex(Busy, "another command changing run r1"):
+                    run.touch()
+
 
 class RunNames(unittest.TestCase):
     def test_only_names_that_stay_in_the_runs_directory(self):
