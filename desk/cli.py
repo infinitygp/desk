@@ -419,7 +419,7 @@ EXEC_TIMEOUT = 600.0
 
 def _exec_stopped(run, limit: float) -> None:
     run.log_event(rc=124)
-    print(f"desk: still running after {limit:.0f}s; stopped it (--timeout SECONDS to allow longer, 0: no limit)",
+    print(f"desk: still running after {guest._seconds(limit)}s; stopped it (--timeout SECONDS to allow longer, 0: no limit)",
           file=sys.stderr)
     sys.exit(124)
 

@@ -46,16 +46,16 @@ def remote_command(argv: list[str], gui: bool = False, wait: bool = False,
         # first, as a background job reads /dev/null.
         watchdog = 'sleep "$1"; kill -TERM -"$2"; sleep 5; kill -KILL -"$2"'
         cmd = (f"exec 3<&0; setsid sh -c {shlex.quote(cmd)} <&3 3<&- & p=$!; exec 3<&-; "
-               f"setsid sh -c {shlex.quote(watchdog)} _ {max(1, round(limit))} $p </dev/null >/dev/null 2>&1 & w=$!; "
+               f"setsid sh -c {shlex.quote(watchdog)} _ {_seconds(limit)} $p </dev/null >/dev/null 2>&1 & w=$!; "
                "wait $p; rc=$?; kill -TERM -$w $w 2>/dev/null; exit $rc")
     elif limit and not gui:
         # Stopped in the guest too: closing SSH would leave a hung command running there. The
         # command reaches its shell through the environment, not as an argument: `pgrep -f X`
         # would otherwise find `timeout ... bash -c 'pgrep -f X'` and count it.
-        cmd = (f"DESK_CMD={shlex.quote(cmd)} timeout -k 5 {limit:.0f} bash -c "
+        cmd = (f"DESK_CMD={shlex.quote(cmd)} timeout -k 5 {_seconds(limit)} bash -c "
                + shlex.quote('c=$DESK_CMD; unset DESK_CMD; eval "$c"'))
     if limit and gui:
-        setenv += f" -p RuntimeMaxSec={limit:.0f}"
+        setenv += f" -p RuntimeMaxSec={_seconds(limit)}"
     if gui:
         # Starts the program inside the logged-in graphical session and returns at once. The
         # language comes from the shell's own environment: the systemd user manager can outlive
@@ -66,6 +66,12 @@ def remote_command(argv: list[str], gui: bool = False, wait: bool = False,
                f"systemd-run --user --collect --quiet{' --wait --pipe' if wait else ''} $lang{setenv} "
                f"-- bash -c {shlex.quote(cmd)}")
     return cmd
+
+
+def _seconds(limit: float) -> int:
+    """A limit as the guest's tools take it: whole seconds, and never 0, which means none to
+    `timeout` and systemd (and at once to the Windows watchdog)."""
+    return max(1, round(limit))
 
 
 def command(spec, argv: list[str], env: dict[str, str] | None = None, limit: float | None = None) -> str:
@@ -79,7 +85,7 @@ def command(spec, argv: list[str], env: dict[str, str] | None = None, limit: flo
         # Processes outlive a closed SSH session on Windows, so a watchdog in the guest ends the
         # command and everything it started.
         script = (f"$deskWatch = Start-Process powershell.exe -WindowStyle Hidden -PassThru -ArgumentList "
-                  f"'-NoProfile', '-Command', \"Start-Sleep {limit:.0f}; taskkill.exe /T /F /PID $PID\"; "
+                  f"'-NoProfile', '-Command', \"Start-Sleep {_seconds(limit)}; taskkill.exe /T /F /PID $PID\"; "
                   f"try {{ {script}\n}} finally {{ Stop-Process -Id $deskWatch.Id -Force -ErrorAction Ignore }}")
     return spec.cmd(script)
 

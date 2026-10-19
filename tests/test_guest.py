@@ -8,6 +8,17 @@ from desk import guest, winagent
 from desk.config import DeskError
 
 
+class Limits(unittest.TestCase):
+    def test_under_a_second_is_one_not_none(self):
+        # 0 means no limit to timeout and systemd, and kills at once on Windows.
+        self.assertIn("timeout -k 5 1 bash", guest.remote_command(["sleep 1000"], limit=0.3))
+        self.assertIn("RuntimeMaxSec=1 ", guest.remote_command(["app"], gui=True, limit=0.3))
+        self.assertIn("_ 1 $p", guest.remote_command(["sleep 1000"], limit=0.3, shell="sh"))
+        windows = SimpleNamespace(family="windows", cmd=lambda script: script)
+        self.assertIn("Start-Sleep 1;", guest.command(windows, ["Start-Sleep 1000"], limit=0.3))
+        self.assertIn("timeout -k 5 90 bash", guest.remote_command(["make"], limit=90.4))
+
+
 class Waits(unittest.TestCase):
     """A wait that runs out says what the last attempt said."""
 
