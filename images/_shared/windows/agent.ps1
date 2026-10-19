@@ -207,14 +207,20 @@ namespace Desk {
 }
 '@
 
+# One command line of separate arguments, quoted the way programs split it again. Start-Process
+# -ArgumentList joins an array with spaces only, which splits an argument that holds one.
+function Join-Arguments($list) {
+    (@($list) | Where-Object { $_ -ne $null } | ForEach-Object {
+        if ($_ -match '[\s"]' -or $_ -eq '') { '"' + ($_ -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1') + '"' } else { $_ }
+    }) -join ' '
+}
+
 # A program in this session with extra environment variables, optionally waiting for it and
 # returning its exit code and output (desk exec --gui --wait --env), which SSH cannot see.
 function Invoke-Program($req, $client) {
     $psi = New-Object Diagnostics.ProcessStartInfo
     $psi.FileName = $req.file
-    $psi.Arguments = (@($req.args) | Where-Object { $_ -ne $null } | ForEach-Object {
-        if ($_ -match '[\s"]' -or $_ -eq '') { '"' + ($_ -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1') + '"' } else { $_ }
-    }) -join ' '
+    $psi.Arguments = Join-Arguments $req.args
     $psi.UseShellExecute = $false
     if ($req.env) { foreach ($p in $req.env.PSObject.Properties) { $psi.EnvironmentVariables[$p.Name] = [string]$p.Value } }
     if ($req.wait) {
@@ -257,7 +263,7 @@ while ($true) {
                 if ($req.wait -or $req.env) { Invoke-Program $req $client }
                 else {
                     $before = Get-TopHandles
-                    $p = if ($req.args) { Start-Process -FilePath $req.file -ArgumentList $req.args -PassThru }
+                    $p = if ($req.args) { Start-Process -FilePath $req.file -ArgumentList (Join-Arguments $req.args) -PassThru }
                          else { Start-Process -FilePath $req.file -PassThru }
                     @{ ok = $true; pid = $p.Id; focused = (Focus-NewWindow $before $p.Id) }
                 }
