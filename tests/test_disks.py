@@ -28,6 +28,20 @@ class Parse(unittest.TestCase):
                 disks.parse(bad)
 
 
+class Remove(unittest.TestCase):
+    def test_only_names_of_extra_disks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp) / "base" / "disk.qcow2"
+            base.parent.mkdir()
+            base.write_bytes(b"")
+            run = Run(Path(tmp) / "runs" / "r1")
+            disks.directory(run).mkdir(parents=True)
+            for bad in ("../../../base/disk", "disk1.qcow2", ""):
+                with self.subTest(bad=bad), self.assertRaisesRegex(DeskError, "disk names are"):
+                    disks.remove(run, bad)
+            self.assertTrue(base.exists())
+
+
 class Attached(unittest.TestCase):
     def test_only_this_runs_extra_disks(self):
         with tempfile.TemporaryDirectory() as tmp:

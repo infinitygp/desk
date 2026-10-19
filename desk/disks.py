@@ -55,9 +55,14 @@ def parse(item: str) -> tuple[str, str | None]:
     size, _, name = item.partition(":")
     if not SIZE.fullmatch(size):
         raise DeskError(f"disk size is a number with M, G or T, e.g. 10G (got {size!r})")
-    if name and not NAME.fullmatch(name):
+    return size, _checked(name) if name else None
+
+
+def _checked(name: str) -> str:
+    # Also what keeps `desk disk rm ../../base/x/disk` out of other directories.
+    if not NAME.fullmatch(name):
         raise DeskError(f"disk names are 1-20 of a-z, 0-9 and - (got {name!r})")
-    return size, name or None
+    return name
 
 
 def add(run, size: str, name: str | None = None) -> str:
@@ -86,7 +91,7 @@ def add(run, size: str, name: str | None = None) -> str:
 
 
 def remove(run, name: str, timeout: float = 30) -> None:
-    path = directory(run) / f"{name}.qcow2"
+    path = directory(run) / f"{_checked(name)}.qcow2"
     if not path.exists():
         raise DeskError(f"no disk {name} (desk disk ls)")
     dom = run.live_domain()
