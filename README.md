@@ -208,7 +208,8 @@ whose focus is not in a text field is refused. Walks of the tree stop after 20 s
   passes on the guest command's code, 124 when it ran out of time (`push`/`pull` too).
 - The state lock (`<home>/.lock`) is held while a domain is started or destroyed, not while a
   guest boots or a report is written, so a cold boot does not hold up other runs. A command that
-  waits for a lock says who holds it and gives up after 15 minutes (an image's lock: 6 hours).
+  waits for a lock says who holds it and gives up after 15 minutes (an image's lock: 6 hours; the
+  lock around a change of a run's `run.json`: a minute).
 - What a command in the guest may take is enforced in the guest (`timeout`, a watchdog on
   BusyBox and Windows), for `desk exec`, `desk wait --until-exec` and scenario steps alike.
 
