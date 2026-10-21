@@ -378,11 +378,13 @@ def abandoned_warmup(name: str, xml: str) -> str | None:
 
 
 def gc_idle(verbose: bool = True) -> list[str]:
-    """Take down runs nobody touched for idle_ttl(), their report written first. Without the state
+    """Take down runs nobody touched for idle_ttl(), their report written first, and remove old
+    reports. Without the state
     lock: reading a guest's logs and encoding a video take their time, and nobody should wait for
     that (evidence.finish takes the lock for the moment the domain is destroyed)."""
     from . import evidence
 
+    evidence.prune_reports(verbose)
     ttl, removed = idle_ttl(), []
     for run in all_runs():
         live = run.live_domain() is not None

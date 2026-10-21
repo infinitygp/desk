@@ -146,6 +146,14 @@ class Gc(unittest.TestCase):
         self.assertRegex(runs.gc_idle(verbose=False)[0], "report: ")
         self.assertEqual(len(list((self.home / "reports").iterdir())), 2)
 
+    def test_old_reports_go_on_the_way(self):
+        reports = self.home / "reports"
+        for name, days in (("stale", 15), ("recent", 13)):
+            (reports / name).mkdir(parents=True)
+            os.utime(reports / name, (time.time() - days * 86400,) * 2)
+        runs.gc_idle(verbose=False)
+        self.assertEqual([p.name for p in reports.iterdir()], ["recent"])
+
     def test_a_run_whose_owner_came_back_meanwhile_stays(self):
         old = self.run_idle_for("old", 3)
 

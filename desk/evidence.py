@@ -584,8 +584,8 @@ def prune_reports(verbose: bool = True) -> None:
     if not REPORTS.exists():
         return
     cutoff = time.time() - REPORT_RETENTION_DAYS * 86400
-    for d in REPORTS.iterdir():
-        if d.is_dir() and d.stat().st_mtime < cutoff:
-            shutil.rmtree(d, ignore_errors=True)
-            if verbose:
-                print(f"[desk] gc: removed report {d.name}")
+    old = [d for d in REPORTS.iterdir() if d.is_dir() and d.stat().st_mtime < cutoff]
+    for d in old:
+        shutil.rmtree(d, ignore_errors=True)
+    if old and verbose:
+        print(f"[desk] gc: removed {len(old)} reports older than {REPORT_RETENTION_DAYS} days")
