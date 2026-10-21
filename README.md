@@ -74,7 +74,9 @@ display driver and qemu-guest-agent, and an agent in the logged-in session
 programs on the desktop, which SSH sessions cannot see. The agent serves one request at a time,
 so nothing may hold it: a connection that sends nothing is dropped after 5 s, a tree walk ends
 after 20 s, and a program that is waited for (`exec --gui --wait`) is waited for on a thread of
-its own. Commands are sent as
+its own. `agent-loop.ps1`, started at logon, starts it again when it ends and writes that to
+`C:\desk\agent.log`, which the report lists among the failed units; desk asks a listing or lookup
+again once the agent is back, but not an action, which may have been done. Commands are sent as
 `powershell -EncodedCommand`, since Windows' command line mangles quotes.
 Provisioning opts in to early feature updates and enables the taskbar position and size
 features (59213768, 61090762) with ViVeTool v0.3.4 (GPL-3.0, downloaded and checked against a

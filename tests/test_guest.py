@@ -80,6 +80,27 @@ class WindowsAgent(unittest.TestCase):
         with self.assertRaisesRegex(DeskError, "not reachable"):
             winagent.request(run, timeout=0.2, cmd="uia")
 
+    def test_a_query_is_asked_again_once_the_agent_is_back(self):
+        gone = winagent.AgentGone("in-session agent not reachable")
+        run = SimpleNamespace(id="t", agent_port=1)
+        with mock.patch("desk.winagent._request", side_effect=[gone, gone, {"ok": True}, {"nodes": []}]) as req, \
+                mock.patch("desk.winagent.time.sleep"):
+            self.assertEqual(winagent.request(run, cmd="uia", op="snapshot"), {"nodes": []})
+        self.assertEqual([c.args[2]["cmd"] for c in req.call_args_list], ["uia", "ping", "ping", "uia"])
+
+    def test_an_action_is_not(self):
+        run = SimpleNamespace(id="t", agent_port=1)
+        with mock.patch("desk.winagent._request", side_effect=[winagent.AgentGone("not reachable"), {"ok": True}]), \
+                self.assertRaisesRegex(DeskError, "not reachable"):
+            winagent.request(run, cmd="uia", op="action")
+
+    def test_an_agent_that_stays_away_is_not_waited_for_ever(self):
+        run = SimpleNamespace(id="t", agent_port=1)
+        with mock.patch("desk.winagent._request", side_effect=winagent.AgentGone("not reachable")), \
+                mock.patch("desk.winagent.RESTART_WAIT", 0), mock.patch("desk.winagent.time.sleep"), \
+                self.assertRaisesRegex(DeskError, "not reachable"):
+            winagent.request(run, cmd="uia", op="snapshot")
+
 
 if __name__ == "__main__":
     unittest.main()

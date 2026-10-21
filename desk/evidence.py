@@ -130,6 +130,8 @@ function ShutdownNoise($e) {
 $scm = 7000, 7001, 7009, 7011, 7022, 7023, 7024, 7031, 7034
 Ev @{LogName='System'; ProviderName='Service Control Manager'; Id=$scm; StartTime=$S} |
     ? { -not (ShutdownNoise $_) } | % { Line $_ }
+# The in-session agent's ends (images/_shared/windows/agent-loop.ps1), in the guest's local time.
+Get-Content C:\desk\agent.log -ErrorAction SilentlyContinue | ? { $_ -match '^(\S+) ' -and [datetime]$Matches[1] -ge $S }
 '=== journal'
 Ev @{LogName='System','Application'; Level=1,2,3; StartTime=$S} | ? { -not (ShutdownNoise $_) } |
     Select-Object -First 400 | % { Line $_ }

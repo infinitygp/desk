@@ -525,9 +525,10 @@ def provision(spec: ImageSpec, port: int, relogin: bool = True) -> None:
     if spec.files and spec.family == "windows":
         # Windows guests keep the harness's helpers in C:\desk; scp speaks to its OpenSSH. Files
         # copied there from the answer-file CD are read-only, and the running agent should not
-        # keep using the old copy: stop it, the relogin starts it again.
+        # keep using the old copy: stop it and the loop that would start it again (agent.ps1,
+        # agent-loop.ps1); the relogin starts them again.
         guest.ssh_run(port, spec.root_user, spec.cmd(
-            "Get-CimInstance Win32_Process -Filter \"CommandLine LIKE '%desk\\\\agent.ps1%'\" | "
+            "Get-CimInstance Win32_Process -Filter \"CommandLine LIKE '%desk\\\\agent%'\" | "
             "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }; "
             "Get-ChildItem C:\\desk -File | ForEach-Object { $_.IsReadOnly = $false }"), capture=True, timeout=60)
         for d in spec.files:

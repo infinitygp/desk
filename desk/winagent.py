@@ -6,13 +6,47 @@ SSH sessions on Windows cannot see the interactive desktop, so UI Automation que
 
 import json
 import socket
+import time
 
 from .config import DeskError
+
+# agent-loop.ps1 starts an agent that ended again within this many seconds (PowerShell's start and
+# the C# it compiles).
+RESTART_WAIT = 60
+
+
+class AgentGone(DeskError):
+    """Nothing listens on the agent's port, or it went away without an answer."""
+
+
+def _query(req: dict) -> bool:
+    """Asking again changes nothing in the guest."""
+    return req.get("cmd") == "ping" or (req.get("cmd") == "uia" and req.get("op") in
+                                        ("snapshot", "resolve", "probe"))
 
 
 def request(run, timeout: float = 60, **req) -> dict:
     if not run.agent_port:
         raise DeskError(f"run {run.id} has no in-session agent port")
+    try:
+        return _request(run, timeout, req)
+    except AgentGone:
+        # An action may have been done before the agent ended: only a query is asked again.
+        if not _query(req):
+            raise
+    deadline = time.monotonic() + RESTART_WAIT
+    while True:
+        try:
+            _request(run, 5, {"cmd": "ping"})
+            break
+        except AgentGone:
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(1)
+    return _request(run, timeout, req)
+
+
+def _request(run, timeout: float, req: dict) -> dict:
     try:
         with socket.create_connection(("127.0.0.1", run.agent_port), timeout=timeout) as s:
             s.sendall(json.dumps(req).encode() + b"\n")
@@ -26,10 +60,13 @@ def request(run, timeout: float = 60, **req) -> dict:
         raise DeskError(f"the in-session agent did not answer {req.get('cmd')!r} within {timeout:.0f}s; it may still "
                         "be working on it or on an earlier request") from e
     except OSError as e:
-        raise DeskError(f"in-session agent not reachable ({e}); is the desktop session logged in?") from e
+        raise AgentGone(f"in-session agent not reachable ({e}): it ended (C:\\desk\\agent.log says why; it is "
+                        "started again within a minute) or the desktop session is not logged in yet") from e
     raw = b"".join(chunks).decode("utf-8-sig")
+    if not raw:
+        raise AgentGone("the in-session agent closed the connection without an answer")
     try:
-        out = json.loads(raw) if raw else {"error": "the in-session agent closed the connection without an answer"}
+        out = json.loads(raw)
     except ValueError:
         raise DeskError(f"the in-session agent's answer was cut off after {len(raw)} characters") from None
     if isinstance(out, dict) and out.get("error"):

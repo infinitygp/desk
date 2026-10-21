@@ -5,6 +5,8 @@
 # is dropped after 5 s, a tree walk ends after 20 s (uia.ps1), and a program that is waited for
 # (exec --gui --wait) is waited for on a thread of its own, which answers when it has ended.
 $ErrorActionPreference = 'Stop'
+# An error that ends the agent goes to agent.log, which the report lists; agent-loop.ps1 starts it again.
+trap { Add-Content (Join-Path $PSScriptRoot 'agent.log') ('{0:s} the in-session agent failed: {1}' -f (Get-Date), $_); break }
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 . (Join-Path $PSScriptRoot 'uia.ps1')
 # Per-monitor DPI aware, so UI Automation reports physical pixels, the same as the screenshots,
