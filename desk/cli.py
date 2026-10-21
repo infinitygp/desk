@@ -218,7 +218,6 @@ def cmd_ls(args) -> None:
 
 def cmd_gc(args) -> None:
     removed = runs.gc_idle()
-    evidence.prune_reports()
     with runs.state_lock():
         removed += runs.gc() + runs.prune_versions()
     if not removed:
@@ -789,11 +788,11 @@ def _copy(args, push: bool) -> None:
     if rc == 124:
         print(f"desk: still copying after {args.timeout:.0f}s; stopped it (--timeout SECONDS to allow longer, "
               "0: no limit)", file=sys.stderr)
-    elif rc != 0:
-        print(f"desk: copying failed (scp exit {rc})"
-              + ("" if args.root else f"; {args.remote} may be outside what {run.user} can access: --root"),
-              file=sys.stderr)
-    sys.exit(rc)
+        sys.exit(rc)
+    if rc != 0:
+        # scp's own 1 would read as a failed check: copying is desk's work.
+        raise DeskError(f"copying failed (scp exit {rc})"
+                        + ("" if args.root else f"; {args.remote} may be outside what {run.user} can access: --root"))
 
 
 def cmd_push(args) -> None:

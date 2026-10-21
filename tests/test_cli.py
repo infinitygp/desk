@@ -86,3 +86,21 @@ class Failures(unittest.TestCase):
         # What a command decides itself goes through: a failed scenario, a guest command's code.
         self.assertEqual(self.run_main(SystemExit(1)), 1)
         self.assertEqual(self.run_main(SystemExit(124)), 124)
+
+
+class Copy(unittest.TestCase):
+    def copy(self, rc: int):
+        run = mock.Mock(ssh_port=1, user="tester")
+        args = SimpleNamespace(run=None, root=False, local="a.rpm", remote="/tmp/", timeout=600)
+        with mock.patch("desk.cli.runs.resolve", return_value=run), \
+                mock.patch("desk.cli.guest.scp", return_value=rc), mock.patch("sys.stderr"):
+            cli._copy(args, push=True)
+
+    def test_a_failed_copy_is_desks_failure_not_a_failed_check(self):
+        with self.assertRaisesRegex(cli.DeskError, r"copying failed \(scp exit 1\).*--root"):
+            self.copy(1)
+
+    def test_running_out_of_time_is_124(self):
+        with self.assertRaises(SystemExit) as e:
+            self.copy(124)
+        self.assertEqual(e.exception.code, 124)
