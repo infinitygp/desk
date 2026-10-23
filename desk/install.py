@@ -50,10 +50,10 @@ def _skill() -> list[str]:
         SKILLS.symlink_to(source)
         done.append(f"{SKILLS} -> {source}")
     else:
-        # A release unpacks into the cache, which is pruned: the skill is copied out of it.
-        SKILLS.mkdir(parents=True, exist_ok=True)
-        for f in source.iterdir():
-            shutil.copy2(f, SKILLS / f.name)
+        # A release unpacks into the cache, which is pruned: the skill is copied out of it, whole,
+        # so that a file the release no longer has does not stay behind for agents to read.
+        shutil.rmtree(SKILLS, ignore_errors=True)
+        shutil.copytree(source, SKILLS)
         done.append(f"{SKILLS}: skill of desk {version()}")
     for link in LINKED:
         if link.exists() or link.is_symlink():

@@ -103,10 +103,13 @@ class Release(unittest.TestCase):
         same = self.desk(launcher, "update", home=home, FAKE_RELEASE=str(self.pyz))
         self.assertIn("is the newest release", same.stdout, same.stderr)
 
-        # A later release, whose skill says something else.
+        # A later release, whose skill says something else and has one file less.
+        self.assertTrue((skill.parent / "openwrt.md").exists())
         rebuilt = self.dir / "newer.pyz"
         with zipfile.ZipFile(self.pyz) as src, zipfile.ZipFile(rebuilt, "w") as dst:
             for item in src.infolist():
+                if item.filename == "skill/openwrt.md":
+                    continue
                 data = src.read(item.filename)
                 if item.filename == "BUILD.json":
                     data = json.dumps({**json.loads(data), "version": "v9.9.10-test", "id": "newer-build"}).encode()
@@ -119,6 +122,7 @@ class Release(unittest.TestCase):
         self.assertIn("-> v9.9.10-test", r.stdout)
         self.assertIn("v9.9.10-test", self.desk(launcher, "--version", home=home).stdout)
         self.assertEqual(skill.read_text(), "the newer skill\n")
+        self.assertFalse((skill.parent / "openwrt.md").exists())
 
     def test_without_libvirt_it_says_what_to_install(self):
         home = self.home()
