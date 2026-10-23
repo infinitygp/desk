@@ -21,7 +21,8 @@ INTERACTIVE = {
     "list item", "tree item", "table cell", "slider", "spin button", "switch", "menu", "icon",
     "button", "toggle", "editbar", "terminal",
 }
-# Roles whose name is only a container caption and adds noise without children context.
+# Roles whose name is only a container caption and adds noise without children context: listed
+# only for text of their own.
 QUIET = {"filler", "panel", "section", "scroll pane", "viewport", "layered pane", "split pane",
          "redundant object", "unknown", "grouping"}
 TEXT_ROLES = {"label", "heading", "paragraph", "static", "caption", "document web",
@@ -209,9 +210,10 @@ def describe(acc, base, pid, path, depth):
         value = text_of(acc)[:120]
         if "editable" in st or (value and value != name):
             node["value"] = value
-    elif (role in TEXT_ROLES or role in QUIET) and not name:
+    elif role in QUIET or (role in TEXT_ROLES and not name):
         # For containers this is only their own text: children appear as embedded objects,
-        # which text_of drops, and are listed separately.
+        # which text_of drops, and are listed separately. A named one keeps it too: a toolbar
+        # labelled "Selection" holds "2 tags selected" and nothing else does.
         node["text"] = text_of(acc)[:160]
     return node, st
 

@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 try:
@@ -115,6 +116,47 @@ class CutOff(unittest.TestCase):
             self.assertEqual(guest_a11y.clickable_point(link, self.link, self.chain, root, True),
                              ((329, 768), None, False))
             self.assertEqual(guest_a11y.clickable_point(link, self.link, self.chain, root, False), (None, None, False))
+
+
+
+class Acc:
+    def __init__(self, role, name):
+        self.role, self.name = role, name
+
+    def get_role_name(self):
+        return self.role
+
+    def get_name(self):
+        return self.name
+
+    def get_state_set(self):
+        return SimpleNamespace(contains=lambda state: state == Atspi.StateType.SHOWING)
+
+    def get_extents(self, coord):
+        return SimpleNamespace(x=10, y=20, width=100, height=20)
+
+    def get_interfaces(self):
+        return ["Text", "Component"]
+
+
+@unittest.skipIf(guest_a11y is None, "AT-SPI GObject introspection not installed")
+class OwnText(unittest.TestCase):
+    def node(self, role, name, text):
+        with mock.patch.object(guest_a11y, "text_of", return_value=text):
+            node, st = guest_a11y.describe(Acc(role, name), ("screen", 0, 0), 1, [0], 0)
+        return node if guest_a11y.wanted(node, st, "") else None
+
+    def test_a_named_group_keeps_its_text(self):
+        # role="group" aria-label="Selection" around "2 tags selected": Firefox's panel.
+        self.assertEqual(self.node("panel", "Selection", "2 tags selected")["text"], "2 tags selected")
+        self.assertEqual(self.node("panel", "", "2 tags selected")["text"], "2 tags selected")
+
+    def test_containers_without_text_of_their_own_stay_out(self):
+        self.assertIsNone(self.node("panel", "Selection", ""))
+        self.assertIsNone(self.node("section", "", ""))
+
+    def test_a_named_label_is_its_name(self):
+        self.assertNotIn("text", self.node("label", "User name", "User name"))
 
 
 if __name__ == "__main__":
