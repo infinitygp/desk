@@ -381,8 +381,8 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None) -> bo
             print(f"video: {v}")
     print("scenario passed" if ok else "scenario FAILED")
     if keep and run.live_domain() is not None:
-        print(f"run {run.id} left running: export DESK_RUN={run.id} (fish: set -x DESK_RUN {run.id}); "
-              f"desk down {run.id} when done; desk scenario run FILE --from N goes on in it")
+        print(f"run {run.id} left running: desk -r {run.id} COMMAND; desk down {run.id} when done; "
+              f"desk -r {run.id} scenario run FILE --from N goes on in it")
     return ok
 
 

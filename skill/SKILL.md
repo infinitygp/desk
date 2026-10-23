@@ -30,7 +30,7 @@ Read the file for your task before you start:
 ## Loop
 
 ```bash
-desk up fedora-44-gnome             # prints the run id; export DESK_RUN=<id> if several runs exist
+desk up fedora-44-gnome             # prints the run id; desk -r <id> ... when several runs exist
 desk exec --gui -- gnome-calculator # start an app in the session
 desk wait --change                  # until its window has appeared and settled
 desk a11y                           # focused window as text: @refs, roles, names, values, click points
@@ -243,7 +243,7 @@ the cause usually is. An element that did not appear (`expect`, `click`) comes w
 window, similar names on screen and, on GNOME, the overview or a notification banner over the
 windows: a typo, the wrong window in front or a prompt of the system shows there without a
 screenshot. `desk scenario run FILE --keep` writes the report and leaves the run running
-(it prints the `DESK_RUN` to use) to go on by hand from where the scenario stopped; `desk down` it
+(it prints the `desk -r ID` to use) to go on by hand from where the scenario stopped; `desk down` it
 afterwards (left alone, it is destroyed after 2 h idle). While writing a scenario, fix the failed
 step in the file and try it again in that run with `desk -r ID scenario run FILE --from N`: steps
 N.. only, no build and no new run, seconds instead of the whole scenario; the run stays, and its
@@ -298,7 +298,8 @@ then (`runs/<id>/failed-start.png`).
   or tips (`/etc/firefox/policies/policies.json`).
 - Guest clocks are synced on restore; network goes through user-mode networking (outbound
   works, inbound only SSH; `desk forward PORT` makes a guest service reachable from the host).
-- Several runs can exist at once; pass `-r ID` or set `DESK_RUN`. `desk ls` shows who holds each:
+- Several runs can exist at once; pass `-r ID` (an exported `DESK_RUN` points every later command
+  of the shell at one run, also those meant for another). `desk ls` shows who holds each:
   the scenario, `desk up --label TEXT` (or `$DESK_LABEL`), or by default the coding agent and its
   directory ("claude @ cockpit-example", "(agent gone)" once it has exited). Leave other agents'
   runs alone. Only one run per image is restored from the warm state (~2 s); further ones boot

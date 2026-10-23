@@ -127,7 +127,9 @@ def cmd_up(args) -> None:
     print(f"run {run.id} up (image {run.image}, ssh port {run.ssh_port})" + (", recording" if args.record else ""))
     for port, local in forwards:
         print(_forward_line(port, local))
-    print(f"export DESK_RUN={run.id}  # fish: set -x DESK_RUN {run.id}")
+    # Not DESK_RUN: exported, it points every command of the shell at this run, whichever run
+    # the agent meant next.
+    print(f"next: desk -r {run.id} COMMAND (desk down {run.id} when done)")
 
 
 def cmd_down(args) -> None:
