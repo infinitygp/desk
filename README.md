@@ -236,7 +236,8 @@ into a browser window whose focus is not in a text field is refused. Walks of th
 20 s.
 
 `desk forward` keeps an SSH tunnel per guest port in a background process
-(`python -m desk.forward`), restarted when SSH drops, stopped by `desk down`.
+(`python -m desk.forward`), restarted when SSH drops, stopped by `desk down`. ssh holds the host
+port only while connected, so while a guest reboots no other run's `desk forward` takes it.
 
 ## Exit codes, locks, limits
 
