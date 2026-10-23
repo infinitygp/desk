@@ -72,10 +72,12 @@ function Show-Window($handle) {
 
 # The topmost window whose title or process name contains the query, brought to the front.
 function Focus-Window($query) {
+    # As written: [ and ] in a title ("Report [draft]") would otherwise be a wildcard character class.
+    $like = "*$([WildcardPattern]::Escape($query))*"
     $hit = $AE::RootElement.FindAll([Windows.Automation.TreeScope]::Children, $ControlView) | Where-Object {
         $_.Current.NativeWindowHandle -and (
-            $_.Current.Name -like "*$query*" -or
-            (Get-Process -Id $_.Current.ProcessId -ErrorAction SilentlyContinue).ProcessName -like "*$query*")
+            $_.Current.Name -like $like -or
+            (Get-Process -Id $_.Current.ProcessId -ErrorAction SilentlyContinue).ProcessName -like $like)
     } | Select-Object -First 1
     if (-not $hit) { return @{ ok = $true; title = '' } }
     @{ ok = $true; title = $hit.Current.Name; focused = (Show-Window $hit.Current.NativeWindowHandle) }

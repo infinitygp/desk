@@ -243,7 +243,7 @@ function Snapshot($opts) {
         }
         $isFocus = ($hwnd -eq $focusHwnd)
         $procName = try { (Get-Process -Id $procId).ProcessName } catch { '' }
-        if ($opts.app -and ($procName -notlike "*$($opts.app)*")) { continue }
+        if ($opts.app -and ($procName -notlike "*$([WildcardPattern]::Escape($opts.app))*")) { continue }
         if (-not ($opts.all -or $opts.app) -and -not $isFocus) { continue }
         # A closing window, or one whose app is busy (Notepad while its teaching tip is open),
         # makes UIA throw. Say so instead of silently leaving the window out.
