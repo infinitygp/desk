@@ -220,6 +220,17 @@ class ChromiumPages(unittest.TestCase):
             # A page that only looks like one is the page asked for.
             self.assertIsNone(guest_a11y.browser_error(page("Offline", "E1"), "https://app.test/"))
 
+    def test_a_walk_out_of_time_is_not_a_walk_that_found_nothing(self):
+        import time
+
+        top = Tree("frame", children=[Tree("panel", children=[Tree("embedded", "responsive")])])
+        seen = []
+        with mock.patch.object(guest_a11y, "states", return_value={"showing"}):
+            guest_a11y.showing_walk(top, lambda a: seen.append(a.role), time.monotonic() + 5)
+            self.assertEqual(seen, ["panel", "embedded"])
+            with self.assertRaisesRegex(LookupError, "did not answer in time"):
+                guest_a11y.showing_walk(top, lambda a: None, time.monotonic() - 1)
+
     def test_the_page_behind_docked_devtools(self):
         # The address bar first, then DevTools (desk browser viewport opens them), then the page.
         bar = Tree("entry", attrs={"class": guest_a11y.OMNIBOX})

@@ -690,10 +690,13 @@ def front_toplevel():
 
 
 def showing_walk(acc, visit, deadline, depth=0) -> None:
-    """Depth first through what is showing, until `visit` returns True or time runs out; False
-    leaves out what is inside the node."""
-    if depth > 80 or time.monotonic() > deadline:
+    """Depth first through what is showing, until `visit` returns True; False leaves out what is
+    inside the node. Raises when time runs out: what was not looked at is not missing (a
+    responsive design mode taken for closed would be toggled off)."""
+    if depth > 80:
         return
+    if time.monotonic() > deadline:
+        raise LookupError("the focused window did not answer in time while its accessibility tree was read")
     try:
         n = acc.get_child_count()
     except GLib.Error:
