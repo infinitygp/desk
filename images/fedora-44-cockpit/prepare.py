@@ -3,9 +3,27 @@ a run back to that state later (desk prepare), e.g. after a reboot: whatever of 
 admin() alone turns on administrative access on whatever Cockpit page is open (desk prepare admin)."""
 
 URL = "https://localhost:9090/"
-ADMIN = ("Administrative access", "button")
+# Cockpit's names in English and in Polish, which a test may have switched it to (Session, Display
+# language); from /usr/share/cockpit/{static,shell}/po.pl.js.
+NAMES = [
+    {"user": "User name", "password": "Password", "admin": "Administrative access", "limited": "Limited access",
+     "turn on": "Turn on administrative access", "authenticate": "Authenticate"},
+    {"user": "Nazwa użytkownika", "password": "Hasło", "admin": "Dostęp administracyjny",
+     "limited": "Ograniczony dostęp", "turn on": "Włącz dostęp administracyjny", "authenticate": "Uwierzytelnij"},
+]
+# sudo's prompt and complaint, in the system's language rather than Cockpit's (sudoers.mo).
+SUDO_PASSWORD = ("Password", "Hasło")
+SUDO_SORRY = ("Sorry", "Niestety")
 # A cold boot starts Firefox and Cockpit for the first time, with the host busy with other runs.
 FIRST_PAGE = 180
+
+
+def _first(s, *wanted, timeout=60):
+    """The first of these (key, role) on screen in either language: the key, and the names of that
+    language."""
+    found = [(names, key, role) for key, role in wanted for names in NAMES]
+    names, key, _ = found[s.first(*[(names[key], role) for names, key, role in found], timeout=timeout)]
+    return key, names
 
 
 def prepare(s):
@@ -15,10 +33,11 @@ def prepare(s):
     s.gui("firefox", URL)
     if running:
         s.focus("Firefox")
-    if s.first(("User name", "entry"), ADMIN, ("Limited access", "button"), timeout=FIRST_PAGE) == 0:
-        s.click("User name", role="entry")
+    key, names = _first(s, ("user", "entry"), ("admin", "button"), ("limited", "button"), timeout=FIRST_PAGE)
+    if key == "user":
+        s.click(names["user"], role="entry")
         s.type("tester")
-        s.click("Password", role="password text")
+        s.click(names["password"], role="password text")
         s.type("tester")
         s.key("ret")
     admin(s)
@@ -26,20 +45,20 @@ def prepare(s):
 
 def admin(s):
     # The dialog may be open already: a page asks for administrative access with a button of its own.
-    state = s.first(ADMIN, ("Limited access", "button"), ("Turn on administrative access", "button"),
-                    ("Authenticate", "button"))
-    if state == 0:
+    key, names = _first(s, ("admin", "button"), ("limited", "button"), ("turn on", "button"),
+                        ("authenticate", "button"))
+    if key == "admin":
         return
-    if state < 3:
-        s.click(("Limited access", "Turn on administrative access")[state - 1], role="button")
+    if key != "authenticate":
+        s.click(names[key], role="button")
     for _ in range(3):
         # The field is named after sudo's prompt once sudo asks; typing earlier is lost when sudo
         # starts over with "Sorry, try again".
-        s.wait_for("Password", role="password text", exact=False)
-        s.click("Password", role="password text", exact=False)
+        field = SUDO_PASSWORD[s.first(*[(p, "password text") for p in SUDO_PASSWORD], exact=False)]
+        s.click(field, role="password text", exact=False)
         s.type("tester")
-        s.click("Authenticate", role="button")
+        s.click(names["authenticate"], role="button")
         s.settle()
-        if s.first(ADMIN, ("Sorry", None), exact=False) == 0:
+        if s.first((names["admin"], "button"), *[(w, None) for w in SUDO_SORRY], exact=False) == 0:
             return
     raise RuntimeError("Cockpit did not grant administrative access after three attempts")

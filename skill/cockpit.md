@@ -9,7 +9,8 @@ Use `fedora-44-cockpit` to test what the plugin does: Firefox shows Cockpit at
 `desk exec --root -- dnf install -y /tmp/foo.rpm`, then press F5 in Firefox: the new entry appears
 in Cockpit's menu without logging in again. After `desk reboot` (or when Cockpit asks to log in
 again) run `desk prepare`, in a scenario `prepare = true`: it opens Firefox at Cockpit, logs in and
-turns on administrative access, whichever of that is missing. To get administrative access back
+turns on administrative access, whichever of that is missing, also when the test has switched
+Cockpit to Polish. To get administrative access back
 in the middle of a test (after limiting it, or on a page that asks for it) without leaving the page:
 `desk prepare admin`, in a scenario `prepare = "admin"`; it waits for sudo's password prompt and
 types the password again when sudo answers "Sorry, try again"; a sudo dialog the plugin itself
