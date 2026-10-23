@@ -48,6 +48,7 @@ class Steps:
         else:
             r = guest.ssh_run(self.target.ssh_port, self.target.user,
                               guest.remote_command(list(argv), gui=True, env=env), capture=True, timeout=60)
+            guest.lost(r, self.target.ssh_port, self.target.user, f"starting {argv[0]}")
             if r.returncode != 0:
                 raise DeskError(f"starting {argv[0]} failed: {r.stderr.decode(errors='replace').strip()}")
         display.wait_change(dom, timeout=30, base=before)
@@ -60,6 +61,8 @@ class Steps:
             try:
                 snap = a11y.snapshot(self.target, limit=2000, save=False)
                 hits = a11y._matches(snap, name, role, exact)
+            except guest.NoConnection:
+                raise  # a guest that does not answer is not a window still coming up
             except DeskError:
                 hits = []  # the window is still coming up
             if hits:
@@ -76,6 +79,8 @@ class Steps:
         while True:
             try:
                 snap = a11y.snapshot(self.target, limit=2000, save=False)
+            except guest.NoConnection:
+                raise
             except DeskError:
                 snap = None  # the window is still coming up
             for i, (name, role) in enumerate(candidates):

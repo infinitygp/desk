@@ -27,6 +27,7 @@ def _helper(run, *args: str) -> dict:
         r = guest.ssh_run(run.ssh_port, run.user, cmd, input=HELPER.read_bytes(), capture=True, timeout=60)
     except subprocess.TimeoutExpired as e:
         raise DeskError("a11y helper timed out (an application may not be answering on the a11y bus)") from e
+    guest.lost(r, run.ssh_port, run.user, "reading the accessibility tree")
     if r.returncode != 0:
         raise DeskError(f"a11y helper failed: {r.stderr.decode(errors='replace').strip()[-500:]}")
     out = json.loads(r.stdout)

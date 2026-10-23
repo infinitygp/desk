@@ -264,6 +264,19 @@ class LostConnection(unittest.TestCase):
     def test_a_step_that_expects_255_gets_it(self):
         self.assertEqual(self.shell({"exec": "reboot", "rc": 255}, 255), "")
 
+    def test_steps_on_the_accessibility_tree_do_not_wait_it_out(self):
+        from desk import steps
+
+        lost = subprocess.CompletedProcess([], 255, b"", b"Connection refused")
+        target = SimpleNamespace(ssh_port=1, user="tester", agent_port=0, dom=lambda: None)
+        for step in (lambda s: s.wait_for("Saved", timeout=30), lambda s: s.first(("Saved", None), timeout=30),
+                     lambda s: s.gui("gnome-text-editor")):
+            with self.subTest(step=step), mock.patch("desk.guest.ssh_run", return_value=lost), \
+                    mock.patch("desk.steps.display"), mock.patch("desk.steps.time.sleep") as slept, \
+                    self.assertRaisesRegex(guest.NoConnection, "no SSH connection to the guest.*Connection refused"):
+                step(steps.Steps(SimpleNamespace(family="linux", need_desktop=lambda what: None), target))
+            slept.assert_not_called()
+
     def test_the_steps_stop_with_it(self):
         run = mock.Mock()
         with mock.patch("desk.scenario._step", side_effect=guest.NoConnection("no SSH connection")), \
