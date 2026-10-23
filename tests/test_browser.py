@@ -177,6 +177,8 @@ class Open(unittest.TestCase):
     def test_an_image_without_chromium_says_so(self):
         with self.assertRaisesRegex(DeskError, "fedora-44-gnome has no Chromium.*desk maintain --only fedora-44-gnome"):
             self.open([{"url": None}], browser="chromium", rc=127)
+        with self.assertRaisesRegex(DeskError, "fedora-44-gnome has no Firefox: --browser chromium"):
+            self.open([{"url": None}], browser="firefox", rc=127)
 
     def test_chromiums_error_page_is_not_waited_out(self):
         # Its address is Chromium's own, so the page asked for never "arrives".

@@ -61,8 +61,8 @@ A host keeps the images it tests on: none is required, and nothing builds them u
 | `fedora-44-gnome-pl` | variant of `fedora-44-gnome` | Polish locale; shares the base disk, own warm state |
 | `fedora-44-cockpit` | variant of `fedora-44-gnome` | Cockpit, Firefox logged in with administrative access |
 
-The images with a desktop on Linux have Chromium next to Firefox (`chromium` in `ks.cfg` and
-`user-data`).
+The images with a desktop on Linux have Chromium (`chromium` in `ks.cfg` and `user-data`), the
+Fedora ones next to Firefox; Arch's GNOME comes without it, and `desk browser` says so.
 | `arch-gnome` | official cloud image, GNOME installed by cloud-init (NoCloud seed) | rolling; no Secure Boot |
 | `windows-11` | evaluation ISO + autounattend.xml on a second CD | 90-day evaluation, reinstalled by `desk maintain` |
 | `openwrt-25.12` | the release's disk image (x86-64 ext4 combined, EFI), grown and preconfigured offline | no desktop: BusyBox ash, procd, apk, LuCI |
