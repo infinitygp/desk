@@ -203,10 +203,11 @@ whole card, radio button included. Firefox's hit test also answers with an eleme
 scrolling container cuts it off (a table row reaching below Cockpit's main area), so the points
 tried come inside every ancestor's box first, `desk a11y` lists such a point rather than the
 middle, and an element with none there is scrolled into view first; a menu hanging out of its
-container's box stays clickable where the hit test finds it. `desk a11y` marks covered elements. `desk set-text` focuses the
-field, selects all and types (or pastes through the shell extension's `SetClipboard`), since
-AT-SPI's text replacement leaves web pages' input events out. `desk type` into a browser window
-whose focus is not in a text field is refused. Walks of the tree stop after 20 s.
+container's box stays clickable where the hit test finds it. `desk a11y` marks covered elements.
+`desk set-text` focuses the field, selects all and types (or pastes through the shell extension's
+`SetClipboard`), since AT-SPI's text replacement leaves web pages' input events out. `desk type`
+into a browser window whose focus is not in a text field is refused. Walks of the tree stop after
+20 s.
 
 `desk forward` keeps an SSH tunnel per guest port in a background process
 (`python -m desk.forward`), restarted when SSH drops, stopped by `desk down`.
