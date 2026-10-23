@@ -248,12 +248,31 @@ def hit_at(root, base, point):
     return hit
 
 
+def labelled_by(acc, hit) -> bool:
+    """Whether `hit` or what holds it is a label of `acc`, so that a click there reaches `acc`:
+    a PatternFly tile's label lies over its radio button and is the tile's place to click."""
+    try:
+        labels = [r.get_target(i) for r in acc.get_relation_set() or []
+                  if r.get_relation_type() == Atspi.RelationType.LABELLED_BY for i in range(r.get_n_targets())]
+        a = hit
+        for _ in range(3):
+            if a is None:
+                return False
+            if any(a == label for label in labels):
+                return True
+            a = a.get_parent()
+    except GLib.Error:
+        pass
+    return False
+
+
 def placement(acc, hit, chain, point) -> str | None:
     """Where `hit`, the element at `point`, is relative to `acc`: "self", "inside" (a descendant,
     such as the text inside a button), "around" (an ancestor, and every element between them
     contains the point: `acc` itself is not hit-testable there; Firefox leaves out the buttons of
-    sticky footers that way), "other" (something else covers `acc` there) or None (unknown).
-    `chain` holds the ancestors of `acc` with their boxes, the top-level first."""
+    sticky footers that way), "label" (a label of `acc` lies over it), "other" (something else
+    covers `acc` there) or None (unknown). `chain` holds the ancestors of `acc` with their boxes,
+    the top-level first."""
     if hit is None:
         return None
     if hit == acc:
@@ -275,7 +294,7 @@ def placement(acc, hit, chain, point) -> str | None:
             return "inside"
         if any(a == anc for anc, _ in chain):
             break
-    return "other"
+    return "label" if labelled_by(acc, hit) else "other"
 
 
 def label_of(acc) -> str:
@@ -351,7 +370,7 @@ def snapshot(opts: dict) -> dict:
         where = placement(acc, hit, chain, point)
         probe.spent += time.monotonic() - t
         if node.get("offscreen"):
-            if where in ("self", "inside", "around"):
+            if where in ("self", "inside", "around", "label"):
                 del node["offscreen"]
         elif where == "other":
             node["covered"] = label_of(hit)

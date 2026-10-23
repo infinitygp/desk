@@ -1,9 +1,9 @@
 import unittest
 
 try:
-    from desk.guest_a11y import placement, stacked_base
+    from desk.guest_a11y import Atspi, placement, stacked_base
 except (ImportError, ValueError):  # no AT-SPI typelib on this host
-    placement = stacked_base = None
+    Atspi = placement = stacked_base = None
 
 
 @unittest.skipIf(stacked_base is None, "AT-SPI GObject introspection not installed")
@@ -23,11 +23,28 @@ class StackedBase(unittest.TestCase):
 
 
 class Node:
-    def __init__(self, parent=None):
-        self.parent = parent
+    def __init__(self, parent=None, labels=()):
+        self.parent, self.labels = parent, list(labels)
 
     def get_parent(self):
         return self.parent
+
+    def get_relation_set(self):
+        return [Relation(Atspi.RelationType.LABELLED_BY, self.labels)] if self.labels else []
+
+
+class Relation:
+    def __init__(self, kind, targets):
+        self.kind, self.targets = kind, targets
+
+    def get_relation_type(self):
+        return self.kind
+
+    def get_n_targets(self):
+        return len(self.targets)
+
+    def get_target(self, i):
+        return self.targets[i]
 
 
 @unittest.skipIf(placement is None, "AT-SPI GObject introspection not installed")
@@ -58,6 +75,16 @@ class Placement(unittest.TestCase):
 
     def test_unknown(self):
         self.assertIsNone(placement(self.button, None, self.chain, (10, 150)))
+
+    def test_its_own_label_over_it_is_where_to_click(self):
+        # A PatternFly tile: the label over the whole card is what a click on the radio hits.
+        card = Node(self.pane)
+        label = Node(card)
+        radio = Node(card, labels=[Node(card), label])
+        chain = self.chain + ((card, [0, 100, 200, 80]),)
+        self.assertEqual(placement(radio, label, chain, (100, 140)), "label")
+        self.assertEqual(placement(radio, Node(label), chain, (100, 140)), "label")
+        self.assertEqual(placement(radio, self.footer_button, chain, (100, 140)), "other")
 
 
 if __name__ == "__main__":
