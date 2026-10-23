@@ -70,6 +70,11 @@ def center(bbox: list[int]) -> tuple[int, int]:
     return x + w // 2, y + h // 2
 
 
+def short(text: str, limit: int = 160) -> str:
+    """Text as listed: find and expect search all that the guest read of it (a log in a <pre>)."""
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
 def format_node(node: dict, indent: bool = True) -> str:
     pad = "  " * node["depth"] if indent else ""
     parts = [f"{pad}@{node['ref']} {node['role']}"]
@@ -78,7 +83,7 @@ def format_node(node: dict, indent: bool = True) -> str:
     if node.get("value") is not None:
         parts.append(f"value={json.dumps(node['value'], ensure_ascii=False)}")
     if node.get("text"):
-        parts.append(f"text={json.dumps(node['text'], ensure_ascii=False)}")
+        parts.append(f"text={json.dumps(short(node['text']), ensure_ascii=False)}")
     states = node["states"] + (["offscreen"] if node.get("offscreen") else []) + \
         (["covered"] if node.get("covered") else [])
     if states:
@@ -265,7 +270,7 @@ def pick(snap: dict, hits: list[dict], query: str) -> dict:
     rank = _ranker(snap)
     best = min(rank(n) for n in hits)
     top = [n for n in hits if rank(n) == best]
-    names = sorted({n["name"] or n.get("text") or n.get("value") or "" for n in top})
+    names = sorted({short(n["name"] or n.get("text") or n.get("value") or "", 60) for n in top})
     if len(names) > 1:
         shown = ", ".join(f"{n!r}" for n in names[:8]) + (" ..." if len(names) > 8 else "")
         raise DeskError(f"{query!r} is part of several names: {shown}; give the whole name "
@@ -277,7 +282,7 @@ def role_hint(snap: dict, query: str, role: str | None, exact: bool) -> str:
     """When nothing of a role matches: what the name belongs to instead."""
     if not role:
         return ""
-    others = sorted({f"{n['role']} {n['name'] or n.get('text') or n.get('value')!r}"
+    others = sorted({f"{n['role']} {short(n['name'] or n.get('text') or n.get('value') or '', 60)!r}"
                      for n in _matches(snap, query, None, exact)})
     return f" with role {role!r}; there is: {', '.join(others[:6])}" if others else ""
 

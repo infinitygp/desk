@@ -57,6 +57,15 @@ class Format(unittest.TestCase):
         snap = {"tops": [{"title": "A", "app": "a", "focus": True, "start": 0}], "nodes": [], "truncated": "time"}
         self.assertIn("took too long", format_snapshot(snap))
 
+    def test_long_text_is_searched_whole_and_listed_short(self):
+        # A log in a <pre>: what is looked for may be far into it.
+        log = "podman[1234]: image pull registry:3.1.2 " * 20 + "container create 1234abcd"
+        n = node("e5", 0, "static", "", text=log)
+        self.assertEqual(_matches({"nodes": [n]}, "container create", None, False), [n])
+        listed = format_node(n, indent=False)
+        self.assertLess(len(listed), 200)
+        self.assertIn('…"', listed)
+
     def test_point_where_the_middle_is_cut_off(self):
         self.assertIn("(329,768)", format_node(node("e9", 0, "link", "abrtd", point=[329, 768])))
 

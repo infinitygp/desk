@@ -50,7 +50,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | Command | Purpose |
 |---|---|
 | `desk a11y [--app NAME] [--all] [--offscreen] [--max N]` | Accessibility tree of the focused window (`--all`: every window and the shell; `--offscreen`: also what is scrolled out of view); `[covered] under X` marks what a sticky bar, toast or popup lies over (the element's own label over it does not count: clicking it is clicking the element) |
-| `desk find TEXT [--role R] [--exact] [--all]` | Elements whose name, value or text matches, off-screen ones included; refs usable right away |
+| `desk find TEXT [--role R] [--exact] [--all]` | Elements whose name, value or text matches (a text element's first 10,000 characters, a whole log in a `<pre>`; listings show 160), off-screen ones included; refs usable right away |
 | `desk click (X Y \| @eN \| --name TEXT [--role R] [--exact]) [--button right] [--double]` | Click; an off-screen, covered or cut-off (by a scrolling area's edge) @ref or name is scrolled into view first, and the click goes where the element itself is hit, never onto what covers it; `--role` also takes ARIA names (`tab`, `checkbox`, `textbox`) |
 | `desk action @eN [NAME]` | Invoke an AT-SPI action instead of clicking (element covered or off-screen) |
 | `desk set-text @eN TEXT` | Replace an editable field's text as a user would: focus it, select all, type (or paste what the keyboard cannot type); web forms (React) see it; says when the field shows something else afterwards |

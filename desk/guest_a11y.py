@@ -40,6 +40,8 @@ WALK_SECONDS = 20
 SEARCH_SECONDS = 10
 # Hit tests (what is really at a point) per listing; Firefox answers each in about a millisecond.
 HIT_SECONDS = 3
+# Text of a text element that find and expect search: a log in a <pre> is a single element.
+TEXT_CHARS = 10000
 
 
 def shell_windows() -> list[dict]:
@@ -98,12 +100,12 @@ def extents(acc, coord):
     return [r.x, r.y, r.width, r.height]
 
 
-def text_of(acc) -> str:
+def text_of(acc, limit: int = 400) -> str:
     try:
         if "Text" not in acc.get_interfaces():
             return ""
         n = Atspi.Text.get_character_count(acc)
-        t = Atspi.Text.get_text(acc, 0, min(n, 400))
+        t = Atspi.Text.get_text(acc, 0, min(n, limit))
     except GLib.Error:
         return ""
     return " ".join(t.replace(OBJ, " ").split())
@@ -214,7 +216,7 @@ def describe(acc, base, pid, path, depth):
         # For containers this is only their own text: children appear as embedded objects,
         # which text_of drops, and are listed separately. A named one keeps it too: a toolbar
         # labelled "Selection" holds "2 tags selected" and nothing else does.
-        node["text"] = text_of(acc)[:160]
+        node["text"] = text_of(acc, TEXT_CHARS)
     return node, st
 
 
