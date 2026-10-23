@@ -128,3 +128,30 @@ class Open(unittest.TestCase):
         self.assertTrue(browser.under("https://app.test/example#/tasks/1", "https://app.test/example#/tasks"))
         self.assertTrue(browser.under("https://app.test/example#/overview", "https://app.test/example#/tasks",
                                       fragment=False))
+
+
+class Viewport(unittest.TestCase):
+    """The first time in a Firefox session the mode's toolbar comes before its size fields."""
+
+    def viewport(self, fields: list):
+        from types import SimpleNamespace
+        from unittest import mock
+
+        run = SimpleNamespace(image="fedora-44-gnome", dom=lambda: None, scale=100)
+        clock = iter(range(0, 1000, 5))
+        with mock.patch("desk.browser._linux", return_value=SimpleNamespace(layout="us")), \
+                mock.patch("desk.browser.a11y.focus"), mock.patch("desk.browser._rdm", return_value={"open": True}), \
+                mock.patch("desk.browser._rdm_fields", side_effect=fields) as looked, \
+                mock.patch("desk.browser.a11y.replace_text", return_value=""), mock.patch("desk.browser.display"), \
+                mock.patch("desk.browser.time.monotonic", side_effect=lambda: next(clock)), \
+                mock.patch("desk.browser.time.sleep"):
+            browser.viewport(run, "390x700")
+        return looked.call_count
+
+    def test_waits_for_the_fields(self):
+        field = {"pid": 1, "path": [0, 1], "role": "spin button", "name": ""}
+        self.assertEqual(self.viewport([[], [], [field, field]]), 3)
+
+    def test_gives_up_when_they_do_not_come(self):
+        with self.assertRaisesRegex(DeskError, "cannot find the width and height fields"):
+            self.viewport([[]] * 100)

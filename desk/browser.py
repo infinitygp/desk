@@ -192,6 +192,14 @@ def _rdm(run, focus: bool = False) -> dict:
     return a11y._helper(run, "rdm", json.dumps({"focus": focus}))
 
 
+def _rdm_fields(run) -> list[dict]:
+    snap = a11y.snapshot(run, app="Firefox", limit=400, save=False)
+    bar = next((n for n in snap["nodes"] if n["role"] == "embedded" and n["name"].startswith("chrome://devtools/"
+                                                                                            "content/responsive")), None)
+    return [n for n in snap["nodes"] if bar is not None and n["role"] == "spin button"
+            and n["pid"] == bar["pid"] and n["path"][:len(bar["path"])] == bar["path"]]
+
+
 def viewport(run, size: str) -> str:
     """Pages at WIDTHxHEIGHT CSS pixels, a phone's layout, through Firefox's responsive design mode
     (a window cannot get that narrow), with its sizes typed into the mode's toolbar like a person
@@ -216,13 +224,12 @@ def viewport(run, size: str) -> str:
                 raise DeskError("Firefox's responsive design mode did not open (ctrl+shift+m)")
             time.sleep(0.5)
             state = _rdm(run)
-    snap = a11y.snapshot(run, app="Firefox", limit=400, save=False)
-    bar = next((n for n in snap["nodes"] if n["role"] == "embedded" and n["name"].startswith("chrome://devtools/"
-                                                                                            "content/responsive")), None)
-    fields = [n for n in snap["nodes"] if bar is not None and n["role"] == "spin button"
-              and n["pid"] == bar["pid"] and n["path"][:len(bar["path"])] == bar["path"]]
-    if len(fields) < 2:
-        raise DeskError("cannot find the width and height fields of Firefox's responsive design mode")
+    # The first time in a Firefox session the mode's toolbar is there a moment before its fields.
+    deadline = time.monotonic() + 15
+    while len(fields := _rdm_fields(run)) < 2:
+        if time.monotonic() > deadline:
+            raise DeskError("cannot find the width and height fields of Firefox's responsive design mode")
+        time.sleep(0.5)
     for node, value in zip(fields[:2], (width, height), strict=True):
         note = a11y.replace_text(run, {k: node[k] for k in ("pid", "path", "role", "name")}, str(value), spec.layout)
         display.key(run.dom(), "ret")
