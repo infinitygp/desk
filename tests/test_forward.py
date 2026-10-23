@@ -61,6 +61,27 @@ class Forwards(unittest.TestCase):
             with self.assertRaisesRegex(DeskError, "in use"):
                 forward.start(self.run_, 80, s.getsockname()[1])
 
+    def test_the_port_of_a_tunnel_waiting_for_its_guest_stays_its_own(self):
+        # Run "other" forwards to `port`; its guest reboots, so nothing listens there right now.
+        from desk.virt import free_port
+
+        port = free_port()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        other = Run(tmp.name)
+        other.id = "other"
+        (other.dir / "forward").mkdir()
+        (other.dir / "forward" / "9090.json").write_text(json.dumps({"port": 9090, "local": port, "pid": 1}))
+        started = mock.Mock(pid=4242)
+        started.poll.return_value = None
+        with mock.patch("desk.forward._alive", side_effect=lambda pid: pid == 1), \
+                mock.patch("desk.runs.all_runs", return_value=[other, self.run_]), \
+                mock.patch("desk.forward.subprocess.Popen", return_value=started), \
+                mock.patch("desk.forward._listening", return_value=True):
+            self.assertNotEqual(forward.start(self.run_, port), port)
+            with self.assertRaisesRegex(DeskError, "tunnel of run other"):
+                forward.start(self.run_, 8000, port)
+
     def test_stop_forgets_dead_tunnels(self):
         self.note(80, 8080, 1)
         self.assertEqual(forward.stop(self.run_), [80])

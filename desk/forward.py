@@ -57,6 +57,7 @@ def listing(run) -> list[dict]:
 def start(run, port: int, local: int | None = None) -> int:
     """Forward the guest's `port` to `local` on the host's 127.0.0.1 (the same number when it is
     free, else any free port); returns the local port."""
+    from . import runs
     from .virt import free_port
 
     for f in listing(run):
@@ -65,8 +66,15 @@ def start(run, port: int, local: int | None = None) -> int:
                 raise DeskError(f"guest port {port} is forwarded to 127.0.0.1:{f['local']} already "
                                 f"(desk forward --stop {port}, then again with :{local})")
             return f["local"]
+    # A tunnel's ssh holds its port only while connected: while its guest reboots the port is
+    # free, and another run must not take it.
+    claimed = {f["local"]: r.id for r in runs.all_runs() for f in listing(r) if f["alive"]}
     if local is None:
-        local = port if _free(port) else free_port()
+        local = port if port not in claimed and _free(port) else free_port()
+        while local in claimed:
+            local = free_port()
+    elif local in claimed:
+        raise DeskError(f"port {local} on the host is the tunnel of run {claimed[local]}")
     elif not _free(local):
         raise DeskError(f"port {local} on the host is in use")
     d = _dir(run)
