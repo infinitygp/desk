@@ -5,6 +5,7 @@ import json
 import os
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 from . import display, guest, winagent
@@ -261,12 +262,23 @@ def best_match(snap: dict, hits: list[dict]) -> dict:
 
 
 def pick(snap: dict, hits: list[dict], query: str) -> dict:
-    """The element a click by name means: the whole name over a part of one, and no guessing
-    between different names that merely contain the query ("Save" vs "Save as...")."""
+    """The element a click by name means: the whole name over a part of one, written as given
+    over one that differs in case only, and no guessing between different names that merely
+    contain the query ("Save" vs "Save as...")."""
     q = query.casefold()
     whole = [n for n in hits if q in {(n.get(k) or "").casefold() for k in ("name", "value", "text")}]
     if whole:
-        return best_match(snap, whole)
+        # "registry", a plugin's repository, rather than "Registry" in Cockpit's menu.
+        whole = [n for n in whole if query in {n.get(k) for k in ("name", "value", "text")}] or whole
+        best = best_match(snap, whole)
+        rank = _ranker(snap)
+        alike = [n for n in whole if rank(n) == rank(best)]
+        if len(alike) > 1:
+            where = ", ".join(f"{n['role']} at ({x},{y})" for n in alike[:6]
+                              for x, y in [n.get("point") or center(n["bbox"])])
+            print(f"[desk] warning: {len(alike)} elements are named {query!r} ({where}); took the first; "
+                  "--role, or an @ref from desk find, picks another", file=sys.stderr)
+        return best
     rank = _ranker(snap)
     best = min(rank(n) for n in hits)
     top = [n for n in hits if rank(n) == best]

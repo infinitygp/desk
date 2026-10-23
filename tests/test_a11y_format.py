@@ -167,6 +167,26 @@ class Pick(unittest.TestCase):
         text = {"pid": 1, "path": [0, 2], "role": "heading", "name": "Backups", "offscreen": True}
         self.assertIs(pick({"nodes": [link, text]}, [link, text], "Backup"), link)
 
+    def test_the_name_as_written_wins_over_another_case(self):
+        from desk.a11y import pick
+
+        menu = node("e1", 0, "link", "Registry")
+        repository = node("e2", 0, "link", "registry")
+        with mock.patch("sys.stderr") as err:
+            self.assertIs(pick({"nodes": [menu, repository]}, [menu, repository], "registry"), repository)
+            self.assertIs(pick({"nodes": [menu, repository]}, [menu, repository], "Registry"), menu)
+        err.write.assert_not_called()
+
+    def test_elements_alike_are_named_in_a_warning(self):
+        from desk.a11y import pick
+
+        first = node("e1", 0, "push button", "Delete")
+        second = dict(node("e2", 0, "push button", "Delete"), bbox=[10, 80, 100, 40])
+        with mock.patch("sys.stderr") as err:
+            self.assertIs(pick({"nodes": [first, second]}, [first, second], "Delete"), first)
+        said = "".join(c.args[0] for c in err.write.call_args_list)
+        self.assertIn("2 elements are named 'Delete' (push button at (60,40), push button at (60,100))", said)
+
     def test_only_the_best_ranked_count(self):
         from desk.a11y import pick
 
