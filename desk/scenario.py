@@ -54,7 +54,7 @@ VALUES = {
     "viewport": (lambda v: isinstance(v, str) and (v == "reset" or re.fullmatch(r"[1-9]\d*x[1-9]\d*", v)),
                  "WIDTHxHEIGHT (390x700) or reset"),
     "role": (_text, "a text"), "output": (_text, "a text"), "name": (_text, "a text"), "step": (_text, "a text"),
-    "browser": (lambda v: v in browser.NAMES, " or ".join(sorted(browser.NAMES))),
+    "browser": (lambda v: isinstance(v, str) and v in browser.NAMES, " or ".join(sorted(browser.NAMES))),
     "timeout": (lambda v: _number(v) and v > 0, "seconds"),
     "rc": (lambda v: isinstance(v, int) and not isinstance(v, bool), "an exit code"),
     **{o: (lambda v: isinstance(v, bool), "true or false") for o in ("exact", "soft", "until", "anywhere")},

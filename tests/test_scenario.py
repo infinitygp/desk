@@ -80,6 +80,7 @@ reboot = true
             'image = "a"\n[[step]]\nviewport = "phone"',
             'image = "a"\n[[step]]\nviewport = "390x700"\ntimeout = 5',
             'image = "a"\n[[step]]\nopen = "/x"\nbrowser = "edge"',
+            'image = "a"\n[[step]]\nopen = "/x"\nbrowser = ["chromium"]',
             'image = "a"\n[[step]]\nclick = "x"\nbrowser = "chromium"',
         ):
             with self.subTest(text=text), self.assertRaises(DeskError):

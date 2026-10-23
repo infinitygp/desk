@@ -630,7 +630,8 @@ def action(spec: dict, name: str | None) -> dict:
 def set_text(spec: dict, text: str) -> dict:
     _, _, acc = find_node(spec)
     if "EditableText" not in acc.get_interfaces():
-        raise LookupError("element is not editable")
+        raise LookupError("the element takes no text through AT-SPI (Chromium's fields do not): click into it and "
+                          "use desk type")
     if not Atspi.EditableText.set_text_contents(acc, text):
         raise LookupError("the application refused to replace the field's text through AT-SPI")
     return {"done": True}
