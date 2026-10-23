@@ -230,7 +230,10 @@ whose focus is not in a text field is refused. Walks of the tree stop after 20 s
 `skill/SKILL.md`): build on the host, copy the artifacts in, start a run, steps with the same real
 input as the CLI (`desk/steps.py`), report with the steps in its timeline, exit code 0/1.
 Projects keep theirs in `test/desk/`. `--from N` runs steps N.. in a run left by `--keep`, for
-trying a fixed step again without the ones before it.
+trying a fixed step again without the ones before it. A step that loses the guest (exit 2) says
+whether its VM still runs and what the host had then (`runs.host_state`: free disk where the run
+and libvirt's logs are, memory, swap, other runs): on 2026-10-20 a full `/home` ended QEMU in a
+screendump, and the scenario saw only "Connection refused".
 
 ## Watching
 

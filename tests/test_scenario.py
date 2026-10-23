@@ -216,9 +216,27 @@ class LostConnection(unittest.TestCase):
         run = mock.Mock()
         with mock.patch("desk.scenario._step", side_effect=guest.NoConnection("no SSH connection")), \
                 mock.patch("desk.scenario.Steps"), mock.patch("desk.scenario.display"), \
-                self.assertRaises(guest.NoConnection):
+                mock.patch("desk.scenario.runs.host_state", return_value="the VM is no longer running"), \
+                self.assertRaisesRegex(guest.NoConnection, "no SSH connection; the VM is no longer running"):
             scenario._run_steps(run, self.SPEC, {"step": [{"exec": "true", "soft": True}, {"exec": "true"}]})
-        self.assertTrue(any(c.kwargs.get("ok") is False for c in run.log_event.call_args_list))
+        failed = [c.kwargs for c in run.log_event.call_args_list if c.kwargs.get("ok") is False]
+        self.assertIn("the VM is no longer running", failed[0]["detail"])  # for the report
+
+    def test_host_state_says_whether_the_vm_still_runs_and_what_the_host_has(self):
+        from desk import runs
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run = SimpleNamespace(id="r1", dir=Path(tmp), domain="desk-r1", live_domain=lambda: None)
+            with mock.patch("desk.runs.all_runs", return_value=[run]):
+                said = runs.host_state(run)
+            self.assertTrue(said.startswith("the VM is no longer running (QEMU ended; coredumpctl and libvirt's "
+                                            "log of desk-r1 may say why); host: "))
+            self.assertIn(f"GiB free in {tmp}", said)
+            self.assertIn("MiB memory available", said)
+            self.assertIn("other runs: none", said)
+            run.live_domain = lambda: object()
+            with mock.patch("desk.runs.all_runs", return_value=[run]):
+                self.assertTrue(runs.host_state(run).startswith("the VM is running but does not answer; host: "))
 
 
 class SplitWindows(unittest.TestCase):

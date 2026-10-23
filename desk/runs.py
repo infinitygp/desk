@@ -326,6 +326,33 @@ def _memory_stall_percent() -> float:
     return 0.0
 
 
+def host_state(run: Run) -> str:
+    """Why a run may have stopped answering, for its failure message and report: whether its VM
+    still runs, and what the host is short of. A disk that fills up under a run ends its QEMU
+    (seen as SIGABRT in a screendump, then "Connection refused" for SSH)."""
+    from .config import URI
+
+    where = [run.dir, (Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") if "session" in URI
+                       else Path("/var/cache")) / "libvirt"]
+    parts, devices = [], set()
+    for path in where:
+        try:
+            device, free = path.stat().st_dev, shutil.disk_usage(path).free
+        except OSError:
+            continue
+        if device not in devices:
+            devices.add(device)
+            parts.append(f"{free / 2**30:.1f} GiB free in {path}")
+    meminfo = dict(line.split(":", 1) for line in Path("/proc/meminfo").read_text().splitlines() if ":" in line)
+    swap = (int(meminfo.get("SwapTotal", "0 kB").split()[0]) - int(meminfo.get("SwapFree", "0 kB").split()[0])) // 1024
+    parts.append(f"{_mem_available_mib()} MiB memory available, {swap} MiB swap used")
+    others = [r.id for r in all_runs() if r.id != run.id and r.live_domain() is not None]
+    parts.append(f"other runs: {', '.join(others) or 'none'}")
+    vm = ("the VM is running but does not answer" if run.live_domain() is not None else
+          f"the VM is no longer running (QEMU ended; coredumpctl and libvirt's log of {run.domain} may say why)")
+    return f"{vm}; host: {'; '.join(parts)}"
+
+
 def check_memory(spec: ImageSpec) -> None:
     need = spec.memory_mib + HOST_RESERVE_MIB
     avail = _mem_available_mib() - _promised_mib()

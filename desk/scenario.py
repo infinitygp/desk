@@ -367,14 +367,15 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None) -> bo
                           else f"New-Item -ItemType Directory -Force {dest} | Out-Null"), capture=True)
             for f in artifacts:
                 if guest.scp(run.ssh_port, str(f), f"{run.user}@127.0.0.1:{dest}/{f.name}") != 0:
-                    raise DeskError(f"copying {f.name} to the guest failed")
+                    raise DeskError(f"copying {f.name} to the guest failed; {runs.host_state(run)}")
         for d in data.get("disks", []):
             disks.add(run, *disks.parse(d))
         for device in data.get("usb", []):
             usb.add(run, device)
         ok = _run_steps(run, spec, data)
     finally:
-        report, videos = evidence.finish(run, keep=keep, running=keep)
+        # Also when the VM is gone: the steps and why the guest was lost are in its directory.
+        report, videos = evidence.finish(run, keep=keep, running=keep, stopped=True)
         if report:
             print(f"report: {report / 'report.md'}")
         for v in videos:
@@ -427,7 +428,9 @@ def _run_steps(run, spec, data: dict, first: int = 1) -> bool:
         except (StepFailed, DeskError, subprocess.TimeoutExpired) as e:
             detail, passed = str(e), False
             # Without the guest no step says anything about the product: desk's failure (exit 2).
-            lost = e if isinstance(e, guest.NoConnection) else None
+            if isinstance(e, guest.NoConnection):
+                lost = guest.NoConnection(f"{e}; {runs.host_state(run)}")
+                detail = str(lost)
         run.log_event(step=i, action=label, ok=passed, detail=detail, seconds=round(time.monotonic() - t0, 1))
         head, *rest = detail.splitlines() or [""]
         print(f"{'PASS' if passed else 'FAIL'}  {i:>2}. {label[:60]:<60} {time.monotonic() - t0:5.1f}s  "

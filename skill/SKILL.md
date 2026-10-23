@@ -191,10 +191,12 @@ snapshot keeps the guest's memory on disk (2.5-4 GB) until `desk snapshot delete
 When a project has `test/desk/*.toml` (or the user wants a check that can be repeated), run it
 with `desk scenario run FILE`: it builds on the host (`[build] run`, at the top of the repository,
 or in `dir`, relative to the scenario file: `dir = "../.."` for one project of a repository of
-several), copies the newest file matching each `artifacts` pattern (relative to the same place) to `/tmp/desk/` in the guest, starts a run of
-`image`, executes the steps in order and stops at the first failure with a screenshot. Exit code 0
-or 1, and 2 when a step lost SSH to the guest (a step that reboots it with a command says
-`rc = 255`); the report (and the video with `record = true`) shows every step in its timeline.
+several), copies the newest file matching each `artifacts` pattern (relative to the same place)
+to `/tmp/desk/` in the guest, starts a run of `image`, executes the steps in order and stops at
+the first failure with a screenshot. Exit code 0 or 1, and 2 when a step lost SSH to the guest (a
+step that reboots it with a command says `rc = 255`): then the message says whether the VM still
+runs and what the host had (free disk, memory, swap, other runs), as a full disk ends a VM; the
+report (and the video with `record = true`) shows every step in its timeline.
 
 ```toml
 image = "fedora-44-cockpit"
