@@ -706,7 +706,7 @@ def down(run: Run, keep: bool = False) -> None:
     if not keep:
         record.kill(run)
     try:
-        forward.kill(run)
+        forward.stop(run)  # no tunnels to a VM that is gone
     except OSError as e:
         print(f"[desk] warning: stopping port forwards of {run.id}: {e}", file=sys.stderr)
     dom = run.live_domain()

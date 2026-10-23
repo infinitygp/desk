@@ -376,7 +376,6 @@ def snapshot(opts: dict) -> dict:
     scope_app = opts.get("app")
     want_all = opts.get("all", False)
     limit = opts.get("max", 300)
-    hits = opts.get("hits", True)
     desktop = Atspi.get_desktop(0)
     nodes, tops, visited, offscreen = [], [], 0, 0
     truncated = False
@@ -431,7 +430,7 @@ def snapshot(opts: dict) -> dict:
                 return
             node["offscreen"] = True
         emit = wanted(node, st, parent_name)
-        if emit and hits:
+        if emit:
             probe(node, acc, chain, root)
         if emit and node["bbox"] is not None and not node.get("offscreen"):
             point = visible_point(node["bbox"], chain)

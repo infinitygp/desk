@@ -362,22 +362,6 @@ function Invoke-Uia($op, $arg, $text) {
     $spec = if ($arg -is [string]) { $arg | ConvertFrom-Json } else { $arg }
     switch ($op) {
         'snapshot' { return Snapshot $spec }
-        # Diagnostics for windows whose contents do not show up.
-        'probe' {
-            $out = [ordered]@{ apartment = [Threading.Thread]::CurrentThread.GetApartmentState().ToString() }
-            foreach ($top in (Get-TopWindows)) {
-                $name = try { $top.Current.Name } catch { "?" }
-                if ($spec.title -and $name -notlike "*$($spec.title)*") { continue }
-                $row = [ordered]@{ hwnd = $top.Current.NativeWindowHandle; framework = $top.Current.FrameworkId
-                                   class = $top.Current.ClassName }
-                try { $row.cached = $top.GetUpdatedCache((New-Cache)).CachedChildren.Count } catch { $row.cached = "error: $($_.Exception.Message)" }
-                try { $row.control = $top.FindAll([Windows.Automation.TreeScope]::Children, $ControlView).Count } catch { $row.control = "error: $($_.Exception.Message)" }
-                try { $row.raw = $top.FindAll([Windows.Automation.TreeScope]::Children, [Windows.Automation.Condition]::TrueCondition).Count } catch { $row.raw = "error: $($_.Exception.Message)" }
-                try { $f = $RawWalker.GetFirstChild($top); $row.rawfirst = if ($f) { "$($f.Current.ControlType.ProgrammaticName) '$($f.Current.Name)'" } else { $null } } catch { $row.rawfirst = "error: $($_.Exception.Message)" }
-                $out[$name] = $row
-            }
-            return $out
-        }
         'resolve' {
             $msaa = Resolve-Msaa $spec
             if ($msaa) { return $msaa }

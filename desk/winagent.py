@@ -22,7 +22,7 @@ class AgentGone(DeskError):
 def _query(req: dict) -> bool:
     """Asking again changes nothing in the guest."""
     return req.get("cmd") == "ping" or (req.get("cmd") == "uia" and req.get("op") in
-                                        ("snapshot", "resolve", "probe"))
+                                        ("snapshot", "resolve"))
 
 
 def request(run, timeout: float = 60, **req) -> dict:

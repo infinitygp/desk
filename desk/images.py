@@ -215,10 +215,6 @@ def _fetch(spec: ImageSpec, file: str, source: str) -> Path:
     return target
 
 
-def _fetch_iso(spec: ImageSpec) -> Path:
-    return _fetch(spec, "iso", "iso")
-
-
 def _fetch_published(url: str, sums_url: str, pick) -> Path:
     """`url` into the cache, checked against the checksum published with it (`pick` finds it in
     the sums file); downloaded again only when that checksum changes."""
@@ -439,7 +435,7 @@ CD_PROMPT_PRESSES = 3
 
 
 def _windows_install(spec: ImageSpec, name: str, common: list[str], work: Path, deadline: float) -> None:
-    iso = _fetch_iso(spec)
+    iso = _fetch(spec, "iso", "iso")
     unattend = _unattend_iso(spec, work)
     # virtio disk with the driver from the answer-file CD: QEMU 10.2's AHCI (SATA) emulation
     # crashes when Windows restarts a port's command engine during a read (ahci_commit_buf,

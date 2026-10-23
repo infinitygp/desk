@@ -116,11 +116,6 @@ def stop(run, port: int | None = None) -> list[int]:
     return stopped
 
 
-def kill(run) -> None:
-    """When the run goes down: no tunnels to a VM that is gone."""
-    stop(run)
-
-
 def _target(run) -> str | None:
     """Where in the guest the tunnel leads: its loopback, or on OpenWrt the LAN address, where
     router services listen (ttyd on @lan; uhttpd listens everywhere). None while the guest does
