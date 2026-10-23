@@ -250,7 +250,7 @@ def viewport(run, size: str) -> str:
     f = (run.scale or 100) / 100
     shown = (round(w / f), round(h / f))
     note = "" if shown == (width, height) else f" (asked for {width}x{height}; Firefox shows {shown[0]}x{shown[1]})"
-    clipped = " and runs past the bottom of the screen (desk display --resolution for a taller one)" \
+    clipped = " and runs past the bottom of the screen (desk display --resolution 1280x1024 for a taller one)" \
         if y + h > display.png_size(display.screenshot(run.dom()))[1] else ""
     return (f"page area {shown[0]}x{shown[1]} CSS pixels{note}{clipped}; on screen: "
             f"desk shot --region {x},{y},{w},{h}; desk browser viewport reset to close the mode")

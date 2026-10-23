@@ -31,7 +31,8 @@ instead, where Cockpit is not installed, as on a fresh Workstation: a plugin tha
   page area; `desk browser viewport reset` closes the mode (in a scenario: `viewport = "390x700"`,
   `viewport = "reset"`, and `open = "/plugin#/page"` for a page). Cockpit collapses its menu at that
   width, so the plugin's iframe gets the whole width. The screen is 800 pixels high: taller
-  viewports run past its bottom (`desk display --resolution` to a taller mode the monitor offers).
+  viewports run past its bottom; `desk display --resolution 1280x1024` (or `desk up IMAGE
+  --resolution 1280x1024`) makes room for 390x776.
 - The plugin's iframe is same-origin, so the web console (`desk key ctrl+shift+k`) can measure it:
   `[...document.querySelectorAll('iframe')].find(i => i.src.includes('<plugin>')).contentDocument`.
 - Desktop regression check: the same crop before and after a change, compared on the host with
