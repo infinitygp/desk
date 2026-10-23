@@ -47,6 +47,8 @@ reboot = true
             'image = "a"\n[[step]]\nclik = "x"',                   # typo
             'image = "a"\nrecrod = true',                          # unknown top-level key
             'image = "a"\n[build]\ncommand = "make"',              # unknown build key
+            'image = "a"\n[build]\ndir = "no-such-directory"',
+            'image = "a"\n[build]\ndir = ""',
             'image = "a"\ndisks = "8G"',                           # disks is a list
             'image = "a"\ndisks = ["8G:Bad_Name"]',                # not a disk name
             'image = "a"\nrecord = "yes"',
@@ -76,6 +78,21 @@ reboot = true
         ):
             with self.subTest(text=text), self.assertRaises(DeskError):
                 scenario.load(write(text))
+
+    def test_build_dir_is_relative_to_the_scenario(self):
+        # A repository of several projects: cockpit-x/test/desk/basic.toml builds in cockpit-x.
+        with tempfile.TemporaryDirectory() as top:
+            subprocess.run(["git", "init", "-q", top], check=True)
+            here = Path(top, "cockpit-x", "test", "desk")
+            here.mkdir(parents=True)
+            Path(top, "cockpit-x", "cockpit-x-1.rpm").write_text("")
+            plain, other = here / "plain.toml", here / "dir.toml"
+            plain.write_text('image = "a"\n[build]\nartifacts = ["cockpit-x/*.rpm"]')
+            other.write_text('image = "a"\n[build]\ndir = "../.."\nartifacts = ["*.rpm"]')
+            self.assertEqual(scenario._base(plain, scenario.load(plain)), Path(top).resolve())
+            base = scenario._base(other, scenario.load(other))
+            self.assertEqual(base, Path(top, "cockpit-x").resolve())
+            self.assertEqual([f.name for f in scenario._build(scenario.load(other), base)], ["cockpit-x-1.rpm"])
 
     def test_what_each_action_takes(self):
         data = scenario.load(write('''

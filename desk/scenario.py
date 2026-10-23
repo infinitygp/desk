@@ -124,10 +124,12 @@ def load(path: Path) -> dict:
                                                 for d in devices):
         raise DeskError(f"{path}: usb is a list like [\"0fd9:0084\"] (VENDOR:PRODUCT or BUS.DEVICE)")
     build = data.get("build", {})
-    if not isinstance(build, dict) or set(build) - {"run", "artifacts"}:
-        raise DeskError(f"{path}: [build] takes run and artifacts")
+    if not isinstance(build, dict) or set(build) - {"run", "artifacts", "dir"}:
+        raise DeskError(f"{path}: [build] takes run, artifacts and dir")
     if "run" in build and not _text(build["run"]):
         raise DeskError(f"{path}: [build] run is a command line")
+    if "dir" in build and not (_text(build["dir"]) and (path.parent / build["dir"]).is_dir()):
+        raise DeskError(f"{path}: [build] dir is a directory, relative to the scenario file (got {build['dir']!r})")
     if not isinstance(build.get("artifacts", []), list) or not all(_text(a) for a in build.get("artifacts", [])):
         raise DeskError(f"{path}: [build] artifacts is a list of file patterns")
     if not isinstance(data.get("step", []), list) or not all(isinstance(s, dict) for s in data.get("step", [])):
@@ -186,7 +188,11 @@ def describe(step: dict) -> tuple[str, str]:
     return action, value if isinstance(value, str) else " ".join(map(str, value)) if isinstance(value, list) else ""
 
 
-def _repo(path: Path) -> Path:
+def _base(path: Path, data: dict) -> Path:
+    """Where [build] runs and its artifacts are: `dir`, relative to the scenario file (a project in
+    a repository of several), else the top of the scenario's git repository."""
+    if "dir" in data.get("build", {}):
+        return (path.parent / data["build"]["dir"]).resolve()
     r = subprocess.run(["git", "-C", str(path.parent), "rev-parse", "--show-toplevel"], capture_output=True, text=True)
     return Path(r.stdout.strip()) if r.returncode == 0 else path.parent
 
@@ -335,9 +341,10 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None) -> bo
     data = load(path)
     spec = load_image(image or data["image"])
     _warn(data)
-    artifacts = _build(data, _repo(path))
+    base = _base(path, data)
+    artifacts = _build(data, base)
     agent, _ = runs.agent_process()
-    run = runs.up(spec, label=f"scenario {_repo(path).name}/{path.name}" + (f" ({agent})" if agent else ""))
+    run = runs.up(spec, label=f"scenario {base.name}/{path.name}" + (f" ({agent})" if agent else ""))
     print(f"run {run.id} ({spec.name})", flush=True)
     ok = True
     try:
