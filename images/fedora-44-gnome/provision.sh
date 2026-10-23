@@ -15,6 +15,12 @@ install -D -m 0644 "$FILES"/desk.cfg /usr/lib64/firefox/desk.cfg
 # No first-run tabs (the privacy notice comes with telemetry), default browser question, offers
 # to save passwords, studies or tips in the way of the page under test.
 install -D -m 0644 "$FILES"/desk-firefox-policies.json /etc/firefox/policies/policies.json
+# Chromium (ks.cfg) likewise: policies, and flags its wrapper adds to every start (what each is
+# for is in desk-chromium-flags); the line is replaced when provisioning runs again.
+install -D -m 0644 "$FILES"/desk-chromium-policies.json /etc/chromium/policies/managed/desk.json
+sed -i '/# desk-chromium-flags$/d' /etc/chromium/chromium.conf
+echo "CHROMIUM_FLAGS+=\" $(grep -v '^#' "$FILES"/desk-chromium-flags | xargs)\"  # desk-chromium-flags" \
+    >> /etc/chromium/chromium.conf
 
 # A blinking text cursor would keep the screen from ever settling. A pointer passing the top
 # left corner would open the overview over the app under test. GNOME Software is off (below),

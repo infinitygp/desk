@@ -15,6 +15,10 @@ install -D -m 0644 "$FILES"/desk.cfg /usr/lib/firefox/desk.cfg
 # No first-run tabs (the privacy notice comes with telemetry), default browser question, offers
 # to save passwords, studies or tips in the way of the page under test.
 install -D -m 0644 "$FILES"/desk-firefox-policies.json /etc/firefox/policies/policies.json
+# Chromium (user-data) likewise: policies, and flags its launcher adds to every start (what each
+# is for is in desk-chromium-flags).
+install -D -m 0644 "$FILES"/desk-chromium-policies.json /etc/chromium/policies/managed/desk.json
+install -m 0644 "$FILES"/desk-chromium-flags /etc/chromium-flags.conf
 
 # Stable screen for screenshots: no lock, blanking, animations or blinking cursor, and no
 # overview opened by a pointer passing the top left corner. GNOME Software is off (below),

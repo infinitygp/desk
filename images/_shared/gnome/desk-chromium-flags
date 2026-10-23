@@ -1,0 +1,16 @@
+# Installed by desk as Chromium's flags for every start, from the dash or `chromium URL` from
+# another program (Arch: /etc/chromium-flags.conf; Fedora: appended to /etc/chromium/chromium.conf).
+# One per line; a line starting with # is a comment.
+# No first-run dialog ("Additional Terms of Service") or tabs.
+--no-first-run
+# GDM logs in without a password, so there is no unlocked keyring and Chromium would ask for a
+# new one's password at its first start.
+--password-store=basic
+# Pages' web console into its output, which lands in the journal (desk browser console).
+--enable-logging=stderr
+# The accessibility tree from the start: without it desk a11y saw only the window's frame of a
+# Chromium just started.
+--force-renderer-accessibility
+# An address opened from outside (desk browser open, prepare scripts) replaces the page in the
+# current tab, as typing it would, instead of piling up tabs.
+--same-tab

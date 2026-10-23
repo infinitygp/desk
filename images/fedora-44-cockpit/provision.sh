@@ -3,7 +3,7 @@
 set -euo pipefail
 dnf install -y -q cockpit >/dev/null 2>&1
 # A CA of the image's own signs the certificate Cockpit serves (the last one in ws-certs.d), and
-# Firefox trusts that CA: Cockpit 368 no longer keeps a CA next to its self-signed certificate.
+# the browsers trust that CA: Cockpit 368 no longer keeps a CA next to its self-signed certificate.
 certs=/etc/cockpit/ws-certs.d
 install -d -m 0755 "$certs"
 [ -s /etc/cockpit/desk-ca.pem ] || openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=desk test CA" \
@@ -22,14 +22,25 @@ systemctl enable --now cockpit.socket
 # A Cockpit already running (provisioning again after a cold boot) picks up the certificate.
 systemctl try-restart cockpit.service
 
-# Firefox trusts the CA above, so the login page opens without the certificate warning; the rest
-# of its policies come from fedora-44-gnome's provisioning.
+# Firefox and Chromium trust the CA above, so the login page opens without the certificate
+# warning; the rest of their policies come from fedora-44-gnome's provisioning.
 python3 - <<'PY'
+import base64
 import json
-path = "/etc/firefox/policies/policies.json"
-with open(path) as f:
-    data = json.load(f)
-data["policies"]["Certificates"] = {"Install": ["/etc/cockpit/desk-ca.pem"]}
-with open(path, "w") as f:
-    json.dump(data, f, indent=2)
+import ssl
+
+
+def amend(path, change):
+    with open(path) as f:
+        data = json.load(f)
+    change(data)
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+with open("/etc/cockpit/desk-ca.pem") as f:
+    der = ssl.PEM_cert_to_DER_cert(f.read())
+amend("/etc/firefox/policies/policies.json",
+      lambda d: d["policies"].update(Certificates={"Install": ["/etc/cockpit/desk-ca.pem"]}))
+amend("/etc/chromium/policies/managed/desk.json", lambda d: d.update(CACertificates=[base64.b64encode(der).decode()]))
 PY

@@ -60,6 +60,9 @@ A host keeps the images it tests on: none is required, and nothing builds them u
 | `fedora-45-gnome` | kickstart, the beta's installer tree, the release's packages | next release; follows it once it is out |
 | `fedora-44-gnome-pl` | variant of `fedora-44-gnome` | Polish locale; shares the base disk, own warm state |
 | `fedora-44-cockpit` | variant of `fedora-44-gnome` | Cockpit, Firefox logged in with administrative access |
+
+The images with a desktop on Linux have Chromium next to Firefox (`chromium` in `ks.cfg` and
+`user-data`).
 | `arch-gnome` | official cloud image, GNOME installed by cloud-init (NoCloud seed) | rolling; no Secure Boot |
 | `windows-11` | evaluation ISO + autounattend.xml on a second CD | 90-day evaluation, reinstalled by `desk maintain` |
 | `openwrt-25.12` | the release's disk image (x86-64 ext4 combined, EFI), grown and preconfigured offline | no desktop: BusyBox ash, procd, apk, LuCI |
@@ -108,8 +111,8 @@ Shared provisioning files live in `images/_shared/`. A variant (`base = "..."` i
 session is up, before the warm state is saved (and after cold boots): what a user does before the
 tests start, with real input (`desk/steps.py`: `gui`, `wait_for`, `click`, `type`, `key`).
 `fedora-44-cockpit` logs in to Cockpit that way; Cockpit serves a certificate from a CA of the
-image's own, which its Firefox trusts (Cockpit 368 keeps no CA of its own any more), and the
-session has no idle timeout, since restoring the warm state moves the clock forward.
+image's own, which its Firefox and Chromium trust (Cockpit 368 keeps no CA of its own any more),
+and the session has no idle timeout, since restoring the warm state moves the clock forward.
 
 ## Builds and maintenance
 
