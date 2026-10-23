@@ -166,6 +166,13 @@ def open_url(run, target: str, timeout: float = 30, browser: str | None = None) 
                         "the browser would guess the scheme, http:// for most hosts")
     page = a11y.page_url(run)
     name = _which(page, browser)
+    if page.get("app", name) != name:
+        # What it shows now, an error page left from before too, is not the page opened.
+        try:
+            a11y.focus(run, name)
+            page = a11y.page_url(run)
+        except DeskError:
+            page = {}  # not running: whatever it shows next is new
     before = page.get("url") if page.get("app", name) == name else None
     if target.startswith("/"):
         if not before:

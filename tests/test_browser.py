@@ -160,8 +160,15 @@ class Open(unittest.TestCase):
             opened, focused = [], []
             with self.subTest(expected=expected):
                 self.open(pages + [{"url": "https://app.test/", "app": expected}], opened=opened, focused=focused, **kw)
-                self.assertEqual(focused, [expected])
+                # Brought to the front first when another window was, to see what it shows now.
+                self.assertEqual(focused, [expected] * (1 if pages[0]["app"] == expected else 2))
                 self.assertIn("chromium-browser" if expected == "Chromium" else "firefox https://app.test/", opened[0])
+
+    def test_an_error_page_left_from_before_in_a_browser_behind_is_not_the_new_page(self):
+        stale = {"url": "chrome-error://chromewebdata/", "problem": "This site can’t be reached", "app": "Chromium"}
+        self.assertEqual(self.open([{"url": "https://localhost:9090/", "app": "Firefox"}, stale, stale, stale,
+                                    {"url": "https://app.test/", "app": "Chromium"}], browser="chromium")[0],
+                         "https://app.test/")
 
     def test_a_path_on_the_page_of_another_browser_is_not_opened(self):
         with self.assertRaisesRegex(DeskError, "no page in a focused Chromium window"):

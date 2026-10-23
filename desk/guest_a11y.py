@@ -756,17 +756,19 @@ def page(_opts) -> dict:
     if top is None:
         return {"url": None}
     docs, bar = [], []
+    chromium = toolkit_major(app)[0] == "chromium"
 
     def visit(a):
         role = a.get_role_name()
         if role == "document web":
-            # Chromium's docked DevTools are a page of their own, in front of the one inspected.
-            if (doc_url(a) or "").startswith(DEVTOOLS):
-                return False
-            docs.append(a)
-            return True
-        if role == "entry" and not bar and (a.get_attributes() or {}).get("class") == OMNIBOX:
+            # Chromium's docked DevTools are a page of their own, in front of the one inspected;
+            # its address bar may come after the page.
+            if not docs and not (doc_url(a) or "").startswith(DEVTOOLS):
+                docs.append(a)
+            return bool(bar) or not chromium
+        if role == "entry" and not bar and chromium and (a.get_attributes() or {}).get("class") == OMNIBOX:
             bar.append(text_of(a, 2000))
+            return bool(docs) or None
         return None
 
     showing_walk(top, visit, time.monotonic() + 5)
