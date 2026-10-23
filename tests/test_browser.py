@@ -244,7 +244,8 @@ class Viewport(unittest.TestCase):
 class ChromiumDevice(unittest.TestCase):
     """Chromium's device mode is DevTools': opened, its sizes typed, closed with them."""
 
-    def viewport(self, states: list[dict], size: str = "390x700", box=None, shows=None) -> tuple[str, list, list]:
+    def viewport(self, states: list[dict], size: str = "390x700", box=None, shows=None,
+                 zooms: bool = True) -> tuple[str, list, list]:
         import json
         from types import SimpleNamespace
         from unittest import mock
@@ -256,6 +257,7 @@ class ChromiumDevice(unittest.TestCase):
         def rdm(run, focus=None, zoom=False):
             if zoom:
                 keys.append("zoom 100%")
+                return {**last, "zoomed": zooms}
             return {**last, "bbox": box} if focus == "page" else next(answers, last)
 
         display = mock.Mock()
@@ -267,7 +269,8 @@ class ChromiumDevice(unittest.TestCase):
                            typed.append((spec["name"], text)) or ""), \
                 mock.patch("desk.browser.a11y._helper", side_effect=lambda run, cmd, spec: {
                     "text": shows.get(json.loads(spec)["name"], dict(typed).get(json.loads(spec)["name"]))}), \
-                mock.patch("desk.browser.display", display), mock.patch("desk.browser.time.sleep"):
+                mock.patch("desk.browser.display", display), mock.patch("desk.browser.time.sleep"), \
+                mock.patch("desk.browser.time.monotonic", side_effect=iter(range(0, 10000, 5)).__next__):
             return browser.viewport(run, size, browser="chromium"), keys, typed
 
     FIELDS = [{"pid": 1, "path": [0, 3], "role": "spin button", "name": "Width"},
@@ -298,6 +301,11 @@ class ChromiumDevice(unittest.TestCase):
         device = {"open": True, "devtools": True, "fields": self.FIELDS}
         with self.assertRaisesRegex(DeskError, "device mode's fields show 390 x  afterwards"):
             self.viewport([device], box=[168, 193, 390, 582], shows={"Height (leave empty for full)": ""})
+
+    def test_a_zoom_that_does_not_come_is_desks_failure(self):
+        device = {"open": True, "devtools": True, "fields": self.FIELDS}
+        with self.assertRaisesRegex(DeskError, "did not take the zoom 100 %"):
+            self.viewport([device], box=[168, 193, 390, 700], zooms=False)
 
     def test_reset_closes_devtools(self):
         out, keys, _ = self.viewport([{"open": True, "devtools": True}, {"open": False, "devtools": False}], "reset")

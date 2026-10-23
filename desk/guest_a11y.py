@@ -890,15 +890,18 @@ def chromium_device(app, top, base, opts: dict) -> dict:
     height fields (as snapshot lists them) and where the page area is on screen; with focus
     "devtools" or "page" the keyboard focus moved there, with {"zoom": true} the page shown at
     100 % (the toolbar's zoom; DevTools fit it to the window at first, which AT-SPI's boxes do not
-    follow). {"devtools": False} while DevTools are closed, {"open": False} while they show no
-    device toolbar."""
+    follow), "zoomed" once it is. {"devtools": False} while DevTools are closed, {"open": False}
+    while they show no device toolbar; a window that cannot be looked through is an error."""
     index = next((i for i in range(app.get_child_count()) if app.get_child_at_index(i) == top), 0)
     pid, deadline = app.get_process_id(), time.monotonic() + 5
     docs, fields, zoom, budget = [], [], [], [400]
 
     def find_docs(acc, path, depth):
-        if depth > 80 or time.monotonic() > deadline:
+        if depth > 80:
             return
+        if time.monotonic() > deadline:
+            # What is not found here would read as DevTools being closed.
+            raise LookupError("Chromium's window did not answer within 5 s")
         for i in range(acc.get_child_count()):
             ch = acc.get_child_at_index(i)
             if ch is None or "showing" not in states(ch):
@@ -929,16 +932,13 @@ def chromium_device(app, top, base, opts: dict) -> dict:
             else:
                 find_fields(ch, path + [i], depth + 1)
 
-    try:
-        find_docs(top, [index], 0)
-        tools = next(((d, p) for d, p, dev in docs if dev), None)
-        shown = next((d for d, _, dev in docs if not dev), None)
-        if tools:
-            find_fields(*tools, 0)
-        if opts.get("zoom") and zoom and "selected" not in states(zoom[0]):
-            Atspi.Action.do_action(zoom[0], 0)  # its only action but the context menu: select
-    except GLib.Error:
-        return {"open": False, "devtools": False}
+    find_docs(top, [index], 0)
+    tools = next(((d, p) for d, p, dev in docs if dev), None)
+    shown = next((d for d, _, dev in docs if not dev), None)
+    if tools:
+        find_fields(*tools, 0)
+    if opts.get("zoom") and zoom and "selected" not in states(zoom[0]):
+        Atspi.Action.do_action(zoom[0], 0)  # its only action but the context menu: select
     target = {"devtools": tools[0] if tools else None, "page": shown}.get(opts.get("focus"))
     if target is not None:
         try:
@@ -946,6 +946,7 @@ def chromium_device(app, top, base, opts: dict) -> dict:
         except (GLib.Error, AttributeError, TypeError):
             pass
     return {"open": len(fields) == 2, "devtools": tools is not None, "fields": fields,
+            "zoomed": bool(zoom) and "selected" in states(zoom[0]),
             "bbox": Mapper.place(shown, base) if shown is not None and base is not None else None}
 
 

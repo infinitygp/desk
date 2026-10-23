@@ -332,7 +332,8 @@ def viewport(run, size: str, browser: str | None = None) -> str:
         # A page fitted to the window would be smaller than its CSS pixels on screen, and clicks
         # by the accessibility tree would miss. The toolbar is drawn anew afterwards, which empties
         # a size typed meanwhile.
-        _rdm(run, zoom=True)
+        if not _rdm(run, zoom=True).get("zoomed"):
+            _until(run, lambda s: s.get("zoomed"), f"{mode} did not take the zoom 100 % (its toolbar's Zoom)")
         display.wait_stable(run.dom(), timeout=5)
     # The first time in a Firefox session the mode's toolbar is there a moment before its fields.
     deadline = time.monotonic() + 15
