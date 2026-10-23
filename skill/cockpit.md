@@ -14,7 +14,11 @@ in the middle of a test (after limiting it, or on a page that asks for it) witho
 `desk prepare admin`, in a scenario `prepare = "admin"`; it waits for sudo's password prompt and
 types the password again when sudo answers "Sorry, try again"; a sudo dialog the plugin itself
 opened is used as it is. `desk browser open /podman` opens a Cockpit page (a path is taken on the
-site shown now; a whole address needs `https://`) without typing into the address bar.
+site shown now; a whole address needs `https://`) without typing into the address bar;
+`/example#/tasks` reaches a plugin's own page, also from another page of the same plugin (Cockpit
+loads afresh then). Cockpit ends its session when none of its pages is open for a few seconds:
+after `desk browser open` of another site, or a tab left on an error page, it asks to log in
+again (`desk prepare`).
 `desk reboot --prepare` reboots and logs in again in one go. Test packaging and dependencies on `fedora-44-gnome`
 instead, where Cockpit is not installed, as on a fresh Workstation: a plugin that depends only on
 `cockpit-bridge` installs there without the web console a user needs to reach it.

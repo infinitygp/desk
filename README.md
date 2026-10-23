@@ -179,7 +179,10 @@ the journal (`images/_shared/gnome/desk-firefox.js`); `desk browser console` and
 them from there. Promises keep their rejection stack without the devtools open, and an autoconfig
 script (`desk.cfg`, loaded into every content process) adds the thrown value and stack of each
 uncaught exception as a `JavaScript error detail:` line, which desk joins to its error. Addresses
-opened from outside (`desk browser open`, `firefox URL`) replace the current tab. The Remote Agent
+opened from outside (`desk browser open`, `firefox URL`) replace the current tab; one that
+differs from the page shown only after `#` leaves Firefox with an empty tab that never loads, so
+`desk browser open` goes through `about:blank` for it (quickly: Cockpit ends its session when none
+of its pages is open for a few seconds). The Remote Agent
 (WebDriver BiDi) is not used, as it marks the browser window; `desk browser viewport` types sizes
 into the responsive design mode instead.
 

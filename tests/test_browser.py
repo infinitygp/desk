@@ -1,6 +1,7 @@
 import unittest
 
 from desk import browser
+from desk.config import DeskError
 
 JOURNAL = """\
 2026-10-06T09:58:01.250311+02:00 desk-fedora bash[4612]: console.log: "hello from log" ({a:1})
@@ -50,7 +51,7 @@ class Detail(unittest.TestCase):
 class Open(unittest.TestCase):
     """`desk browser open` tells a page that loaded from one that did not."""
 
-    def open(self, pages: list[dict], target: str = "https://app.test/") -> str:
+    def open(self, pages: list[dict], target: str = "https://app.test/", opened: list | None = None) -> str:
         from types import SimpleNamespace
         from unittest import mock
 
@@ -58,8 +59,13 @@ class Open(unittest.TestCase):
         answers = iter(pages)
         last = pages[-1]
         started = SimpleNamespace(returncode=0, stderr=b"")
+
+        def ssh_run(port, user, command, **kw):
+            (opened if opened is not None else []).append(command)
+            return started
+
         with mock.patch("desk.browser.a11y.page_url", side_effect=lambda run: next(answers, last)), \
-                mock.patch("desk.browser.a11y.focus"), mock.patch("desk.browser.guest.ssh_run", return_value=started), \
+                mock.patch("desk.browser.a11y.focus"), mock.patch("desk.browser.guest.ssh_run", side_effect=ssh_run), \
                 mock.patch("desk.browser.display.wait_stable"), mock.patch("desk.browser.time.sleep"):
             return browser.open_url(run, target, timeout=0.05)
 
@@ -86,6 +92,26 @@ class Open(unittest.TestCase):
         self.assertEqual(self.open([{"url": "about:home"}, {"url": "https://app.test/"}, {"url": None}])[0],
                          "https://app.test/")
 
+    def test_a_new_part_after_hash_of_the_page_shown_is_loaded_through_about_blank(self):
+        # Firefox leaves an empty "New Tab" for such an address from another program.
+        opened = []
+        self.assertEqual(self.open([{"url": "https://app.test/example"}, {"url": "about:blank"},
+                                    {"url": "https://app.test/example#/tasks"}], "/example#/tasks", opened)[0],
+                         "https://app.test/example#/tasks")
+        self.assertEqual(["about:blank" in c for c in opened], [True, False])
+        self.assertIn("https://app.test/example#/tasks", opened[1])
+        # Another page, or the same one without "#", loads whole by itself.
+        for before, target in (("https://app.test/system", "/example#/tasks"),
+                               ("https://app.test/example#/x", "/example")):
+            opened = []
+            self.open([{"url": before}, {"url": "https://app.test" + target}], target, opened)
+            self.assertEqual(len(opened), 1)
+
+    def test_about_blank_that_does_not_come_is_desks_failure(self):
+        with self.assertRaisesRegex(DeskError, "did not leave the page") as e:
+            self.open([{"url": "https://app.test/example"}], "/example#/tasks")
+        self.assertNotIsInstance(e.exception, browser.NotLoaded)
+
     def test_addresses_as_firefox_writes_them(self):
         for shown, asked in (("https://app.test/", "https://App.Test"), ("https://app.test/", "http://app.test/"),
                              ("file:///home/tester/x.html", "file:/home/tester/x.html"),
@@ -94,6 +120,11 @@ class Open(unittest.TestCase):
             with self.subTest(shown=shown, asked=asked):
                 self.assertTrue(browser.under(shown, asked))
         for shown, asked in (("https://app.test/login", "https://app.test/dashboard"),
-                             ("https://other.test/", "https://app.test/"), ("about:home", "https://app.test/")):
+                             ("https://other.test/", "https://app.test/"), ("about:home", "https://app.test/"),
+                             ("https://app.test/example", "https://app.test/example#/tasks"),
+                             ("https://app.test/example#/overview", "https://app.test/example#/tasks")):
             with self.subTest(shown=shown, asked=asked):
                 self.assertFalse(browser.under(shown, asked))
+        self.assertTrue(browser.under("https://app.test/example#/tasks/1", "https://app.test/example#/tasks"))
+        self.assertTrue(browser.under("https://app.test/example#/overview", "https://app.test/example#/tasks",
+                                      fragment=False))

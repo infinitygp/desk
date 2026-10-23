@@ -117,12 +117,20 @@ def open_url(run, target: str, timeout: float = 30) -> tuple[str, str]:
         raise DeskError(f"give a whole address (https://{target}) or a path starting with /: "
                         "Firefox would guess the scheme, http:// for most hosts")
     dom = run.dom()
-    r = guest.ssh_run(run.ssh_port, run.user, guest.remote_command(["firefox", url], gui=True),
-                      capture=True, timeout=60)
-    if r.returncode != 0:
-        raise DeskError(f"starting firefox failed: {r.stderr.decode(errors='replace').strip()[-300:]}")
-    # A link opened from another program does not take the focus on Wayland.
     deadline = time.monotonic() + timeout
+    if urlsplit(url).fragment and before and _address(before, False) == _address(url, False):
+        # Firefox takes an address from another program that differs from the page shown only
+        # after "#" for a new page that never loads (an empty "New Tab", the old picture left on
+        # screen); from another page it loads it whole. Quickly: Cockpit ends its session when
+        # none of its pages is open for a few seconds.
+        _firefox(run, "about:blank")
+        while a11y.page_url(run).get("url") != "about:blank":
+            if time.monotonic() > deadline:
+                raise DeskError("Firefox did not leave the page shown for about:blank to open the page again with its "
+                                f"new part after #: {url}")
+            time.sleep(0.2)
+    _firefox(run, url)
+    # A link opened from another program does not take the focus on Wayland.
     while True:
         try:
             a11y.focus(run, "Firefox")
@@ -135,7 +143,9 @@ def open_url(run, target: str, timeout: float = 30) -> tuple[str, str]:
     while time.monotonic() < deadline and not arrived:
         current = a11y.page_url(run).get("url")
         seen = current or seen
-        arrived = bool(current) and under(current, url)
+        # The document is there; what follows "#" a page may rewrite itself (its own routes),
+        # which the caller sees in the address returned.
+        arrived = bool(current) and under(current, url, fragment=False)
         if not arrived:
             time.sleep(0.5)
     display.wait_stable(dom, timeout=10)
@@ -151,16 +161,26 @@ def open_url(run, target: str, timeout: float = 30) -> tuple[str, str]:
     return page.get("url") or seen, url
 
 
-def _address(url: str) -> tuple[str, str, str]:
-    parts = urlsplit(url.split("#")[0])
+def _firefox(run, url: str) -> None:
+    r = guest.ssh_run(run.ssh_port, run.user, guest.remote_command(["firefox", url], gui=True),
+                      capture=True, timeout=60)
+    if r.returncode != 0:
+        raise DeskError(f"starting firefox failed: {r.stderr.decode(errors='replace').strip()[-300:]}")
+
+
+def _address(url: str, fragment: bool = True) -> tuple[str, str, str]:
+    parts = urlsplit(url)
     scheme = "http" if parts.scheme.lower() in ("http", "https") else parts.scheme.lower()
-    return scheme, parts.netloc.lower(), parts.path.rstrip("/") + ("?" + parts.query if parts.query else "")
+    return scheme, parts.netloc.lower(), parts.path.rstrip("/") + ("?" + parts.query if parts.query else "") + \
+        ("#" + parts.fragment if fragment and parts.fragment else "")
 
 
-def under(shown: str, asked: str) -> bool:
+def under(shown: str, asked: str, fragment: bool = True) -> bool:
     """`shown` is the page `asked` for or one below it, as Firefox writes addresses: the host in
-    lower case, https where the site upgrades http, file:/x as file:///x."""
-    (scheme, host, path), (wanted_scheme, wanted_host, wanted_path) = _address(shown), _address(asked)
+    lower case, https where the site upgrades http, file:/x as file:///x; what follows "#" too
+    unless `fragment` is false."""
+    (scheme, host, path), (wanted_scheme, wanted_host, wanted_path) = \
+        _address(shown, fragment), _address(asked, fragment)
     return (scheme, host) == (wanted_scheme, wanted_host) and path.startswith(wanted_path)
 
 
