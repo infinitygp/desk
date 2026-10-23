@@ -111,6 +111,8 @@ def _gnome_mode(run, connector: str, resolution: tuple[int, int]) -> str:
 
 
 def _gnome(run, resolution, scale) -> None:
+    # gdctl gives a monitor without --mode its preferred mode: keep one desk display set earlier.
+    resolution = resolution or (tuple(run.resolution) if run.resolution else None)
     connectors = _gnome_connectors(run)
     if not connectors:
         raise DeskError("GNOME reports no monitors")
