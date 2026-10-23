@@ -26,11 +26,15 @@ def unpack(archive: Path, cache: Path) -> Path:
         cache.mkdir(parents=True, exist_ok=True)
         # Unpacked next to its place and moved there whole: another desk may be starting too.
         tmp = Path(tempfile.mkdtemp(prefix=f".{build['id']}.", dir=cache))
-        for info in z.infolist():
-            path = Path(z.extract(info, tmp))
-            mode = info.external_attr >> 16
-            if mode and not info.is_dir():
-                path.chmod(mode & 0o777)
+        try:
+            for info in z.infolist():
+                path = Path(z.extract(info, tmp))
+                mode = info.external_attr >> 16
+                if mode and not info.is_dir():
+                    path.chmod(mode & 0o777)
+        except BaseException:
+            shutil.rmtree(tmp, ignore_errors=True)  # cut off (a full disk, Ctrl-C): not left for a week
+            raise
     try:
         tmp.rename(target)
     except OSError:

@@ -102,6 +102,12 @@ class Release(unittest.TestCase):
 
         same = self.desk(launcher, "update", home=home, FAKE_RELEASE=str(self.pyz))
         self.assertIn("is the newest release", same.stdout, same.stderr)
+        broken = self.dir / "broken.pyz"
+        broken.write_text("<html>rate limited</html>")
+        r = self.desk(launcher, "update", home=home, FAKE_RELEASE=str(broken))
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("is not a desk release", r.stderr)
+        self.assertEqual(sorted(p.name for p in launcher.parent.iterdir()), ["desk"])  # no download left behind
 
         # A later release, whose skill says something else and has one file less.
         self.assertTrue((skill.parent / "openwrt.md").exists())
@@ -177,6 +183,23 @@ class Unpack(unittest.TestCase):
 
             with mock.patch.object(Path, "stat", gone):
                 self.assertEqual(pyz_main.unpack(archive, cache), cache / "new")
+
+    def test_an_unpack_cut_off_leaves_nothing_behind(self):
+        import errno
+        import importlib.util
+        from unittest import mock
+
+        spec = importlib.util.spec_from_file_location("pyz_main", ROOT / "scripts" / "pyz_main.py")
+        pyz_main = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(pyz_main)
+        with tempfile.TemporaryDirectory() as tmp:
+            archive, cache = Path(tmp) / "desk.pyz", Path(tmp) / "cache"
+            with zipfile.ZipFile(archive, "w") as z:
+                z.writestr("BUILD.json", json.dumps({"id": "new"}))
+            with mock.patch.object(zipfile.ZipFile, "extract", side_effect=OSError(errno.ENOSPC, "No space left")), \
+                    self.assertRaises(OSError):
+                pyz_main.unpack(archive, cache)
+            self.assertEqual(list(cache.iterdir()), [])
 
 
 if __name__ == "__main__":

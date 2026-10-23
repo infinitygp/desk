@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -82,19 +83,23 @@ def _build_of(pyz: Path) -> dict:
 def update() -> str:
     if not BUILD:
         raise DeskError(f"this desk runs from a checkout of its repository ({PROJECT}): update it with git pull there")
-    new = LAUNCHER.with_name(f".{LAUNCHER.name}.new")
-    r = subprocess.run(["gh", "release", "download", "--repo", BUILD["repo"], "--pattern", "desk.pyz",
-                        "--output", str(new), "--clobber"], capture_output=True, text=True, timeout=300)
-    if r.returncode != 0:
-        new.unlink(missing_ok=True)
-        raise DeskError(f"downloading the newest release of {BUILD['repo']} failed: {r.stderr.strip()[-300:]} "
-                        "(gh auth status)")
-    build = _build_of(new)
-    if build["id"] == BUILD["id"]:
-        new.unlink()
-        return f"desk {version()} is the newest release"
-    new.chmod(0o755)
-    os.replace(new, LAUNCHER)
+    # A name of its own, so that two updates at once do not write into each other's download.
+    fd, name = tempfile.mkstemp(dir=LAUNCHER.parent, prefix=f".{LAUNCHER.name}.", suffix=".new")
+    os.close(fd)
+    new = Path(name)
+    try:
+        r = subprocess.run(["gh", "release", "download", "--repo", BUILD["repo"], "--pattern", "desk.pyz",
+                            "--output", str(new), "--clobber"], capture_output=True, text=True, timeout=300)
+        if r.returncode != 0:
+            raise DeskError(f"downloading the newest release of {BUILD['repo']} failed: {r.stderr.strip()[-300:]} "
+                            "(gh auth status)")
+        build = _build_of(new)
+        if build["id"] == BUILD["id"]:
+            return f"desk {version()} is the newest release"
+        new.chmod(0o755)
+        os.replace(new, LAUNCHER)
+    finally:
+        new.unlink(missing_ok=True)  # a download that failed or is no release
     # The new release puts its own skill in place.
     subprocess.run([sys.executable, str(LAUNCHER), "install", "--quiet"], check=True, timeout=120)
     return f"desk {version()} -> {build['version']} ({build['commit']})"
