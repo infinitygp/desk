@@ -14,3 +14,6 @@
 # An address opened from outside (desk browser open, prepare scripts) replaces the page in the
 # current tab, as typing it would, instead of piling up tabs.
 --same-tab
+# A window as large as the screen, as Firefox's: DevTools' device mode (desk browser viewport)
+# shows a phone's page below their toolbar.
+--start-maximized

@@ -334,7 +334,8 @@ def viewport(run, size: str, browser: str | None = None) -> str:
             # DevTools take ctrl+shift+m only while they have the keyboard focus.
             _rdm(run, focus="devtools")
         display.key(run.dom(), "ctrl+shift+m")
-        state = _until(run, lambda s: s["open"], f"{mode} did not open (ctrl+shift+m)")
+        state = _until(run, lambda s: s["open"], f"{mode} did not open (ctrl+shift+m)" + (
+            ", or its size fields are not in its accessibility tree" if chromium else ""))
     if chromium:
         # A page fitted to the window would be smaller than its CSS pixels on screen, and clicks
         # by the accessibility tree would miss. The toolbar is drawn anew afterwards, which empties
@@ -349,16 +350,20 @@ def viewport(run, size: str, browser: str | None = None) -> str:
             raise DeskError(f"cannot find the width and height fields of {mode}")
         time.sleep(0.5)
     specs = [{k: node[k] for k in ("pid", "path", "role", "name")} for node in fields[:2]]
-    for node, value in zip(specs, (width, height), strict=True):
-        note = a11y.replace_text(run, node, str(value), spec.layout)
-        display.key(run.dom(), "ret")
-        if note:
-            raise DeskError(f"setting the viewport size: {note}")
-    display.wait_stable(run.dom(), timeout=5)
-    if chromium:
-        typed = [a11y._helper(run, "read", json.dumps(node))["text"] for node in specs]
-        if typed != [str(width), str(height)]:
-            raise DeskError(f"setting the viewport size: {mode}'s fields show {' x '.join(typed)} afterwards")
+    # Chromium's toolbar, drawn anew while its window or zoom changes, empties a size just typed:
+    # typed again once.
+    for attempt in range(2 if chromium else 1):
+        for node, value in zip(specs, (width, height), strict=True):
+            note = a11y.replace_text(run, node, str(value), spec.layout)
+            display.key(run.dom(), "ret")
+            if note:
+                raise DeskError(f"setting the viewport size: {note}")
+        display.wait_stable(run.dom(), timeout=5)
+        typed = [a11y._helper(run, "read", json.dumps(node))["text"] for node in specs] if chromium else []
+        if typed == ([str(width), str(height)] if chromium else []):
+            break
+    else:
+        raise DeskError(f"setting the viewport size: {mode}'s fields show {' x '.join(typed)} afterwards")
     # Keys typed next are for the page, not the mode's height field.
     box = _rdm(run, focus="page").get("bbox")
     if not box:
@@ -367,6 +372,8 @@ def viewport(run, size: str, browser: str | None = None) -> str:
     x, y, w, h = box if chromium else (box[0] + 1, box[1] + 1, box[2] - 2, box[3] - 2)
     f = (run.scale or 100) / 100
     shown = (round(w / f), round(h / f))
+    if chromium and abs(shown[0] - width) <= 1 and abs(shown[1] - height) <= 1:
+        shown = (width, height)  # its boxes are rounded from fractions of a pixel
     taller = "(desk display --resolution 1280x1024 for a taller one)"
     clipped = ""
     if chromium and shown[0] == width and shown[1] < height:

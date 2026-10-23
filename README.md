@@ -194,8 +194,9 @@ wrapper reads flags from `/etc/chromium/chromium.conf`, Arch's launcher from
 `/etc/chromium-flags.conf`): `--password-store=basic`, since GDM logs in without a password and
 leaves no unlocked keyring, so Chromium would ask for a new one's; `--force-renderer-accessibility`,
 without which `desk a11y` saw only the frame of a Chromium just started; `--same-tab`, the
-counterpart of Firefox's external links in the current tab; and `--enable-logging=stderr` for the
-web console. Chromium logs every console call of a page at one level, so desk lists its messages
+counterpart of Firefox's external links in the current tab; `--start-maximized`, as Firefox's
+window is, for the height of a phone's page in the device mode; and `--enable-logging=stderr` for
+the web console. Chromium logs every console call of a page at one level, so desk lists its messages
 as `Chromium console:` whatever they are, counts only its uncaught exceptions (`Uncaught ...`) as
 errors, and a `console_errors` step that meets one of the others fails with exit 2 rather than
 pass without having looked. The browser `desk browser` drives is the one asked for (`--browser`),
@@ -205,8 +206,9 @@ waits for a server it keeps the page before, and its address bar (`OmniboxViewVi
 one it waits for. Its device mode belongs to DevTools: `desk browser viewport` opens them
 (ctrl+shift+i), their device toolbar (ctrl+shift+m, only taken with the focus in DevTools), sets
 the toolbar's zoom to 100 % (fitted to the window, the page is smaller on screen than the boxes
-AT-SPI gives) and types the sizes, then reads them back: the toolbar is drawn anew after the zoom
-changes and empties a size typed meanwhile. AT-SPI's box of the page is the part the window shows.
+AT-SPI gives) and types the sizes, then reads them back and types them once more if they are
+gone: the toolbar is drawn anew after the zoom or the window changes and empties a size typed
+meanwhile. AT-SPI's box of the page is the part the window shows, rounded to a pixel either way.
 Chromium reports window coordinates from its surface, shadow included, like GTK 3, and has no
 EditableText interface: its fields count as editable by their state.
 

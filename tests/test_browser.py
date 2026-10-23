@@ -267,6 +267,11 @@ class ChromiumDevice(unittest.TestCase):
                 return {**last, "zoomed": zooms}
             return {**last, "bbox": box} if focus == "page" else next(answers, last)
 
+        def read(run, cmd, spec):
+            # What the field shows: a value of `shows` first, else what was typed into it last.
+            name = json.loads(spec)["name"]
+            return {"text": (shows.get(name) or [dict(typed).get(name)]).pop(0)}
+
         display = mock.Mock()
         display.key.side_effect = lambda dom, combo: keys.append(combo)
         display.png_size.return_value = (1280, 800)
@@ -274,8 +279,7 @@ class ChromiumDevice(unittest.TestCase):
                 mock.patch("desk.browser.a11y.focus"), mock.patch("desk.browser._rdm", side_effect=rdm), \
                 mock.patch("desk.browser.a11y.replace_text", side_effect=lambda run, spec, text, layout:
                            typed.append((spec["name"], text)) or ""), \
-                mock.patch("desk.browser.a11y._helper", side_effect=lambda run, cmd, spec: {
-                    "text": shows.get(json.loads(spec)["name"], dict(typed).get(json.loads(spec)["name"]))}), \
+                mock.patch("desk.browser.a11y._helper", side_effect=read), \
                 mock.patch("desk.browser.display", display), mock.patch("desk.browser.time.sleep"), \
                 mock.patch("desk.browser.time.monotonic", side_effect=iter(range(0, 10000, 5)).__next__):
             return browser.viewport(run, size, browser="chromium"), keys, typed
@@ -304,10 +308,19 @@ class ChromiumDevice(unittest.TestCase):
                                        "display --resolution 1280x1024 for a taller one); on screen: desk shot "
                                        "--region 168,193,390,582"), out)
 
-    def test_a_size_the_toolbar_lost_is_not_reported_as_set(self):
+    def test_a_size_the_toolbar_lost_is_typed_again_once(self):
         device = {"open": True, "devtools": True, "fields": self.FIELDS}
+        out, keys, typed = self.viewport([device], box=[168, 193, 390, 582],
+                                         shows={"Height (leave empty for full)": [""]})
+        self.assertEqual(len(typed), 4)
+        self.assertIn("page area 390x700 CSS pixels", out)
         with self.assertRaisesRegex(DeskError, "device mode's fields show 390 x  afterwards"):
-            self.viewport([device], box=[168, 193, 390, 582], shows={"Height (leave empty for full)": ""})
+            self.viewport([device], box=[168, 193, 390, 582], shows={"Height (leave empty for full)": ["", ""]})
+
+    def test_a_box_a_pixel_off_is_the_size_asked_for(self):
+        device = {"open": True, "devtools": True, "fields": self.FIELDS}
+        out, _, _ = self.viewport([device], box=[168, 186, 390, 777], size="390x776")
+        self.assertTrue(out.startswith("page area 390x776 CSS pixels and runs past the bottom of the screen"), out)
 
     def test_a_zoom_that_does_not_come_is_desks_failure(self):
         device = {"open": True, "devtools": True, "fields": self.FIELDS}
