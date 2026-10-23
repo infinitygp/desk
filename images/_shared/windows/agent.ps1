@@ -222,11 +222,25 @@ function Join-Arguments($list) {
     }) -join ' '
 }
 
+# What Start-Process (ShellExecute) finds and Process.Start without it does not: a program
+# registered under App Paths (msedge.exe, chrome.exe), which is not on PATH.
+function Resolve-Program($file) {
+    if ([IO.Path]::GetDirectoryName($file) -or (Get-Command $file -CommandType Application -ErrorAction SilentlyContinue)) {
+        return $file
+    }
+    $name = if ([IO.Path]::GetExtension($file)) { $file } else { "$file.exe" }
+    foreach ($root in 'HKCU:', 'HKLM:') {
+        $path = (Get-ItemProperty "$root\Software\Microsoft\Windows\CurrentVersion\App Paths\$name" -ErrorAction SilentlyContinue).'(default)'
+        if ($path) { return [Environment]::ExpandEnvironmentVariables($path.Trim('"')) }
+    }
+    $file
+}
+
 # A program in this session with extra environment variables, optionally waiting for it and
 # returning its exit code and output (desk exec --gui --wait --env), which SSH cannot see.
 function Invoke-Program($req, $client) {
     $psi = New-Object Diagnostics.ProcessStartInfo
-    $psi.FileName = $req.file
+    $psi.FileName = Resolve-Program $req.file
     $psi.Arguments = Join-Arguments $req.args
     $psi.UseShellExecute = $false
     if ($req.env) { foreach ($p in $req.env.PSObject.Properties) { $psi.EnvironmentVariables[$p.Name] = [string]$p.Value } }
