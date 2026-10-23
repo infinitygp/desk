@@ -498,7 +498,8 @@ def snapshot(opts: dict) -> dict:
 
 
 def find_node(spec: dict):
-    """Re-find a node from a snapshot: same path if role and name still match, else first match."""
+    """Re-find a node from a snapshot: same path if role and name still match, else the only node
+    of the window with them (of two "Delete" buttons, the first is not necessarily the one meant)."""
     desktop = Atspi.get_desktop(0)
     app = None
     for _, a in app_children(desktop):
@@ -520,28 +521,34 @@ def find_node(spec: dict):
     # The tree changed (a web page builds it lazily and re-renders): search the window for it.
     deadline = time.monotonic() + SEARCH_SECONDS
 
+    hits = []
+
     def search(a, at, depth=0):
         if depth > 60 or time.monotonic() > deadline:
-            return None
+            return
         for i in range(a.get_child_count()):
+            if len(hits) > 1:
+                return
             ch = a.get_child_at_index(i)
             if ch is None:
                 continue
             if ch.get_role_name() == spec["role"] and (ch.get_name() or "").strip() == spec["name"]:
-                return at + [i], ch
-            hit = search(ch, at + [i], depth + 1)
-            if hit is not None:
-                return hit
-        return None
+                hits.append((at + [i], ch))
+            else:
+                search(ch, at + [i], depth + 1)
 
     top = app.get_child_at_index(path[0]) if path[0] < app.get_child_count() else None
-    hit = search(top, [path[0]]) if top is not None else None
-    if hit is None:
+    if top is not None:
+        search(top, [path[0]])
+    if len(hits) > 1:
+        raise LookupError(f"{spec['role']} {spec['name']!r} moved, and the window has more than one; look again "
+                          "(desk a11y) for the @ref of the one meant")
+    if not hits:
         if time.monotonic() > deadline:
             raise LookupError(f"{spec['role']} {spec['name']!r} not found again within {SEARCH_SECONDS}s "
                               "(the page changed); look again")
         raise LookupError(f"{spec['role']} {spec['name']!r} no longer exists")
-    return app, hit[0], hit[1]
+    return app, hits[0][0], hits[0][1]
 
 
 def along(app, path):

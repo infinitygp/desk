@@ -188,6 +188,27 @@ class Tree:
 
 
 @unittest.skipIf(guest_a11y is None, "AT-SPI GObject introspection not installed")
+class FindAgain(unittest.TestCase):
+    """A node from a listing whose path no longer leads to it (the page re-rendered)."""
+
+    def find(self, *rows):
+        app = Tree("application", "Firefox", children=[Tree("frame", children=[Tree("panel", children=list(rows))])])
+        app.get_process_id = lambda: 7
+        spec = {"pid": 7, "path": [0, 0, 5], "role": "push button", "name": "Delete"}
+        with mock.patch.object(guest_a11y.Atspi, "get_desktop"), \
+                mock.patch.object(guest_a11y, "app_children", return_value=[(0, app)]):
+            return guest_a11y.find_node(spec)
+
+    def test_the_only_one_of_its_role_and_name(self):
+        delete = Tree("push button", "Delete")
+        self.assertEqual(self.find(Tree("push button", "Edit"), delete)[1:], ([0, 0, 1], delete))
+
+    def test_not_the_first_of_several(self):
+        with self.assertRaisesRegex(LookupError, "moved, and the window has more than one"):
+            self.find(Tree("push button", "Delete"), Tree("push button", "Delete"))
+
+
+@unittest.skipIf(guest_a11y is None, "AT-SPI GObject introspection not installed")
 class ChromiumPages(unittest.TestCase):
     def test_window_coordinates_from_the_surface(self):
         # Chromium draws its own shadow: its Back button at (18, 56) of a window whose frame is

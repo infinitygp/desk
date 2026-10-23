@@ -103,7 +103,8 @@ guest shell; `--root` and `--gui` apply to the whole snippet.
   changed yet, so plain `desk wait` returns at once. Use `desk wait --change`; when an app is slow,
   check `pgrep` in the guest before concluding it failed.
 - Refs (`@e7`) come from the latest `desk a11y` or `desk find`; take a new one after the UI changes.
-  `desk click @eN` re-reads the element's position, so moved elements are still hit.
+  `desk click @eN` re-reads the element's position, so moved elements are still hit; one that moved
+  while the window has others of its role and name (two "Delete" buttons) is an error: list again.
 - `click --name TEXT` (and scenario `click`) takes the element whose whole name is TEXT, written
   as given before one that differs in case only ("registry" before "Registry"); only if there is
   none does a part of a name do, and then only when it is part of one name: "Save" next to

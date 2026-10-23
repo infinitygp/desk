@@ -341,13 +341,20 @@ function Find-Node($spec) {
         $el = $kids[$i]
     }
     if ($el -and (Get-Role $el) -eq $spec.role -and ([string]$el.Cached.Name).Trim() -eq $spec.name) { return $el }
+    # Moved: the only element of the window with its role and name (of two "OK" buttons, the
+    # first found is not necessarily the one meant).
+    $hits = New-Object System.Collections.ArrayList
     $stack = New-Object System.Collections.Stack
     $stack.Push($cached)
-    while ($stack.Count) {
+    while ($stack.Count -and $hits.Count -lt 2) {
         $e = $stack.Pop()
-        if ((Get-Role $e) -eq $spec.role -and ([string]$e.Cached.Name).Trim() -eq $spec.name) { return $e }
-        foreach ($ch in $e.CachedChildren) { $stack.Push($ch) }
+        if ((Get-Role $e) -eq $spec.role -and ([string]$e.Cached.Name).Trim() -eq $spec.name) { [void]$hits.Add($e) }
+        else { foreach ($ch in $e.CachedChildren) { $stack.Push($ch) } }
     }
+    if ($hits.Count -gt 1) {
+        throw "$($spec.role) '$($spec.name)' moved, and the window has more than one; look again (desk a11y) for the @ref of the one meant"
+    }
+    if ($hits.Count) { return $hits[0] }
     throw "$($spec.role) '$($spec.name)' no longer exists"
 }
 
