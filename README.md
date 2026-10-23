@@ -274,9 +274,10 @@ screendump, and the scenario saw only "Connection refused".
 `desk down` writes `reports/<run>/report.md` (failed units, unit failures from the journal since
 the start across reboots, SELinux denials, coredumps, journal warnings, package changes with dnf's
 UTC times made local, timeline with screenshots); `--diff` adds the files the run changed,
-from `virt-diff` against the image the run started from. `desk gc` (and so every `desk up`)
-removes reports older than 14 days, and writes the report of an idle run before destroying it, unless
-its owner comes back meanwhile. One command at a time takes a run down; a second `desk down` of
+from `virt-diff` against the image the run started from. `desk gc` removes reports older than
+14 days, and writes the report of an idle run before destroying it, unless its owner comes back
+meanwhile. Every `desk up` starts the same in the background (`logs/gc-idle.log`) and does it
+itself only while it waits for memory: another run's report and video can take minutes. One command at a time takes a run down; a second `desk down` of
 it is refused. When the guest could not be asked, the report says "NOT CHECKED" instead of
 counting nothing.
 

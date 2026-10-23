@@ -262,6 +262,7 @@ class Up(unittest.TestCase):
                 ("desk.config.BASE", self.home / "base"), ("desk.config.WARM", self.home / "warm"),
                 ("desk.runs.conn", lambda: conn), ("desk.runs.lookup", lambda name: None),
                 ("desk.runs.check_memory", lambda spec: None), ("desk.maintain.check_usable", lambda spec: []),
+                ("desk.runs._gc_idle_in_background", lambda: None),
                 ("desk.runs.qemu_img_overlay", lambda backing, overlay: overlay.write_bytes(b"")),
                 ("desk.runs.reflink_copy", lambda src, dst: dst.write_bytes(b"")),
                 ("desk.runs.prepare_domain_xml", lambda *a, **k: "<domain/>"), ("desk.runs.free_port", lambda: 1),

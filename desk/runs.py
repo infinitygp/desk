@@ -6,6 +6,7 @@ import os
 import re
 import secrets
 import shutil
+import subprocess
 import sys
 import time
 import xml.etree.ElementTree as ET
@@ -574,7 +575,7 @@ def up(spec: ImageSpec, run_id: str | None = None, cold: bool = False, force: bo
         _checked_id(run_id)
     for warning in check_usable(spec):
         print(f"[desk] warning: {warning}", file=sys.stderr)
-    gc_idle()
+    _gc_idle_in_background()
     # Short of memory, wait in line for other runs to end (parallel scenarios) rather than fail;
     # the lock is let go meanwhile, as ending a run needs it too.
     deadline = time.monotonic() + MEMORY_WAIT
@@ -595,7 +596,20 @@ def up(spec: ImageSpec, run_id: str | None = None, cold: bool = False, force: bo
                     waiting = True
             else:
                 return _up(spec, run_id, cold, displays, resolution, label, started=lock.close)
+        # Runs idle past their time give their memory back; their reports take a while, which only
+        # a start that needs the memory waits for.
+        gc_idle()
         time.sleep(15)
+
+
+def _gc_idle_in_background() -> subprocess.Popen:
+    """gc_idle without waiting for it: an idle run's report and video can take minutes."""
+    from .config import LOGS, PROJECT
+
+    LOGS.mkdir(parents=True, exist_ok=True)
+    with open(LOGS / "gc-idle.log", "a") as log:
+        return subprocess.Popen([sys.executable, "-c", "from desk.runs import gc_idle; gc_idle()"], cwd=PROJECT,
+                         stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
 
 
 def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,

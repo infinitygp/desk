@@ -38,24 +38,37 @@ class WaitForMemory(unittest.TestCase):
              mock.patch.object(runs, "gc"), \
              mock.patch.object(runs, "check_memory", side_effect=[short, short, None]), \
              mock.patch.object(runs, "_up", return_value=run), \
-             mock.patch.object(runs, "gc_idle"), \
+             mock.patch.object(runs, "gc_idle") as idle, mock.patch.object(runs, "_gc_idle_in_background"), \
              mock.patch("desk.maintain.check_usable", return_value=[]), \
              mock.patch.object(runs.time, "sleep") as sleep:
             self.assertIs(runs.up(SPEC), run)
         self.assertEqual(len(locks), 3)  # the lock taken anew for each try
         self.assertEqual(sleep.call_count, 2)
+        self.assertEqual(idle.call_count, 2)  # idle runs give their memory back while it waits
 
     def test_other_errors_are_not_waited_for(self):
         with mock.patch.object(runs, "state_lock", return_value=nullcontext()), \
              mock.patch.object(runs, "gc"), \
              mock.patch.object(runs, "check_memory"), \
              mock.patch.object(runs, "_up", side_effect=DeskError("run x already exists")), \
-             mock.patch.object(runs, "gc_idle"), \
+             mock.patch.object(runs, "gc_idle") as idle, mock.patch.object(runs, "_gc_idle_in_background") as later, \
              mock.patch("desk.maintain.check_usable", return_value=[]), \
              mock.patch.object(runs.time, "sleep") as sleep, \
              self.assertRaisesRegex(DeskError, "already exists"):
             runs.up(SPEC)
         sleep.assert_not_called()
+        # Enough memory: the start does not wait for idle runs' reports.
+        idle.assert_not_called()
+        later.assert_called_once()
+
+
+class IdleRunsInTheBackground(unittest.TestCase):
+    def test_the_background_cleanup_runs(self):
+        from desk.config import LOGS
+
+        cleanup = runs._gc_idle_in_background()
+        self.assertEqual(cleanup.wait(60), 0)
+        self.assertNotIn("Traceback", (LOGS / "gc-idle.log").read_text())
 
 
 if __name__ == "__main__":
