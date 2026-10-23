@@ -21,9 +21,11 @@ def _ps(run, spec, script: str) -> str:
 
 def _restart_explorer(run, spec) -> None:
     # Windows starts the shell again by itself; wait until the taskbar is back and still.
-    _ps(run, spec, "Stop-Process -Name explorer -Force; Start-Sleep 2; "
+    _ps(run, spec, "Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue; Start-Sleep 2; "
                    "for ($i = 0; $i -lt 30 -and -not (Get-Process explorer -ErrorAction SilentlyContinue); $i++) "
-                   "{ Start-Sleep 1 }")
+                   "{ Start-Sleep 1 }; "
+                   "if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) "
+                   "{ Write-Error 'Explorer (the taskbar and desktop) did not start again within 30 s' }")
     time.sleep(2)
     display.wait_stable(run.dom(), timeout=15)
 

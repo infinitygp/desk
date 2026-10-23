@@ -74,6 +74,21 @@ class Scale(unittest.TestCase):
             monitors._windows(RUN, load_image("windows-11"), None, 150)
 
 
+class Taskbar(unittest.TestCase):
+    def test_a_shell_that_did_not_come_back_is_not_done(self):
+        from desk import winsettings
+
+        spec = SimpleNamespace(root_user="tester", cmd=lambda script: script)
+        refused = subprocess.CompletedProcess([], 1, b"", b"Explorer (the taskbar and desktop) did not start again\n")
+        with mock.patch("desk.winsettings.guest.ssh_run", side_effect=[subprocess.CompletedProcess([], 0, b"", b""),
+                                                                       refused]) as ssh, \
+                mock.patch("desk.winsettings.display") as display, mock.patch("desk.winsettings.time.sleep"), \
+                self.assertRaisesRegex(DeskError, "did not start again"):
+            winsettings.taskbar(mock.Mock(), spec, align="left")
+        self.assertIn("if (-not (Get-Process explorer", ssh.call_args.args[2])
+        display.wait_stable.assert_not_called()
+
+
 class Forward(unittest.TestCase):
     def test_another_local_port_for_a_forwarded_one_is_refused(self):
         live = [{"port": 22, "local": 40001, "pid": 1, "alive": True}]
