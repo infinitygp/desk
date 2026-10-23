@@ -345,6 +345,12 @@ def _count(text: str, pattern: str | None = None) -> int:
     return len([ln for ln in lines if re.search(pattern, ln)]) if pattern else len(lines)
 
 
+def one_line(text: str, limit: int = 120) -> str:
+    """A command or step as the report lists it: a script of many lines keeps its first words."""
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
 def _step_labels(guest_times: list[float], events: list[dict]) -> list[str]:
     """The scenario step that was running (or had last run) at each guest time. Step events carry
     host times; the guest's clock differs by the offsets desk clock set along the way."""
@@ -355,7 +361,7 @@ def _step_labels(guest_times: list[float], events: list[dict]) -> list[str]:
         elif ev.get("clock") == "reset":
             offset = 0.0
         if "step" in ev and "ok" in ev:
-            starts.append((ev["t"] - ev.get("seconds", 0) + offset, f"step {ev['step']}: {ev['action']}"[:60]))
+            starts.append((ev["t"] - ev.get("seconds", 0) + offset, one_line(f"step {ev['step']}: {ev['action']}", 60)))
     labels = []
     for when in guest_times:
         # Step durations are logged to a tenth of a second.
@@ -432,7 +438,7 @@ def collect(run, diff: bool = False) -> Path:
                f"{len(last) - len(failed)} of {total} steps passed"]
         for ev in failed:
             first, _, rest = ev["detail"].partition("\n")
-            md.append(f"- failed at step {ev['step']} ({ev['action']}): {first}"
+            md.append(f"- failed at step {ev['step']} ({one_line(ev['action'])}): {first}"
                       + (f"\n\n```\n{rest}\n```\n" if rest else ""))
         md.append("")
     md.append("## Found automatically")
@@ -493,14 +499,14 @@ def collect(run, diff: bool = False) -> Path:
         offset = ev["t"] - run.created
         stamp = f"+{int(offset // 60):02d}:{int(offset % 60):02d}"
         if "argv" in ev:
-            md.append(f"- {stamp} `desk {' '.join(ev['argv'])}`")
+            md.append(f"- {stamp} `{one_line('desk ' + ' '.join(ev['argv']))}`")
         elif "rc" in ev:
             if ev["rc"] != 0 and md and md[-1].startswith("- "):
                 md[-1] += f" → exit {ev['rc']}"
         elif "step" in ev and "ok" in ev:
             mark = "ok" if ev["ok"] else "FAILED"
             detail = ev["detail"].split("\n", 1)[0]
-            md.append(f"- {stamp} step {ev['step']} {mark}: {ev['action']} ({ev['seconds']} s)"
+            md.append(f"- {stamp} step {ev['step']} {mark}: {one_line(ev['action'])} ({ev['seconds']} s)"
                       + (f" → {detail}" if detail else ""))
         elif "clock" in ev:
             step = ev.get("clock_step") or (ev.get("step") if "ok" not in ev else None)

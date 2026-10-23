@@ -226,3 +226,34 @@ class DnfTimes(unittest.TestCase):
                 self.assertEqual(local_dnf_times(text).splitlines(),
                                  ["installed foo-1.0-1.noarch", " 3 dnf install -y /tmp/foo.rpm 2026-10-08 23:30:00     1"])
         time.tzset()
+
+
+class Timeline(unittest.TestCase):
+    def test_long_commands_and_scripts_take_one_line(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+
+        from desk import evidence
+
+        script = "set -e\n" + "echo step && " * 40 + "true"
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            run_dir.mkdir()
+            events = [
+                {"t": 100.0, "argv": ["exec", "--root", "--", script]},
+                {"t": 101.0, "scenario": "/x/a.toml", "steps": 1},
+                {"t": 102.0, "step": 1, "action": f"root {script}", "ok": False, "detail": "exit 1", "seconds": 1.0},
+            ]
+            (run_dir / "log.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
+            run = mock.Mock(id="r1", dir=run_dir, image="fedora-44-gnome", created=99.0, ready=0.0)
+            run.live_domain.return_value = None
+            with mock.patch.object(evidence, "REPORTS", Path(tmp) / "reports"):
+                md = (evidence.collect(run) / "report.md").read_text()
+        timeline = md.split("## Timeline", 1)[1].strip().splitlines()
+        self.assertEqual(len(timeline), 2)
+        self.assertTrue(timeline[0].startswith("- +00:01 `desk exec --root -- set -e echo step && "))
+        self.assertTrue(timeline[0].endswith("…`"))
+        self.assertLess(max(len(line) for line in timeline), 180)
+        self.assertIn("failed at step 1 (root set -e echo step", md)
