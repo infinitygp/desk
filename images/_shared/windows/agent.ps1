@@ -19,6 +19,7 @@ Add-Type -Namespace Desk -Name Win -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
 [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
 [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+[DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
 [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
 [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
 [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint msg, UIntPtr wp, string lp, uint flags, uint timeout, out UIntPtr result);
@@ -55,8 +56,10 @@ function Focus-NewWindow($before, $procId, $timeout = 15) {
 function Show-Window($handle) {
     [Desk.Win]::keybd_event(0x87, 0, 0, [UIntPtr]::Zero)
     [Desk.Win]::keybd_event(0x87, 0, 2, [UIntPtr]::Zero)
-    [void][Desk.Win]::ShowWindow([IntPtr][long]$handle, 9)
-    [void][Desk.Win]::SetForegroundWindow([IntPtr][long]$handle)
+    # SW_RESTORE only for a minimized window: it would also take a maximized one back to its normal size.
+    $h = [IntPtr][long]$handle
+    [void][Desk.Win]::ShowWindow($h, $(if ([Desk.Win]::IsIconic($h)) { 9 } else { 5 }))
+    [void][Desk.Win]::SetForegroundWindow($h)
     # Whether it is in front now, as the user would see it: SetForegroundWindow's own answer only
     # says whether Windows accepted the request.
     $deadline = (Get-Date).AddSeconds(2)
