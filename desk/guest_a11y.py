@@ -762,10 +762,13 @@ def page(_opts) -> dict:
     def visit(a):
         role = a.get_role_name()
         if role == "document web":
-            # Chromium's docked DevTools are a page of their own, in front of the one inspected;
-            # its address bar may come after the page.
-            if not docs and not (doc_url(a) or "").startswith(DEVTOOLS):
+            # Chromium's docked DevTools are a page of their own, in front of the one inspected
+            # (desk browser viewport opens them): passed over, the walk goes on to the page.
+            if (doc_url(a) or "").startswith(DEVTOOLS):
+                return False
+            if not docs:
                 docs.append(a)
+            # Its address bar may come after the page.
             return bool(bar) or not chromium
         if role == "entry" and not bar and chromium and (a.get_attributes() or {}).get("class") == OMNIBOX:
             bar.append(text_of(a, 2000))

@@ -220,6 +220,22 @@ class ChromiumPages(unittest.TestCase):
             # A page that only looks like one is the page asked for.
             self.assertIsNone(guest_a11y.browser_error(page("Offline", "E1"), "https://app.test/"))
 
+    def test_the_page_behind_docked_devtools(self):
+        # The address bar first, then DevTools (desk browser viewport opens them), then the page.
+        bar = Tree("entry", attrs={"class": guest_a11y.OMNIBOX})
+        devtools, inspected = Tree("document web", "DevTools"), Tree("document web", "Example Domain")
+        top = Tree("frame", "Example Domain - Chromium", children=[
+            Tree("panel", children=[bar]), Tree("panel", children=[devtools, inspected])])
+        app = Tree("application", "Chromium", toolkit=("Chromium", "155.0.8059.84"))
+        urls = {devtools: "devtools://devtools/bundled/devtools_app.html", inspected: "https://example.com/"}
+        with mock.patch.object(guest_a11y, "front_toplevel", return_value=({"title": top.name}, app, top)), \
+                mock.patch.object(guest_a11y, "states", return_value={"showing"}), \
+                mock.patch.object(guest_a11y, "doc_url", side_effect=urls.get), \
+                mock.patch.object(guest_a11y, "text_of", return_value="example.com"), \
+                mock.patch.object(guest_a11y, "browser_error", return_value=None):
+            shown = guest_a11y.page({})
+        self.assertEqual((shown["url"], shown["address"]), ("https://example.com/", "example.com"))
+
 
 if __name__ == "__main__":
     unittest.main()
