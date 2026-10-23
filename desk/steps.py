@@ -30,8 +30,9 @@ class Target:
 class Steps:
     def __init__(self, spec: ImageSpec, target):
         self.spec, self.target = spec, target
-        # Web console errors already checked by a scenario's console_errors step.
-        self.console_seen = 0
+        # Web console errors (and Chromium messages that may be errors) already checked by a
+        # scenario's console_errors step.
+        self.console_seen = self.console_unlevelled = 0
         # The latest listing in which wait_for found what it waited for.
         self.snap: dict | None = None
 

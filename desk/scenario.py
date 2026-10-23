@@ -17,14 +17,14 @@ from .steps import Steps
 # Exactly one per step; the value is the action's argument.
 ACTIONS = {"root", "exec", "gui", "focus", "click", "type", "key", "expect", "expect_absent", "shot",
            "reboot", "wait", "clock", "disk_add", "disk_rm", "console_errors", "prepare", "open", "viewport"}
-OPTIONS = {"role", "exact", "timeout", "output", "rc", "name", "soft", "env", "step", "until", "anywhere"}
+OPTIONS = {"role", "exact", "timeout", "output", "rc", "name", "soft", "env", "step", "until", "anywhere", "browser"}
 # The options each action reads, besides name and soft; any other would be ignored without a word.
 READS = {
     "root": {"timeout", "output", "rc", "until"}, "exec": {"timeout", "output", "rc", "until"},
     "gui": {"env"}, "click": {"role", "exact", "timeout"}, "type": {"anywhere"},
     "expect": {"role", "exact", "timeout"}, "expect_absent": {"role", "exact", "timeout"},
     "reboot": {"timeout"}, "wait": {"timeout"}, "clock": {"step", "timeout"}, "disk_rm": {"timeout"},
-    "open": {"timeout"},
+    "open": {"timeout", "browser"}, "viewport": {"browser"},
 }
 
 
@@ -54,6 +54,7 @@ VALUES = {
     "viewport": (lambda v: isinstance(v, str) and (v == "reset" or re.fullmatch(r"[1-9]\d*x[1-9]\d*", v)),
                  "WIDTHxHEIGHT (390x700) or reset"),
     "role": (_text, "a text"), "output": (_text, "a text"), "name": (_text, "a text"), "step": (_text, "a text"),
+    "browser": (lambda v: v in browser.NAMES, " or ".join(sorted(browser.NAMES))),
     "timeout": (lambda v: _number(v) and v > 0, "seconds"),
     "rc": (lambda v: isinstance(v, int) and not isinstance(v, bool), "an exit code"),
     **{o: (lambda v: isinstance(v, bool), "true or false") for o in ("exact", "soft", "until", "anywhere")},
@@ -314,21 +315,26 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
         return f"{hook} done"
     elif action == "open":
         # A page that did not load fails the step; one the site sent elsewhere (a login) says so.
-        shown, asked = browser.open_url(run, value, timeout=timeout or 30)
+        shown, asked = browser.open_url(run, value, timeout=timeout or 30, browser=step.get("browser"))
         return shown if browser.under(shown, asked) else f"{shown} (opened {asked})"
     elif action == "viewport":
-        return browser.viewport(run, value)
+        return browser.viewport(run, value, browser=step.get("browser"))
     elif action == "disk_add":
         return f"disk {disks.add(run, *disks.parse(value))} plugged in"
     elif action == "disk_rm":
         disks.remove(run, value, timeout=timeout or 30)
         return f"disk {value} unplugged"
     elif action == "console_errors":
-        # New errors in Firefox's web console since the scenario started or the previous check.
-        found = browser.errors(browser.console(run))
+        # New errors in the web console since the scenario started or the previous check.
+        lines = browser.console(run)
+        found, unknown = browser.errors(lines), browser.unlevelled(lines)
         new, steps.console_seen = found[steps.console_seen:], len(found)
+        maybe, steps.console_unlevelled = unknown[steps.console_unlevelled:], len(unknown)
         if len(new) > value:
             raise StepFailed(f"{len(new)} console errors (at most {value}): " + " | ".join(new[:3])[:300])
+        if maybe:
+            raise browser.Unchecked(f"{len(new)} console errors and {browser.unlevelled_note(len(maybe))}: "
+                                    + " | ".join(maybe[:3])[:300])
         return f"{len(new)} console errors"
     elif action == "clock":
         if value == "reset":
@@ -431,6 +437,8 @@ def _run_steps(run, spec, data: dict, first: int = 1) -> bool:
             if isinstance(e, guest.NoConnection):
                 lost = guest.NoConnection(f"{e}; {runs.host_state(run)}")
                 detail = str(lost)
+            elif isinstance(e, browser.Unchecked):
+                lost = e  # a check desk could not make says nothing about the product either
         run.log_event(step=i, action=label, ok=passed, detail=detail, seconds=round(time.monotonic() - t0, 1))
         head, *rest = detail.splitlines() or [""]
         print(f"{'PASS' if passed else 'FAIL'}  {i:>2}. {label[:60]:<60} {time.monotonic() - t0:5.1f}s  "

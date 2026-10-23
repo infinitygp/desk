@@ -7,7 +7,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from . import a11y, display, evidence, guest, images, record, runs
+from . import a11y, browser, display, evidence, guest, images, record, runs
 from .config import DeskError, list_images, load_image, version
 
 
@@ -704,12 +704,10 @@ def cmd_clock(args) -> None:
 
 
 def cmd_browser(args) -> None:
-    from . import browser
-
     run = runs.resolve(args.run)
     if args.browser_cmd == "open":
         try:
-            shown, asked = browser.open_url(run, args.url)
+            shown, asked = browser.open_url(run, args.url, browser=args.browser)
             print(f"showing {shown}" + ("" if browser.under(shown, asked) else f" (opened {asked}: the site sent the "
                                         "browser there, or back to where it was)"))
         except browser.NotLoaded as e:
@@ -721,13 +719,17 @@ def cmd_browser(args) -> None:
         _after_action(run, run.dom(), args)
         return
     if args.browser_cmd == "viewport":
-        print(browser.viewport(run, args.size))
+        print(browser.viewport(run, args.size, browser=args.browser))
         _after_action(run, run.dom(), args)
         return
     lines = browser.console(run, everything=args.all)
+    unknown = browser.unlevelled(lines) if args.errors else []
     if args.errors:
         lines = browser.errors(lines)
-    print("\n".join(lines) if lines else "(nothing in the web console since the run started)")
+    print("\n".join(lines) if lines else "(no errors in the web console since the run started)" if args.errors
+          else "(nothing in the web console since the run started)")
+    if unknown:
+        print(browser.unlevelled_note(len(unknown)) + " (desk browser console lists them)")
 
 
 def cmd_prepare(args) -> None:
@@ -1083,19 +1085,24 @@ def build_parser() -> argparse.ArgumentParser:
     _action_opts(p)
     p.set_defaults(func=cmd_prepare)
 
-    p = sub.add_parser("browser", help="Firefox in the guest: its web console, opening pages, page size")
+    p = sub.add_parser("browser", help="Firefox and Chromium in the guest: their web console, opening pages, page "
+                       "size")
     bsub = p.add_subparsers(dest="browser_cmd", required=True)
     bp = bsub.add_parser("console", help="console messages, uncaught exceptions and rejected promises of every "
                          "page since the run started")
     bp.add_argument("--errors", action="store_true", help="only errors (console.error, uncaught exceptions)")
-    bp.add_argument("--all", action="store_true", help="also Firefox's own components")
+    bp.add_argument("--all", action="store_true", help="also the browsers' own components and pages")
     bp = bsub.add_parser("open", help="open an address in the current tab, or a path (/system/services) on the "
                          "site shown now")
     bp.add_argument("url")
+    bp.add_argument("--browser", choices=sorted(browser.NAMES), help="which browser (default: the one in the "
+                    "focused window, else Firefox)")
     _action_opts(bp)
     bp = bsub.add_parser("viewport", help="pages at WIDTHxHEIGHT CSS pixels (a phone: 390x700) through Firefox's "
-                         "responsive design mode, or reset")
+                         "responsive design mode or Chromium's device mode, or reset")
     bp.add_argument("size", metavar="WxH|reset")
+    bp.add_argument("--browser", choices=sorted(browser.NAMES), help="which browser (default: the one in the "
+                    "focused window, else Firefox)")
     _action_opts(bp)
     p.set_defaults(func=cmd_browser)
 

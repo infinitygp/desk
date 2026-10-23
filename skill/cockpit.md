@@ -5,7 +5,9 @@ Part of the desk skill ([SKILL.md](SKILL.md)); the commands and pitfalls there a
 ## Cockpit plugins
 
 Use `fedora-44-cockpit` to test what the plugin does: Firefox shows Cockpit at
-`https://localhost:9090`, logged in with administrative access. Install the plugin's package with
+`https://localhost:9090`, logged in with administrative access. Chromium trusts Cockpit's
+certificate too but starts logged out: `desk browser open --browser chromium
+https://localhost:9090`, then log in as tester (password tester). Install the plugin's package with
 `desk exec --root -- dnf install -y /tmp/foo.rpm`, then press F5 in Firefox: the new entry appears
 in Cockpit's menu without logging in again. After `desk reboot` (or when Cockpit asks to log in
 again) run `desk prepare`, in a scenario `prepare = true`: it opens Firefox at Cockpit, logs in and
@@ -27,12 +29,13 @@ instead, where Cockpit is not installed, as on a fresh Workstation: a plugin tha
 ## Cockpit on phones
 
 - `desk browser viewport 390x700` gives pages 390x700 CSS pixels through Firefox's responsive
-  design mode (Firefox's window cannot get that narrow) and prints the `desk shot --region` of the
-  page area; `desk browser viewport reset` closes the mode (in a scenario: `viewport = "390x700"`,
-  `viewport = "reset"`, and `open = "/plugin#/page"` for a page). Cockpit collapses its menu at that
-  width, so the plugin's iframe gets the whole width. The screen is 800 pixels high: taller
-  viewports run past its bottom; `desk display --resolution 1280x1024` (or `desk up IMAGE
-  --resolution 1280x1024`) makes room for 390x776.
+  design mode (a window cannot get that narrow), or Chromium's device mode with Chromium in front
+  or `--browser chromium`, and prints the `desk shot --region` of the page area; `desk browser
+  viewport reset` closes the mode (in a scenario: `viewport = "390x700"`, `viewport = "reset"`, and
+  `open = "/plugin#/page"` for a page). Cockpit collapses its menu at that width, so the plugin's
+  iframe gets the whole width. The screen is 800 pixels high: taller viewports run past its bottom
+  (in Chromium past 582, with DevTools' toolbar above the page); `desk display --resolution
+  1280x1024` (or `desk up IMAGE --resolution 1280x1024`) makes room for 390x776.
 - The plugin's iframe is same-origin, so the web console (`desk key ctrl+shift+k`) can measure it:
   `[...document.querySelectorAll('iframe')].find(i => i.src.includes('<plugin>')).contentDocument`.
 - Desktop regression check: the same crop before and after a change, compared on the host with

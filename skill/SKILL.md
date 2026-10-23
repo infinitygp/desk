@@ -76,8 +76,8 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk ls`, `desk down [ID] [--all] [--keep] [--diff] [--no-report]`, `desk gc` | List (with who holds each run), destroy (writing the report first), clean up idle runs |
 | `desk view` | Tell the user how to watch the run live (VNC through an SSH tunnel) |
 | `desk forward PORT[:LOCAL]`, `desk forward`, `desk forward --stop PORT\|all`, `desk up IMAGE --forward PORT` | Reach a guest port from the host (127.0.0.1, the same number when free, else printed) for as long as the run exists, across reboots and snapshot restores; a port already forwarded keeps its local port (`--stop` it first to move it) |
-| `desk browser open URL\|/PATH` | Open an address in Firefox's current tab, as a link from another program would; a path is opened on the site shown now (`/podman`, `/system/services`); an address that differs from the page shown only after `#` loads that page afresh (Firefox loads no page for such a link from another program). Exits 1 and says what Firefox shows instead when the page did not load (server not found, connection refused, a certificate warning) |
-| `desk browser viewport WxH\|reset` | Pages at WxH CSS pixels (a phone: `390x700`) through Firefox's responsive design mode; prints the `desk shot --region` of the page area |
+| `desk browser open URL\|/PATH [--browser chromium]` | Open an address in the current tab of the browser in the focused window (Firefox when no browser is; `--browser firefox\|chromium` picks one and starts it), as a link from another program would; a path is opened on the site shown now (`/podman`, `/system/services`); an address that differs from the page shown only after `#` loads that page afresh (the browsers load no page for such a link from another program). Exits 1 and says what the browser shows instead when the page did not load (server not found, connection refused, a certificate warning, a server that does not answer) |
+| `desk browser viewport WxH\|reset [--browser chromium]` | Pages at WxH CSS pixels (a phone: `390x700`) through Firefox's responsive design mode or Chromium's device mode (DevTools docked in its window, the page at 100 %); prints the `desk shot --region` of the page area |
 | `desk browser console [--errors] [--all]` | Web console of every page since the run started (see Pitfalls) |
 | `desk record start [--fps N]`, `desk record stop`, `desk up --record` | Record the screen as a WebM video, kept with the report |
 | `desk usb ls`, `desk usb add VENDOR:PRODUCT\|BUS.DEVICE`, `desk usb rm ...`, `desk up IMAGE --usb ...` | Hand a host USB device to the guest ([system.md](system.md)) |
@@ -119,13 +119,17 @@ guest shell; `--root` and `--gui` apply to the whole snippet.
 - Browsers build their accessibility tree lazily: if a page's content is missing from the first
   `desk a11y`, run it again.
 - Web pages' console: `desk browser console` (`--errors`: console.error, uncaught exceptions and
-  rejected promises only) prints what every page in Firefox logged since the run started, iframes
-  included (Cockpit plugins run in one). Firefox's own messages are left out (`--all` shows them).
-  An uncaught exception or rejected promise names the file and line it came from and, after
-  `= `, the thrown value and its stack (`uncaught exception: Object = {"problem":"not-found"} (at
-  load@https://localhost:9090/cockpit/@localhost/foo/index.js:2:41 < ...)`): the URL tells the
-  plugin's code from Cockpit's. Reading only; to evaluate JavaScript open the devtools
-  (`desk key ctrl+shift+k`) and type.
+  rejected promises only) prints what every page in Firefox and Chromium logged since the run
+  started, iframes included (Cockpit plugins run in one). The browsers' own messages are left out
+  (`--all` shows them). In Firefox an uncaught exception or rejected promise names the file and
+  line it came from and, after `= `, the thrown value and its stack (`uncaught exception: Object =
+  {"problem":"not-found"} (at load@https://localhost:9090/cockpit/@localhost/foo/index.js:2:41 <
+  ...)`): the URL tells the plugin's code from Cockpit's. Chromium logs console.error at the level
+  of console.log, so its messages are listed as `Chromium console: "..." (URL, line N)` whatever
+  they are, and `--errors` has only its uncaught exceptions and rejected promises (`Uncaught
+  TypeError: ...`, without the thrown value or stack) and says how many others could be errors;
+  of a message of several lines Chromium's log keeps the first. Reading only; to evaluate
+  JavaScript open the devtools (Firefox `desk key ctrl+shift+k`, Chromium `ctrl+shift+j`) and type.
 - Layouts that are still building move what `desk a11y` listed a moment ago; clicks by @ref or name
   look the position up again, but a click by pixels from an old listing can miss. Typing after a
   missed click is refused in a browser rather than sent to the page as shortcuts.
@@ -138,14 +142,14 @@ guest shell; `--root` and `--gui` apply to the whole snippet.
 - `dnf` prints its progress on stderr even with `-q`; add `>/dev/null 2>&1` and check the result with
   `rpm -q` / `rpm -V` instead of reading the transaction log.
 - Web UIs on `https://localhost` with a self-signed certificate (a Cockpit installed by the test
-  itself; `fedora-44-cockpit`'s Firefox trusts its own) show Firefox's warning on every new run:
-  `desk click --name Advanced`, then `desk click --name Proceed` (it scrolls itself).
+  itself; `fedora-44-cockpit`'s browsers trust its own) show the browser's warning on every new
+  run: `desk click --name Advanced`, then `desk click --name Proceed` (it scrolls itself).
 
 ## Evidence report
 
 `desk down` first writes `reports/<run>/report.md` under desk's home and prints its path: failed
 units (now, and every unit failure since the start, before reboots too), SELinux denials, crashes,
-journal warnings, package changes and Firefox console errors since the run started, plus a
+journal warnings, package changes and web console errors since the run started, plus a
 timeline of every desk command with its exit code and the screenshots taken. `desk down --diff`
 adds the files the run changed. Without `--keep`, `desk down` deletes the run's directory (disk,
 snapshots, extra disks); screenshots and logs stay in the report. Point the user to the report
@@ -170,7 +174,8 @@ base is there, and without a warm state a run still starts, cold, in ~20 s.
 `fedora-44-gnome` is the default; `fedora-45-gnome` is the next
 Fedora release (beta until it is out); `fedora-44-gnome-pl` is the same
 system in Polish (UI, Firefox, formats) for testing Polish interfaces; `fedora-44-cockpit` has
-Cockpit open in Firefox, logged in as tester with administrative access; `arch-gnome` is Arch Linux
+Cockpit open in Firefox, logged in as tester with administrative access (its Chromium trusts
+Cockpit's certificate too, logged out); `arch-gnome` is Arch Linux
 (rolling, pacman, no SELinux) with the newest GNOME and libraries; `windows-11` is Windows 11
 Enterprise (evaluation) for Windows builds and installers; `openwrt-25.12` is OpenWrt 25.12 without
 a desktop, for OpenWrt packages and LuCI apps. Images are as old as their last build
@@ -230,12 +235,16 @@ stopped in the guest and fails as "still running"), `timeout` on a `click` (how 
 the element, 60 s by default), `clock = "+1d"` (or `"reset"`),
 `open = "/example#/tasks"` (`desk browser open`: a path on the site shown or a whole address; fails
 when the page did not load; `timeout`, 30 s), `viewport = "390x700"` (or `"reset"`; `desk browser
-viewport`), `disk_add = "8G:data"`, `disk_rm = "data"` (top-level `disks = ["8G:data"]` plugs them in
-before the first step, `usb = ["0fd9:0084"]` hands host USB devices over), `console_errors = 0` (at most that many new errors in Firefox's web console since
-the start or the previous such step; end a UI scenario with one). In a scenario's report every
-console message is tagged with the step running when it was logged (`[before the first step]` for
-what the warm state and setup logged; a page logs a moment after the step that opened it, so look
-at the step before as well), so no extra step is needed just to separate setup noise. Every step takes `name` for the
+viewport`; both take `browser = "chromium"` or `"firefox"`, else the browser in the focused window),
+`disk_add = "8G:data"`, `disk_rm = "data"` (top-level `disks = ["8G:data"]` plugs them in
+before the first step, `usb = ["0fd9:0084"]` hands host USB devices over), `console_errors = 0` (at
+most that many new errors in the web console since the start or the previous such step; end a UI
+scenario with one. Chromium's messages may be console.error, which its log does not tell: any
+new one makes the step fail with exit 2, desk's failure, not the product's). In a scenario's
+report every console message is tagged with the step running when it was logged (`[before the
+first step]` for what the warm state and setup logged; a page logs a moment after the step that
+opened it, so look at the step before as well), so no extra step is needed just to separate setup
+noise. Every step takes `name` for the
 report, and `soft = true` for an independent check whose failure should not stop the steps after it.
 `desk scenario check FILE` validates a file without starting anything: the image, every value's
 type, and options a step would not read (`rc` on a `click`). When a scenario fails,
@@ -297,7 +306,11 @@ then (`runs/<id>/failed-start.png`).
   ran at random moments of a test; when the test is about one of them, `systemctl start` its
   service (the product's own timers are untouched, and `desk clock --step` runs them). Firefox
   starts without first-run tabs, the default browser question, offers to save passwords, studies
-  or tips (`/etc/firefox/policies/policies.json`).
+  or tips (`/etc/firefox/policies/policies.json`); Chromium, next to it in the Linux desktop
+  images, without its first-run dialog, a keyring password prompt, the default browser question,
+  offers to save passwords or to sign in (`/etc/chromium/policies/managed/desk.json`, and its flags
+  in `/etc/chromium/chromium.conf`, on Arch `/etc/chromium-flags.conf`). In both an address opened
+  from another program replaces the page in the current tab.
 - Guest clocks are synced on restore; network goes through user-mode networking (outbound
   works, inbound only SSH; `desk forward PORT` makes a guest service reachable from the host).
 - Several runs can exist at once; pass `-r ID` (an exported `DESK_RUN` points every later command

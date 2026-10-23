@@ -472,6 +472,9 @@ def collect(run, diff: bool = False) -> Path:
             web = [line for _, line in entries]
             errs = browser.errors(web)
             summary = f"{len(errs)} errors, {len(web)} messages"
+            unknown = browser.unlevelled(web)
+            if unknown:
+                summary += f"; {browser.unlevelled_note(len(unknown))}"
             if stepped:
                 # Which scenario step each message came in, so what setup (installing, logging in,
                 # loading other pages) logged is told apart from what the steps under test did.
@@ -482,7 +485,7 @@ def collect(run, diff: bool = False) -> Path:
                 if setup:
                     summary += f"; {setup} of the errors before the first step"
             (out / "browser-console.txt").write_text("\n".join(web) + "\n")
-            md.append(f"- browser console (Firefox): {summary} (see browser-console.txt)"
+            md.append(f"- browser console: {summary} (see browser-console.txt)"
                       + ("\n\n```\n" + "\n".join(errs[:20]) + "\n```\n" if errs else ""))
         pkgs = problems.get("packages", "")
         md.append("- package changes:" + (f"\n\n```\n{pkgs}\n```\n" if pkgs else " none"))

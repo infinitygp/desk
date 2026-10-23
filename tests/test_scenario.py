@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from desk import guest, scenario
+from desk import browser, guest, scenario
 from desk.config import DeskError
 
 
@@ -79,6 +79,8 @@ reboot = true
             'image = "a"\n[[step]]\nviewport = "390 x 700"',
             'image = "a"\n[[step]]\nviewport = "phone"',
             'image = "a"\n[[step]]\nviewport = "390x700"\ntimeout = 5',
+            'image = "a"\n[[step]]\nopen = "/x"\nbrowser = "edge"',
+            'image = "a"\n[[step]]\nclick = "x"\nbrowser = "chromium"',
         ):
             with self.subTest(text=text), self.assertRaises(DeskError):
                 scenario.load(write(text))
@@ -146,8 +148,14 @@ open = "https://localhost:9090/"
 viewport = "390x700"
 [[step]]
 viewport = "reset"
+[[step]]
+open = "https://localhost:9090/"
+browser = "chromium"
+[[step]]
+viewport = "390x700"
+browser = "firefox"
 '''))
-        self.assertEqual(len(data["step"]), 15)
+        self.assertEqual(len(data["step"]), 17)
 
     def test_a_missing_file_is_a_mistake_too(self):
         with self.assertRaisesRegex(DeskError, "No such file"):
@@ -183,6 +191,49 @@ class FixedWaits(unittest.TestCase):
                          {"exec": "sleep 1; test -f x", "until": True}, {"root": "systemctl start x"}]}
         found = scenario.fixed_waits(data)
         self.assertEqual([w.split(":")[0] for w in found], ["step 1", "step 3"])
+
+
+class ConsoleErrors(unittest.TestCase):
+    """console_errors counts what it can tell: Chromium's messages have no level."""
+
+    def check(self, *consoles: list[str], value: int = 0) -> list:
+        steps = SimpleNamespace(console_seen=0, console_unlevelled=0)
+        out = []
+        with mock.patch("desk.scenario.browser.console", side_effect=consoles):
+            for _ in consoles:
+                try:
+                    out.append(scenario._step(SimpleNamespace(), SimpleNamespace(), steps,
+                                              {"console_errors": value}))
+                except Exception as e:  # noqa: BLE001 - what each check ended with
+                    out.append(e)
+        return out
+
+    def test_firefox_errors_are_counted(self):
+        ok, bad = self.check(['10:00:00 console.log: "x"'], ['10:00:00 console.log: "x"',
+                                                            '10:00:01 console.error: "y"'])
+        self.assertEqual(ok, "0 console errors")
+        self.assertIsInstance(bad, scenario.StepFailed)
+
+    def test_chromium_messages_cannot_be_counted_as_clean(self):
+        maybe = '10:00:00 Chromium console: "an error" (https://app.test/, line 8)'
+        uncaught = "10:00:01 JavaScript error: https://app.test/, line 11: Uncaught TypeError: x"
+        first, second = self.check([maybe], [maybe])
+        self.assertIsInstance(first, browser.Unchecked)
+        self.assertIn("1 Chromium console messages that could be errors or not", str(first))
+        # Only new ones since the previous check.
+        self.assertEqual(second, "0 console errors")
+        # An uncaught exception is an error whatever else there is: the product's failure.
+        (failed,) = self.check([maybe, uncaught])
+        self.assertIsInstance(failed, scenario.StepFailed)
+
+    def test_the_steps_stop_with_it_as_desks_failure(self):
+        run = mock.Mock()
+        with mock.patch("desk.scenario._step", side_effect=browser.Unchecked("1 Chromium console messages")), \
+                mock.patch("desk.scenario.Steps"), mock.patch("desk.scenario.display"), \
+                self.assertRaises(browser.Unchecked):
+            scenario._run_steps(run, LostConnection.SPEC, {"step": [{"console_errors": 0, "soft": True},
+                                                                    {"exec": "true"}]})
+        self.assertEqual(len([c for c in run.log_event.call_args_list if c.kwargs.get("ok") is False]), 1)
 
 
 class LostConnection(unittest.TestCase):

@@ -159,5 +159,67 @@ class OwnText(unittest.TestCase):
         self.assertNotIn("text", self.node("label", "User name", "User name"))
 
 
+class Tree:
+    """An accessible with children and object attributes, as a browser's page has."""
+
+    def __init__(self, role, name="", attrs=None, children=(), toolkit=("", "0")):
+        self.role, self.name, self.attrs, self.children, self.toolkit = role, name, attrs or {}, list(children), toolkit
+
+    def get_role_name(self):
+        return self.role
+
+    def get_name(self):
+        return self.name
+
+    def get_attributes(self):
+        return self.attrs
+
+    def get_child_count(self):
+        return len(self.children)
+
+    def get_child_at_index(self, i):
+        return self.children[i]
+
+    def get_toolkit_name(self):
+        return self.toolkit[0]
+
+    def get_toolkit_version(self):
+        return self.toolkit[1]
+
+
+@unittest.skipIf(guest_a11y is None, "AT-SPI GObject introspection not installed")
+class ChromiumPages(unittest.TestCase):
+    def test_window_coordinates_from_the_surface(self):
+        # Chromium draws its own shadow: its Back button at (18, 56) of a window whose frame is
+        # at (127, 39) and its surface at (115, 29) is on screen at (133, 85). Measured on GNOME 50.
+        window = {"pid": 7, "title": "Example Domain - Chromium", "minimized": False, "x11": False,
+                  "frame": [127, 39, 1026, 755], "buffer": [115, 29, 1050, 780]}
+        mapper = guest_a11y.Mapper([window])
+        top = Tree("frame", "Example Domain - Chromium")
+        chromium = Tree("application", "Chromium", toolkit=("Chromium", "155.0.8059.84"))
+        firefox = Tree("application", "Firefox", toolkit=("Gecko", "144.0"))
+        self.assertEqual(mapper.for_toplevel("Chromium", 7, top, chromium), ("window", 115, 29))
+        self.assertEqual(mapper.for_toplevel("Firefox", 7, top, firefox), ("window", 127, 39))
+
+    def test_error_page_and_certificate_warning(self):
+        def page(heading, code, code_role="static"):
+            return Tree("document web", children=[Tree("section", attrs={"id": "main-content"}, children=[
+                Tree("section", attrs={"id": "main-message"}, children=[
+                    Tree("heading", heading, {"tag": "h1"}),
+                    Tree("section", attrs={"id": "debugging"}, children=[
+                        Tree(code_role, code, {"class": "error-code"})])])])])
+
+        with mock.patch.object(guest_a11y, "text_of", return_value=""):
+            self.assertEqual(guest_a11y.browser_error(page("This site can’t be reached", "ERR_CONNECTION_REFUSED"),
+                                                      "chrome-error://chromewebdata/"),
+                             "This site can’t be reached (ERR_CONNECTION_REFUSED)")
+            self.assertEqual(guest_a11y.browser_error(page("Your connection is not private",
+                                                           "NET::ERR_CERT_AUTHORITY_INVALID", "button"),
+                                                      "chrome-error://chromewebdata/"),
+                             "Your connection is not private (NET::ERR_CERT_AUTHORITY_INVALID)")
+            # A page that only looks like one is the page asked for.
+            self.assertIsNone(guest_a11y.browser_error(page("Offline", "E1"), "https://app.test/"))
+
+
 if __name__ == "__main__":
     unittest.main()

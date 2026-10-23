@@ -150,9 +150,11 @@ class Mapper:
             return None
         if win["x11"]:
             return ("screen", 0, 0)
-        # GTK 3 reports window coordinates from the surface, client-side shadow included; GTK 4
-        # and others from the visible frame (the xdg window geometry). Measured on GNOME 50.
-        if app is not None and toolkit_major(app) == ("gtk", 3):
+        # GTK 3 and Chromium report window coordinates from the surface, client-side shadow
+        # included; GTK 4 and others from the visible frame (the xdg window geometry). Measured on
+        # GNOME 50.
+        kit = toolkit_major(app) if app is not None else ("", 0)
+        if kit == ("gtk", 3) or kit[0] == "chromium":
             return ("window", win["buffer"][0], win["buffer"][1])
         return ("window", win["frame"][0], win["frame"][1])
 
@@ -634,11 +636,18 @@ def set_text(spec: dict, text: str) -> dict:
     return {"done": True}
 
 
+def takes_text(acc, st: set[str]) -> bool:
+    """A field to type into: Chromium marks its fields editable, without the EditableText
+    interface."""
+    interfaces = acc.get_interfaces()
+    return "EditableText" in interfaces or ("editable" in st and "Text" in interfaces)
+
+
 def edit(spec: dict) -> dict:
     """Give an editable element the keyboard focus, its window in front, so that real key presses
     reach it; with its current text."""
     app, path, acc = find_node(spec)
-    if "EditableText" not in acc.get_interfaces():
+    if not takes_text(acc, states(acc)):
         raise LookupError("element is not editable")
     front = next((w for w in shell_windows() if w["focus"]), None)
     title = app.get_child_at_index(path[0]).get_name() or ""
@@ -680,7 +689,8 @@ def front_toplevel():
 
 
 def showing_walk(acc, visit, deadline, depth=0) -> None:
-    """Depth first through what is showing, until `visit` returns True or time runs out."""
+    """Depth first through what is showing, until `visit` returns True or time runs out; False
+    leaves out what is inside the node."""
     if depth > 80 or time.monotonic() > deadline:
         return
     try:
@@ -694,7 +704,8 @@ def showing_walk(acc, visit, deadline, depth=0) -> None:
                 continue
         except GLib.Error:
             continue
-        if visit(ch) or showing_walk(ch, visit, deadline, depth + 1):
+        seen = visit(ch)
+        if seen or (seen is not False and showing_walk(ch, visit, deadline, depth + 1)):
             return True
     return None
 
@@ -716,41 +727,68 @@ def focused(_opts) -> dict:
     if found:
         a, st = found[-1]
         out.update(role=a.get_role_name(), name=(a.get_name() or "").strip(),
-                   editable="editable" in st and "EditableText" in a.get_interfaces())
+                   editable="editable" in st and takes_text(a, st))
     return out
 
 
+DEVTOOLS = "devtools://"
+# Chromium's address bar (views class), the one place that shows where a tab is going while it
+# still shows the page before.
+OMNIBOX = "OmniboxViewViews"
+
+
+def doc_url(doc) -> str | None:
+    getter = getattr(Atspi.Document, "get_attribute_value", None) or Atspi.Document.get_document_attribute_value
+    for name in ("DocURL", "URI"):  # Firefox, Chromium
+        try:
+            url = getter(doc, name)
+        except GLib.Error:
+            url = None
+        if url:
+            return url
+    return None
+
+
 def page(_opts) -> dict:
-    """Address of the page shown in the focused browser window."""
+    """Address of the page shown in the focused browser window, and in Chromium what its address
+    bar shows."""
     front, app, top = front_toplevel()
     if top is None:
         return {"url": None}
-    docs = []
+    docs, bar = [], []
 
     def visit(a):
-        if a.get_role_name() == "document web":
+        role = a.get_role_name()
+        if role == "document web":
+            # Chromium's docked DevTools are a page of their own, in front of the one inspected.
+            if (doc_url(a) or "").startswith(DEVTOOLS):
+                return False
             docs.append(a)
             return True
+        if role == "entry" and not bar and (a.get_attributes() or {}).get("class") == OMNIBOX:
+            bar.append(text_of(a, 2000))
         return None
 
     showing_walk(top, visit, time.monotonic() + 5)
     url = error = None
     if docs:
-        getter = getattr(Atspi.Document, "get_attribute_value", None) or Atspi.Document.get_document_attribute_value
-        try:
-            url = getter(docs[0], "DocURL")
-        except GLib.Error:
-            url = None
-        error = browser_error(docs[0])
-    return {"url": url or None, "problem": error, "app": app.get_name() or "", "window": front["title"]}
+        url = doc_url(docs[0])
+        error = browser_error(docs[0], url)
+    out = {"url": url or None, "problem": error, "app": app.get_name() or "", "window": front["title"]}
+    if bar:
+        out["address"] = bar[0]
+    return out
 
 
-def browser_error(doc) -> str | None:
-    """The heading of Firefox's own page shown instead of the one asked for (server not found,
-    connection refused, a certificate it does not trust), which carries the address of the page
-    that did not load. Told by what only its pages are made of, the same in every language: a
-    heading with the id error-title, next to its introduction, one of Firefox's own buttons
-    (moz-button) or on its error pages' body. A page that changes while it is read is none."""
+def browser_error(doc, url: str | None = None) -> str | None:
+    """The heading of the browser's own page shown instead of the one asked for (server not found,
+    connection refused, a certificate it does not trust). Firefox's carries the address of the
+    page that did not load and is told by what only its pages are made of, the same in every
+    language: a heading with the id error-title, next to its introduction, one of Firefox's own
+    buttons (moz-button) or on its error pages' body. Chromium's has an address of its own. A page
+    that changes while it is read is none."""
+    if (url or "").startswith("chrome-error://"):
+        return chromium_error(doc)
     title, signs, budget = [], set(), [300]
 
     def visit(a, depth):
@@ -775,17 +813,51 @@ def browser_error(doc) -> str | None:
     return (title[0] or "an error page") if title and signs else None
 
 
+def chromium_error(doc) -> str:
+    """Chromium's error page and certificate warning: the heading of its main message and the
+    error code (ERR_CONNECTION_REFUSED, NET::ERR_CERT_AUTHORITY_INVALID), found by their ids and
+    classes, the same in every language."""
+    heading, code, budget = [], [], [300]
+
+    def visit(a, depth, message):
+        if budget[0] <= 0 or depth > 10:
+            return
+        budget[0] -= 1
+        attrs = a.get_attributes() or {}
+        message = message or attrs.get("id") == "main-message"
+        if message and not heading and a.get_role_name() == "heading":
+            heading.append((a.get_name() or "").strip())
+        if not code and "error-code" in (attrs.get("class") or "").split():
+            code.append((a.get_name() or "").strip() or text_of(a))
+        for i in range(a.get_child_count()):
+            child = a.get_child_at_index(i)
+            if child is not None:
+                visit(child, depth + 1, message)
+
+    try:
+        visit(doc, 0, False)
+    except GLib.Error:
+        pass
+    text = (heading or [""])[0] or "an error page"
+    return f"{text} ({code[0]})" if code and code[0] else text
+
+
 RDM_TOOLBAR = "chrome://devtools/content/responsive/toolbar"
+# The width and height fields of the device toolbar in Chromium's DevTools.
+DEVICE_SIZE = "device-mode-size-input"
 
 
 def rdm(opts) -> dict:
     """Firefox's responsive design mode in the focused window: where its page area (the browser
     framed below the mode's toolbar) is on screen, and with {"focus": true} the keyboard focus
-    moved there from the mode's toolbar. {"open": False} when the mode is off."""
+    moved there from the mode's toolbar. {"open": False} when the mode is off. Chromium's device
+    mode likewise (chromium_device)."""
     _, app, top = front_toplevel()
     if top is None:
         return {"open": False}
     base = Mapper(shell_windows()).for_toplevel(app.get_name() or "", app.get_process_id(), top, app)
+    if toolkit_major(app)[0] == "chromium":
+        return chromium_device(app, top, base, opts)
     found = []
 
     def visit(a):
@@ -811,6 +883,70 @@ def rdm(opts) -> dict:
         except (GLib.Error, AttributeError, TypeError):
             pass
     return {"open": True, "bbox": Mapper.place(page_frames[0], base)}
+
+
+def chromium_device(app, top, base, opts: dict) -> dict:
+    """Chromium's device mode, the toolbar of the DevTools docked in the window: its width and
+    height fields (as snapshot lists them) and where the page area is on screen; with focus
+    "devtools" or "page" the keyboard focus moved there, with {"zoom": true} the page shown at
+    100 % (the toolbar's zoom; DevTools fit it to the window at first, which AT-SPI's boxes do not
+    follow). {"devtools": False} while DevTools are closed, {"open": False} while they show no
+    device toolbar."""
+    index = next((i for i in range(app.get_child_count()) if app.get_child_at_index(i) == top), 0)
+    pid, deadline = app.get_process_id(), time.monotonic() + 5
+    docs, fields, zoom, budget = [], [], [], [400]
+
+    def find_docs(acc, path, depth):
+        if depth > 80 or time.monotonic() > deadline:
+            return
+        for i in range(acc.get_child_count()):
+            ch = acc.get_child_at_index(i)
+            if ch is None or "showing" not in states(ch):
+                continue
+            if ch.get_role_name() == "document web":
+                docs.append((ch, path + [i], (doc_url(ch) or "").startswith(DEVTOOLS)))
+            else:
+                find_docs(ch, path + [i], depth + 1)
+
+    def find_fields(acc, path, depth):
+        # The device toolbar comes first in the DevTools page; the panels below it are large.
+        for i in range(acc.get_child_count()):
+            if (len(fields) == 2 and zoom) or budget[0] <= 0 or depth > 40:
+                return
+            budget[0] -= 1
+            ch = acc.get_child_at_index(i)
+            if ch is None or "showing" not in states(ch):
+                continue
+            role = ch.get_role_name()
+            if role == "spin button" and DEVICE_SIZE in ((ch.get_attributes() or {}).get("class") or "").split():
+                fields.append({"pid": pid, "path": path + [i], "role": "spin button",
+                               "name": (ch.get_name() or "").strip()})
+            elif role == "combo box":
+                # The zoom's choices, told by the one named in digits, the same in every language.
+                menu = ch.get_child_at_index(0) if ch.get_child_count() == 1 else None
+                options = [menu.get_child_at_index(j) for j in range(menu.get_child_count())] if menu else []
+                zoom.extend(o for o in options if o is not None and o.get_name() == "100%")
+            else:
+                find_fields(ch, path + [i], depth + 1)
+
+    try:
+        find_docs(top, [index], 0)
+        tools = next(((d, p) for d, p, dev in docs if dev), None)
+        shown = next((d for d, _, dev in docs if not dev), None)
+        if tools:
+            find_fields(*tools, 0)
+        if opts.get("zoom") and zoom and "selected" not in states(zoom[0]):
+            Atspi.Action.do_action(zoom[0], 0)  # its only action but the context menu: select
+    except GLib.Error:
+        return {"open": False, "devtools": False}
+    target = {"devtools": tools[0] if tools else None, "page": shown}.get(opts.get("focus"))
+    if target is not None:
+        try:
+            Atspi.Component.grab_focus(target)
+        except (GLib.Error, AttributeError, TypeError):
+            pass
+    return {"open": len(fields) == 2, "devtools": tools is not None, "fields": fields,
+            "bbox": Mapper.place(shown, base) if shown is not None and base is not None else None}
 
 
 def main() -> None:
