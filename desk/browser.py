@@ -370,12 +370,13 @@ def viewport(run, size: str, browser: str | None = None) -> str:
     box = _rdm(run, focus="page").get("bbox")
     if not box:
         return f"page area {width}x{height} CSS pixels (where it is on screen is unknown; look at a screenshot)"
-    # Firefox's page sits inside a 1 px frame.
-    x, y, w, h = box if chromium else (box[0] + 1, box[1] + 1, box[2] - 2, box[3] - 2)
+    # The page itself in both browsers: Firefox (158) draws its 1 px frame around this box.
+    x, y, w, h = box
     f = (run.scale or 100) / 100
     shown = (round(w / f), round(h / f))
-    if chromium and abs(shown[0] - width) <= 1 and abs(shown[1] - height) <= 1:
-        shown = (width, height)  # its boxes are rounded from fractions of a pixel
+    if abs(shown[0] - width) <= 1 and abs(shown[1] - height) <= 1:
+        # Boxes are rounded from fractions of a pixel (Chromium's, and Firefox's at a scale like 125 %).
+        shown = (width, height)
     taller = "(desk display --resolution 1280x1024 for a taller one)"
     clipped = ""
     if chromium and shown[0] == width and shown[1] < height:

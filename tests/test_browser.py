@@ -251,6 +251,28 @@ class Viewport(unittest.TestCase):
         with self.assertRaisesRegex(DeskError, "cannot find the width and height fields"):
             self.viewport([[]] * 100)
 
+    def test_the_page_area_is_the_box_firefox_gives(self):
+        # Measured with Firefox 158 on Fedora 44: a 390x600 page is 390x600 screen pixels from the
+        # box's corner, its frame drawn around the box.
+        from types import SimpleNamespace
+        from unittest import mock
+
+        run = SimpleNamespace(image="fedora-44-gnome", dom=lambda: None, scale=100)
+        field = {"pid": 1, "path": [0, 1], "role": "spin button", "name": ""}
+        page = {"open": True, "bbox": [453, 157, 390, 600]}
+        with mock.patch("desk.browser._linux", return_value=SimpleNamespace(layout="us")), \
+                mock.patch("desk.browser.a11y.page_url", return_value={"app": "Firefox"}), \
+                mock.patch("desk.browser.a11y.focus"), \
+                mock.patch("desk.browser._rdm", side_effect=lambda run, focus=None, zoom=False:
+                           page if focus == "page" else {"open": True}), \
+                mock.patch("desk.browser._rdm_fields", return_value=[field, field]), \
+                mock.patch("desk.browser.a11y.replace_text", return_value=""), \
+                mock.patch("desk.browser.display") as display:
+            display.png_size.return_value = (1280, 800)
+            self.assertEqual(browser.viewport(run, "390x600"),
+                             "page area 390x600 CSS pixels; on screen: desk shot --region 453,157,390,600; "
+                             "desk browser viewport reset to close the mode")
+
 
 class ChromiumDevice(unittest.TestCase):
     """Chromium's device mode is DevTools': opened, its sizes typed, closed with them."""
