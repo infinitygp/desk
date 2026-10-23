@@ -49,8 +49,9 @@ def request(run, timeout: float = 60, **req) -> dict:
 def _request(run, timeout: float, req: dict) -> dict:
     try:
         with socket.create_connection(("127.0.0.1", run.agent_port), timeout=timeout) as s:
+            # Not half-closed: the agent takes a closed connection for a caller that gave up while
+            # an earlier request held it, and leaves the request undone (it was reported as failed).
             s.sendall(json.dumps(req).encode() + b"\n")
-            s.shutdown(socket.SHUT_WR)
             chunks = []
             while chunk := s.recv(65536):
                 chunks.append(chunk)

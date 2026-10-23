@@ -77,7 +77,8 @@ display driver and qemu-guest-agent, and an agent in the logged-in session
 programs on the desktop, which SSH sessions cannot see. The agent serves one request at a time,
 so nothing may hold it: a connection that sends nothing is dropped after 5 s, a tree walk ends
 after 20 s, and a program that is waited for (`exec --gui --wait`) is waited for on a thread of
-its own. `agent-loop.ps1`, started at logon, starts it again when it ends and writes that to
+its own. A request whose caller gave up waiting (its connection closed) is left undone when the
+agent gets to it: the caller was told it failed. `agent-loop.ps1`, started at logon, starts it again when it ends and writes that to
 `C:\desk\agent.log`, which the report lists among the failed units; desk asks a listing or lookup
 again once the agent is back, but not an action, which may have been done. Commands are sent as
 `powershell -EncodedCommand`, since Windows' command line mangles quotes.

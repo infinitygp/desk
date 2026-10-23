@@ -259,6 +259,12 @@ while ($true) {
         $stream = $client.GetStream()
         $reader = New-Object IO.StreamReader($stream, $utf8)
         $req = $reader.ReadLine() | ConvertFrom-Json
+        # Closed already: the caller gave up while an earlier request held the agent and was told
+        # this one failed, so it must not happen now (an action asked again would happen twice).
+        if ($client.Client.Poll(0, [Net.Sockets.SelectMode]::SelectRead) -and $client.Client.Available -eq 0) {
+            $client.Close()
+            continue
+        }
         $reply = switch ($req.cmd) {
             'ping' { @{ ok = $true; session = (Get-Process -Id $PID).SessionId; user = $env:USERNAME } }
             'run' {

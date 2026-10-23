@@ -80,6 +80,32 @@ class WindowsAgent(unittest.TestCase):
         with self.assertRaisesRegex(DeskError, "not reachable"):
             winagent.request(run, timeout=0.2, cmd="uia")
 
+    def test_the_connection_stays_open_while_the_caller_waits(self):
+        # The agent leaves a request undone when its connection is closed by the time it gets to it.
+        import threading
+
+        with socket.socket() as server:
+            server.bind(("127.0.0.1", 0))
+            server.listen()
+            seen = {}
+
+            def agent():
+                conn, _ = server.accept()
+                with conn:
+                    seen["request"] = conn.makefile("rb").readline()
+                    try:
+                        seen["closed"] = conn.recv(1, socket.MSG_DONTWAIT) == b""
+                    except BlockingIOError:
+                        seen["closed"] = False
+                    conn.sendall(b'{"ok": true}')
+
+            thread = threading.Thread(target=agent)
+            thread.start()
+            run = SimpleNamespace(id="t", agent_port=server.getsockname()[1])
+            self.assertEqual(winagent.request(run, timeout=5, cmd="ping"), {"ok": True})
+            thread.join()
+        self.assertEqual(seen, {"request": b'{"cmd": "ping"}\n', "closed": False})
+
     def test_a_query_is_asked_again_once_the_agent_is_back(self):
         gone = winagent.AgentGone("in-session agent not reachable")
         run = SimpleNamespace(id="t", agent_port=1)
