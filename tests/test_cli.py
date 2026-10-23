@@ -88,6 +88,33 @@ class Failures(unittest.TestCase):
         self.assertEqual(self.run_main(SystemExit(124)), 124)
 
 
+class Down(unittest.TestCase):
+    def test_a_run_whose_vm_is_gone_is_reported_before_its_files_go(self):
+        import json
+        import tempfile
+        import time
+        from pathlib import Path
+
+        from desk import evidence
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            (run_dir / "shots").mkdir(parents=True)
+            (run_dir / "shots" / "0001.png").write_bytes(b"png")
+            (run_dir / "log.jsonl").write_text(json.dumps({"t": time.time(), "shot": str(run_dir / "shots" / "0001.png")})
+                                               + "\n")
+            run = mock.Mock(id="gone", dir=run_dir, image="fedora-44-gnome", created=time.time() - 60, ready=0.0)
+            run.live_domain.return_value = None  # QEMU ended under it
+            args = SimpleNamespace(id=None, run=None, all=False, keep=False, diff=False, no_report=False)
+            with mock.patch.object(evidence, "REPORTS", Path(tmp) / "reports"), \
+                    mock.patch("desk.cli.runs.resolve", return_value=run), mock.patch("sys.stdout"):
+                cli.cmd_down(args)
+            md = (Path(tmp) / "reports" / "gone" / "report.md").read_text()
+            self.assertFalse(run_dir.exists())
+        self.assertIn("the VM was not running", md)
+        self.assertIn("shots/0001.png", md)
+
+
 class Copy(unittest.TestCase):
     def copy(self, rc: int):
         run = mock.Mock(ssh_port=1, user="tester")

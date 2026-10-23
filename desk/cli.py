@@ -138,7 +138,9 @@ def cmd_down(args) -> None:
     targets = runs.all_runs() if args.all else [runs.resolve(args.id or args.run)]
     for run in targets:
         gone = _run_files(run)
-        report, videos = evidence.finish(run, keep=args.keep, diff=args.diff, report=not args.no_report)
+        # A VM that is gone (QEMU ended) still has its screenshots and timeline to report.
+        report, videos = evidence.finish(run, keep=args.keep, diff=args.diff, report=not args.no_report,
+                                         stopped=not evidence.reported(run))
         if args.keep:
             print(f"run {run.id} down (files kept in {run.dir})")
         else:
