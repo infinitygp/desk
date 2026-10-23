@@ -34,7 +34,8 @@ def _helper(run, *args: str) -> dict:
     if getattr(run, "scale", None) and run.scale != 100:
         # GNOME's logical layout: toolkits and the shell speak logical pixels; the screen has more.
         f = run.scale / 100
-        for box in [n.get("bbox") for n in out.get("nodes", [])] + [out.get("bbox"), out.get("point")]:
+        for box in [b for n in out.get("nodes", []) for b in (n.get("bbox"), n.get("point"))] + \
+                [out.get("bbox"), out.get("point")]:
             if box:
                 box[:] = [round(v * f) for v in box]
     return out
@@ -83,7 +84,8 @@ def format_node(node: dict, indent: bool = True) -> str:
     if states:
         parts.append("[" + ",".join(states) + "]")
     if not node.get("offscreen"):
-        cx, cy = center(node["bbox"])
+        # Where a click reaches it: its middle, unless a scrolling container cuts that off.
+        cx, cy = node.get("point") or center(node["bbox"])
         parts.append(f"({cx},{cy})")
     if node.get("covered"):
         parts.append(f"under {node['covered']}")
@@ -128,14 +130,14 @@ def _spec(run, ref: str) -> dict:
     return {k: node[k] for k in ("pid", "path", "role", "name")}
 
 
-def _point(run, spec: dict, size: tuple[int, int]) -> tuple[tuple[int, int] | None, str | None]:
+def _point(run, spec: dict, size: tuple[int, int]) -> tuple[tuple[int, int] | None, str | None, bool]:
     res = _helper(run, "resolve", json.dumps(spec))
     # The guest finds a point where a click reaches the element (hit tests); Windows' agent only
     # says whether it is showing.
     point = res["point"] if "point" in res else (center(res["bbox"]) if res["showing"] else None)
     if point and not _on_screen([*point, 1, 1], size):
         point = None
-    return (tuple(point) if point else None), res.get("covered")
+    return (tuple(point) if point else None), res.get("covered"), bool(res.get("clipped"))
 
 
 def _visible_point(run, spec: dict) -> tuple[int, int]:
@@ -144,15 +146,18 @@ def _visible_point(run, spec: dict) -> tuple[int, int]:
     # A page still building moves what it has already drawn; wait for it, briefly.
     png, _ = display.wait_stable(run.dom(), timeout=2, frames=2)
     size = display.png_size(png)
-    point, covered = _point(run, spec, size)
-    # Scrolled away: the toolkit scrolls it into view. Covered by a sticky bar: to the top, then
-    # the bottom edge of the view, away from it.
+    point, covered, clipped = _point(run, spec, size)
+    # Scrolled away, or cut off by a scrolling container: the toolkit scrolls it into view.
+    # Covered by a sticky bar: to the top, then the bottom edge of the view, away from it.
     for how in ("anywhere", "top", "bottom"):
-        if point or (how != "anywhere" and not covered):
+        if (point and not clipped) or (how != "anywhere" and not covered):
             break
         _helper(run, "scroll", json.dumps(spec), *([] if how == "anywhere" else [how]))
         display.wait_stable(run.dom(), timeout=3)
-        point, covered = _point(run, spec, size)
+        point, covered, clipped = _point(run, spec, size)
+        # Still outside what holds it after scrolling: a menu hanging out of its container's box
+        # is there all the same, as the hit test said.
+        clipped = False
     if point:
         return point
     if covered:

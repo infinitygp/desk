@@ -5,6 +5,7 @@ from unittest import mock
 from desk.a11y import (
     _matches,
     _on_screen,
+    _visible_point,
     center,
     explain_missing,
     format_node,
@@ -56,10 +57,44 @@ class Format(unittest.TestCase):
         snap = {"tops": [{"title": "A", "app": "a", "focus": True, "start": 0}], "nodes": [], "truncated": "time"}
         self.assertIn("took too long", format_snapshot(snap))
 
+    def test_point_where_the_middle_is_cut_off(self):
+        self.assertIn("(329,768)", format_node(node("e9", 0, "link", "abrtd", point=[329, 768])))
+
     def test_geometry(self):
         self.assertEqual(center([10, 20, 100, 40]), (60, 40))
         self.assertTrue(_on_screen([0, 0, 10, 10], (1280, 800)))
         self.assertFalse(_on_screen([100, -950, 20, 20], (1280, 800)))
+
+
+class VisiblePoint(unittest.TestCase):
+    spec = {"pid": 1, "path": [0, 1], "role": "link", "name": "abrtd"}
+
+    def point(self, *answers):
+        replies = iter(answers)
+        calls = []
+
+        def helper(run, cmd, *args):
+            calls.append(cmd)
+            return {} if cmd == "scroll" else next(replies)
+
+        run = SimpleNamespace(dom=lambda: None)
+        with mock.patch("desk.a11y._helper", side_effect=helper), \
+                mock.patch("desk.a11y.display.wait_stable", return_value=(b"", True)), \
+                mock.patch("desk.a11y.display.png_size", return_value=(1280, 800)):
+            return _visible_point(run, self.spec), calls
+
+    def test_cut_off_by_a_scrolling_container_is_scrolled_into_view_first(self):
+        self.assertEqual(self.point({"point": [329, 788], "clipped": True}, {"point": [329, 500], "clipped": False}),
+                         ((329, 500), ["resolve", "scroll", "resolve"]))
+
+    def test_what_scrolling_leaves_outside_its_container_is_clicked_where_it_is_hit(self):
+        # A menu hanging out of the box of what holds it.
+        self.assertEqual(self.point({"point": [329, 788], "clipped": True}, {"point": [329, 788], "clipped": True}),
+                         ((329, 788), ["resolve", "scroll", "resolve"]))
+
+    def test_shown_whole_is_clicked_at_once(self):
+        self.assertEqual(self.point({"point": [329, 500], "clipped": False}), ((329, 500), ["resolve"]))
+        self.assertEqual(self.point({"bbox": [300, 490, 40, 20], "showing": True}), ((320, 500), ["resolve"]))
 
 
 class RemoteCommand(unittest.TestCase):

@@ -1,9 +1,11 @@
 import unittest
+from unittest import mock
 
 try:
-    from desk.guest_a11y import Atspi, placement, stacked_base
+    from desk import guest_a11y
+    from desk.guest_a11y import Atspi, placement, stacked_base, visible_point
 except (ImportError, ValueError):  # no AT-SPI typelib on this host
-    Atspi = placement = stacked_base = None
+    guest_a11y = Atspi = placement = stacked_base = visible_point = None
 
 
 @unittest.skipIf(stacked_base is None, "AT-SPI GObject introspection not installed")
@@ -85,6 +87,34 @@ class Placement(unittest.TestCase):
         self.assertEqual(placement(radio, label, chain, (100, 140)), "label")
         self.assertEqual(placement(radio, Node(label), chain, (100, 140)), "label")
         self.assertEqual(placement(radio, self.footer_button, chain, (100, 140)), "other")
+
+
+
+@unittest.skipIf(visible_point is None, "AT-SPI GObject introspection not installed")
+class CutOff(unittest.TestCase):
+    # Cockpit's services list: the link of the last row reaches 12 px below the bottom of the
+    # plugin's main area, which scrolls, and its middle with it.
+    chain = [(Node(), [0, 32, 1280, 768]), (Node(), [240, 186, 1040, 614]), (Node(), [268, 190, 984, 582])]
+    link = [312, 763, 34, 21]
+
+    def test_the_point_listed_is_one_the_container_shows(self):
+        self.assertEqual(visible_point(self.link, self.chain), (329, 768))
+        self.assertEqual(visible_point([312, 700, 34, 21], self.chain), (329, 710))
+        self.assertIsNone(visible_point([312, 780, 34, 21], self.chain))
+
+    def test_a_click_goes_to_the_part_shown_and_says_when_none_is(self):
+        root = (Node(), ("window", 0, 0), [0, 32, 1280, 768])
+        link = Node()
+        with mock.patch.object(guest_a11y, "hit_at", return_value=link):
+            self.assertEqual(guest_a11y.clickable_point(link, self.link, self.chain, root, True),
+                             ((329, 768), None, False))
+            # All of it below the edge, yet hit-tested as there: clicked, but scrolled first.
+            self.assertEqual(guest_a11y.clickable_point(link, [312, 780, 34, 16], self.chain, root, True),
+                             ((329, 788), None, True))
+        with mock.patch.object(guest_a11y, "hit_at", return_value=None):  # no hit test: what it shows
+            self.assertEqual(guest_a11y.clickable_point(link, self.link, self.chain, root, True),
+                             ((329, 768), None, False))
+            self.assertEqual(guest_a11y.clickable_point(link, self.link, self.chain, root, False), (None, None, False))
 
 
 if __name__ == "__main__":

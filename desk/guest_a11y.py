@@ -306,28 +306,48 @@ def label_of(acc) -> str:
         return "another element"
 
 
-def clickable_point(acc, bbox, chain, root, showing: bool):
-    """A point of `bbox` where a click reaches `acc` (the middle if possible), or None and what
-    covers it. When the toolkit cannot hit-test, the middle of what it reports as showing."""
-    racc, rbase, rbox = root
+def grid(bbox) -> list[tuple[int, int]]:
+    """Points of a box to click, the middle first."""
     x, y, w, h = bbox
+    return [(x + w * fx // 4, y + h * fy // 4)
+            for fx, fy in ((2, 2), (1, 2), (3, 2), (2, 1), (2, 3), (1, 1), (3, 1), (1, 3), (3, 3))]
+
+
+def within(chain, point) -> bool:
+    """Whether every ancestor's box holds the point. Firefox's hit test answers with an element
+    also where a scrolling container cuts it off (a table row below the bottom edge of Cockpit's
+    main area), and a click there reaches nothing. A menu may hang outside the box of what holds
+    it, so this only orders the points tried."""
+    return all(b is None or contains(b, point) for _, b in chain)
+
+
+def visible_point(bbox, chain) -> tuple[int, int] | None:
+    return next((p for p in grid(bbox) if within(chain, p)), None)
+
+
+def clickable_point(acc, bbox, chain, root, showing: bool):
+    """A point of `bbox` where a click reaches `acc` (the middle if possible, one inside every
+    ancestor first), or None and what covers it; and whether that point lies outside an
+    ancestor's box. When the toolkit cannot hit-test, the middle of what it reports as showing."""
+    racc, rbase, rbox = root
     cover, tested = None, False
-    for fx, fy in ((2, 2), (1, 2), (3, 2), (2, 1), (2, 3), (1, 1), (3, 1), (1, 3), (3, 3)):
-        p = (x + w * fx // 4, y + h * fy // 4)
+    for p in sorted(grid(bbox), key=lambda p: not within(chain, p)):
         if rbox is not None and not contains(rbox, p):
             continue
         tested = True
         hit = hit_at(racc, rbase, p)
         where = placement(acc, hit, chain, p)
         if where is None:
-            return (center(bbox) if showing else None), None
+            break
         if where != "other":
-            return p, None
+            return p, None, not within(chain, p)
         cover = cover or label_of(hit)
-    if not tested:
-        # Outside its window's box (a menu hanging below a small window): nothing to ask.
-        return (center(bbox) if showing else None), None
-    return None, cover
+    else:
+        if tested:
+            return None, cover, False
+    # Outside its window's box (a menu hanging below a small window), or the toolkit cannot tell.
+    point = (visible_point(bbox, chain) or center(bbox)) if showing else None
+    return point, None, point is not None and not within(chain, point)
 
 
 def wanted(node, st, parent_name) -> bool:
@@ -407,6 +427,10 @@ def snapshot(opts: dict) -> dict:
         emit = wanted(node, st, parent_name)
         if emit and hits:
             probe(node, acc, chain, root)
+        if emit and node["bbox"] is not None and not node.get("offscreen"):
+            point = visible_point(node["bbox"], chain)
+            if point is not None and point != center(node["bbox"]):
+                node["point"] = list(point)
         if emit and node.get("offscreen"):
             emit = offscreen < MAX_OFFSCREEN
             offscreen += emit
@@ -555,8 +579,9 @@ def resolve(spec: dict) -> dict:
     if bbox is None:
         raise LookupError("element has no on-screen extents")
     showing = "showing" in states(acc)
-    point, cover = clickable_point(acc, bbox, chain, root, showing)
-    return {"bbox": bbox, "showing": showing, "point": list(point) if point else None, "covered": cover}
+    point, cover, clipped = clickable_point(acc, bbox, chain, root, showing)
+    return {"bbox": bbox, "showing": showing, "point": list(point) if point else None, "covered": cover,
+            "clipped": clipped}
 
 
 SCROLL = {"anywhere": Atspi.ScrollType.ANYWHERE, "top": Atspi.ScrollType.TOP_EDGE,

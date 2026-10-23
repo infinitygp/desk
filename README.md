@@ -199,7 +199,11 @@ toast) counts as covering it, and another point of the target or scrolling is tr
 not mark the buttons of sticky footers as showing; when the hit test reaches the footer around
 them, they count as visible. A label of the target (AT-SPI's labelled-by) over it does not cover
 it: a click on a label reaches its control, and PatternFly's selectable tiles lay one over the
-whole card, radio button included. `desk a11y` marks covered elements. `desk set-text` focuses the
+whole card, radio button included. Firefox's hit test also answers with an element where a
+scrolling container cuts it off (a table row reaching below Cockpit's main area), so the points
+tried come inside every ancestor's box first, `desk a11y` lists such a point rather than the
+middle, and an element with none there is scrolled into view first; a menu hanging out of its
+container's box stays clickable where the hit test finds it. `desk a11y` marks covered elements. `desk set-text` focuses the
 field, selects all and types (or pastes through the shell extension's `SetClipboard`), since
 AT-SPI's text replacement leaves web pages' input events out. `desk type` into a browser window
 whose focus is not in a text field is refused. Walks of the tree stop after 20 s.
