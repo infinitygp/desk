@@ -206,13 +206,17 @@ class Open(unittest.TestCase):
         for shown, asked in (("https://app.test/", "https://App.Test"), ("https://app.test/", "http://app.test/"),
                              ("file:///home/tester/x.html", "file:/home/tester/x.html"),
                              ("https://app.test/system/services#/x", "https://app.test/system"),
-                             ("https://app.test/a?b=1", "https://app.test/a?b=1")):
+                             ("https://app.test/a?b=1", "https://app.test/a?b=1"),
+                             ("https://app.test/system?x=1", "https://app.test/system"),
+                             ("https://app.test/a?b=1&c=2", "https://app.test/a?b=1")):
             with self.subTest(shown=shown, asked=asked):
                 self.assertTrue(browser.under(shown, asked))
         for shown, asked in (("https://app.test/login", "https://app.test/dashboard"),
                              ("https://other.test/", "https://app.test/"), ("about:home", "https://app.test/"),
                              ("https://app.test/example", "https://app.test/example#/tasks"),
-                             ("https://app.test/example#/overview", "https://app.test/example#/tasks")):
+                             ("https://app.test/example#/overview", "https://app.test/example#/tasks"),
+                             ("https://app.test/systemd", "https://app.test/system"),
+                             ("https://app.test/a?b=10", "https://app.test/a?b=1")):
             with self.subTest(shown=shown, asked=asked):
                 self.assertFalse(browser.under(shown, asked))
         self.assertTrue(browser.under("https://app.test/example#/tasks/1", "https://app.test/example#/tasks"))

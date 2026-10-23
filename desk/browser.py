@@ -268,7 +268,9 @@ def under(shown: str, asked: str, fragment: bool = True) -> bool:
     unless `fragment` is false."""
     (scheme, host, path), (wanted_scheme, wanted_host, wanted_path) = \
         _address(shown, fragment), _address(asked, fragment)
-    return (scheme, host) == (wanted_scheme, wanted_host) and path.startswith(wanted_path)
+    # Below it, not only starting like it: /systemd is not a page of /system.
+    rest = path[len(wanted_path):] if path.startswith(wanted_path) else None
+    return (scheme, host) == (wanted_scheme, wanted_host) and rest is not None and rest[:1] in ("", "/", "?", "#", "&")
 
 
 RDM_CLOSE = "Close Responsive Design Mode"
