@@ -27,7 +27,8 @@ instead, where Cockpit is not installed, as on a fresh Workstation: a plugin tha
 
 - `desk browser viewport 390x700` gives pages 390x700 CSS pixels through Firefox's responsive
   design mode (Firefox's window cannot get that narrow) and prints the `desk shot --region` of the
-  page area; `desk browser viewport reset` closes the mode. Cockpit collapses its menu at that
+  page area; `desk browser viewport reset` closes the mode (in a scenario: `viewport = "390x700"`,
+  `viewport = "reset"`, and `open = "/plugin#/page"` for a page). Cockpit collapses its menu at that
   width, so the plugin's iframe gets the whole width. The screen is 800 pixels high: taller
   viewports run past its bottom (`desk display --resolution` to a taller mode the monitor offers).
 - The plugin's iframe is same-origin, so the web console (`desk key ctrl+shift+k`) can measure it:

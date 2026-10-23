@@ -99,23 +99,28 @@ def _linux(run):
     return spec
 
 
+def address(target: str) -> bool:
+    """A path on the site shown (/system/services) or a whole address, which open_url takes."""
+    return target.startswith("/") or "://" in target or target.startswith(("about:", "file:", "data:"))
+
+
 def open_url(run, target: str, timeout: float = 30) -> tuple[str, str]:
     """Open an address in the guest's Firefox the way another program would (`firefox URL`),
     which replaces the page in the current tab (desk-firefox.js); a path (/system/services) is
     taken relative to the page shown now. Returns the address the page ended up at and the one
     that was opened."""
     _linux(run)
+    if not address(target):
+        raise DeskError(f"give a whole address (https://{target}) or a path starting with /: "
+                        "Firefox would guess the scheme, http:// for most hosts")
     before = a11y.page_url(run).get("url")
     if target.startswith("/"):
         if not before:
             raise DeskError(f"no page in a focused Firefox window to open {target} on; give the whole address")
         parts = urlsplit(before)
         url = f"{parts.scheme}://{parts.netloc}{target}"
-    elif "://" in target or target.startswith(("about:", "file:", "data:")):
-        url = target
     else:
-        raise DeskError(f"give a whole address (https://{target}) or a path starting with /: "
-                        "Firefox would guess the scheme, http:// for most hosts")
+        url = target
     dom = run.dom()
     deadline = time.monotonic() + timeout
     if urlsplit(url).fragment and before and _address(before, False) == _address(url, False):

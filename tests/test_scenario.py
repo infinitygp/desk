@@ -75,6 +75,10 @@ reboot = true
             'image = "a"\n[[step]]\ntype = "x"\nrole = "text"',
             'image = "a"\n[[step]]\nexec = "true"\nenv = {A = "1"}',
             'image = "a"\n[[step]]\nclick = "x',                   # not TOML
+            'image = "a"\n[[step]]\nopen = "localhost:9090/x"',     # Firefox would guess http://
+            'image = "a"\n[[step]]\nviewport = "390 x 700"',
+            'image = "a"\n[[step]]\nviewport = "phone"',
+            'image = "a"\n[[step]]\nviewport = "390x700"\ntimeout = 5',
         ):
             with self.subTest(text=text), self.assertRaises(DeskError):
                 scenario.load(write(text))
@@ -133,8 +137,17 @@ anywhere = true
 prepare = "admin"
 [[step]]
 disk_add = "8G:data"
+[[step]]
+open = "/example#/tasks"
+timeout = 60
+[[step]]
+open = "https://localhost:9090/"
+[[step]]
+viewport = "390x700"
+[[step]]
+viewport = "reset"
 '''))
-        self.assertEqual(len(data["step"]), 11)
+        self.assertEqual(len(data["step"]), 15)
 
     def test_a_missing_file_is_a_mistake_too(self):
         with self.assertRaisesRegex(DeskError, "No such file"):

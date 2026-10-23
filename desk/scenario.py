@@ -16,7 +16,7 @@ from .steps import Steps
 
 # Exactly one per step; the value is the action's argument.
 ACTIONS = {"root", "exec", "gui", "focus", "click", "type", "key", "expect", "expect_absent", "shot",
-           "reboot", "wait", "clock", "disk_add", "disk_rm", "console_errors", "prepare"}
+           "reboot", "wait", "clock", "disk_add", "disk_rm", "console_errors", "prepare", "open", "viewport"}
 OPTIONS = {"role", "exact", "timeout", "output", "rc", "name", "soft", "env", "step", "until", "anywhere"}
 # The options each action reads, besides name and soft; any other would be ignored without a word.
 READS = {
@@ -24,6 +24,7 @@ READS = {
     "gui": {"env"}, "click": {"role", "exact", "timeout"}, "type": {"anywhere"},
     "expect": {"role", "exact", "timeout"}, "expect_absent": {"role", "exact", "timeout"},
     "reboot": {"timeout"}, "wait": {"timeout"}, "clock": {"step", "timeout"}, "disk_rm": {"timeout"},
+    "open": {"timeout"},
 }
 
 
@@ -49,6 +50,9 @@ VALUES = {
     "prepare": (lambda v: v is True or _text(v), "true or the name of a prepare step"),
     "wait": (lambda v: v is True or (_number(v) and v > 0), "true (until the screen is still) or seconds"),
     "console_errors": (lambda v: isinstance(v, int) and not isinstance(v, bool) and v >= 0, "a count, e.g. 0"),
+    "open": (lambda v: _text(v) and browser.address(v), "a path on the site shown (/system) or a whole address"),
+    "viewport": (lambda v: isinstance(v, str) and (v == "reset" or re.fullmatch(r"[1-9]\d*x[1-9]\d*", v)),
+                 "WIDTHxHEIGHT (390x700) or reset"),
     "role": (_text, "a text"), "output": (_text, "a text"), "name": (_text, "a text"), "step": (_text, "a text"),
     "timeout": (lambda v: _number(v) and v > 0, "seconds"),
     "rc": (lambda v: isinstance(v, int) and not isinstance(v, bool), "an exit code"),
@@ -308,6 +312,12 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
         hook = "prepare" if value is True else value
         run_prepare(spec, run, hook)
         return f"{hook} done"
+    elif action == "open":
+        # A page that did not load fails the step; one the site sent elsewhere (a login) says so.
+        shown, asked = browser.open_url(run, value, timeout=timeout or 30)
+        return shown if browser.under(shown, asked) else f"{shown} (opened {asked})"
+    elif action == "viewport":
+        return browser.viewport(run, value)
     elif action == "disk_add":
         return f"disk {disks.add(run, *disks.parse(value))} plugged in"
     elif action == "disk_rm":
