@@ -61,6 +61,19 @@ class WaitForMemory(unittest.TestCase):
         idle.assert_not_called()
         later.assert_called_once()
 
+    def test_an_idle_run_of_the_image_goes_first(self):
+        # It may hold the warm state this start restores; another image's idle run does not.
+        for image, waits in (("fedora-44-gnome", True), ("windows-11", False)):
+            idle_run = SimpleNamespace(image=image, idle=lambda: 3 * 3600)
+            with self.subTest(image=image), mock.patch.object(runs, "state_lock", return_value=nullcontext()), \
+                    mock.patch.object(runs, "gc"), mock.patch.object(runs, "check_memory"), \
+                    mock.patch.object(runs, "_up"), mock.patch.object(runs, "all_runs", return_value=[idle_run]), \
+                    mock.patch.object(runs, "gc_idle") as idle, \
+                    mock.patch.object(runs, "_gc_idle_in_background") as later, \
+                    mock.patch("desk.maintain.check_usable", return_value=[]):
+                runs.up(SPEC)
+            self.assertEqual((idle.called, later.called), (waits, not waits))
+
 
 class IdleRunsInTheBackground(unittest.TestCase):
     def test_the_background_cleanup_runs(self):

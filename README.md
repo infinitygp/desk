@@ -277,7 +277,8 @@ UTC times made local, timeline with screenshots); `--diff` adds the files the ru
 from `virt-diff` against the image the run started from. `desk gc` removes reports older than
 14 days, and writes the report of an idle run before destroying it, unless its owner comes back
 meanwhile. Every `desk up` starts the same in the background (`logs/gc-idle.log`) and does it
-itself only while it waits for memory: another run's report and video can take minutes. One command at a time takes a run down; a second `desk down` of
+itself only while it waits for memory, or when an idle run of its image may hold the warm state it
+restores: another run's report and video can take minutes. One command at a time takes a run down; a second `desk down` of
 it is refused. When the guest could not be asked, the report says "NOT CHECKED" instead of
 counting nothing.
 

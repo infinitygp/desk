@@ -257,3 +257,26 @@ class Timeline(unittest.TestCase):
         self.assertTrue(timeline[0].endswith("…`"))
         self.assertLess(max(len(line) for line in timeline), 180)
         self.assertIn("failed at step 1 (root set -e echo step", md)
+
+
+class PruneReports(unittest.TestCase):
+    def test_a_report_another_gc_removes_meanwhile_is_skipped(self):
+        import os
+        import tempfile
+
+        from desk import evidence
+
+        with tempfile.TemporaryDirectory() as tmp:
+            for name in ("old", "gone", "new"):
+                (Path(tmp) / name).mkdir()
+            os.utime(Path(tmp) / "old", (0, 0))
+            stat = Path.stat
+
+            def vanishing(path, *args, **kwargs):
+                if path.name == "gone":
+                    raise FileNotFoundError(path)
+                return stat(path, *args, **kwargs)
+
+            with mock.patch.object(evidence, "REPORTS", Path(tmp)), mock.patch.object(Path, "stat", vanishing):
+                evidence.prune_reports(verbose=False)
+            self.assertEqual(sorted(p.name for p in Path(tmp).iterdir()), ["gone", "new"])

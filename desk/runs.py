@@ -575,7 +575,13 @@ def up(spec: ImageSpec, run_id: str | None = None, cold: bool = False, force: bo
         _checked_id(run_id)
     for warning in check_usable(spec):
         print(f"[desk] warning: {warning}", file=sys.stderr)
-    _gc_idle_in_background()
+    ttl = idle_ttl()
+    if any(r.image == spec.name and r.idle() > ttl for r in all_runs()):
+        # An idle run of this image may hold the warm state this start restores (a restore keeps
+        # the saved UUID): it goes first, or this run would boot cold.
+        gc_idle()
+    else:
+        _gc_idle_in_background()
     # Short of memory, wait in line for other runs to end (parallel scenarios) rather than fail;
     # the lock is let go meanwhile, as ending a run needs it too.
     deadline = time.monotonic() + MEMORY_WAIT

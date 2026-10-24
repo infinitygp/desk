@@ -595,7 +595,13 @@ def prune_reports(verbose: bool = True) -> None:
     if not REPORTS.exists():
         return
     cutoff = time.time() - REPORT_RETENTION_DAYS * 86400
-    old = [d for d in REPORTS.iterdir() if d.is_dir() and d.stat().st_mtime < cutoff]
+    old = []
+    for d in REPORTS.iterdir():
+        try:
+            if d.is_dir() and d.stat().st_mtime < cutoff:
+                old.append(d)
+        except FileNotFoundError:
+            continue  # removed meanwhile by another desk's gc
     for d in old:
         shutil.rmtree(d, ignore_errors=True)
     if old and verbose:
