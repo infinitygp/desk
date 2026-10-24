@@ -47,8 +47,8 @@ guest; whatever talks to one is tried in one before it is committed:
 - Failure paths count: make the thing fail (a fake `gst-launch-1.0` first in `PATH`, a second
   process holding a lock, `DESK_TTL=5 bin/desk gc`) and look at what is left afterwards
   (`bin/desk ls`, `virsh -c qemu:///session list`).
-- Scenario files of other projects (`~/Projects/*/test/desk/*.toml`) must still pass
-  `bin/desk scenario check`.
+- Scenario files of the projects on the host that use desk (their `test/desk/*.toml`) must still
+  pass `bin/desk scenario check`.
 
 ### Image definitions (`images/`)
 
@@ -115,7 +115,7 @@ A release is the single file `desk.pyz`; hosts that only use desk install and up
 - Runs of other agents and of the user exist on the same host. Touch only runs you started
   (`bin/desk ls` shows who holds each); never `desk down --all`, never `virsh destroy` a domain
   you did not create.
-- `sudo` is not available. What needs it is given to the user as a command.
+- Do not call `sudo`: what needs it is given to the user as a command.
 - Take down what you started, and delete the reports of your own check runs
   (`<home>/reports/<run>`) when they hold nothing worth keeping.
 
