@@ -102,7 +102,7 @@ names (kickstart or `user-data`, `provision.sh`, `prepare.py`); shared provision
 A variant (`base = "..."`) reuses its base's installed disk and has a warm state of its own. It
 inherits every setting, with the base's file references relative to the base; a `provision` of its
 own replaces the base's, so it names the base's script first (`provision =
-["../fedora-44-gnome/provision.sh", "provision.sh"]`). A variant is not the base of another.
+["../_shared/gnome/provision.sh", "provision.sh"]`). A variant is not the base of another.
 
 `prepare = "prepare.py"` runs `prepare(steps)` on the host once the provisioned session is up,
 before the warm state is saved (and after cold boots): what a user does before the tests start,
@@ -123,8 +123,9 @@ Provisioning (`provision`, `files`) runs in the warm-up's first boot, which then
 cleanly. That disk (`provisioned.qcow2` in the warm build) is what the warm state boots before it
 is saved and what cold runs boot, so both start from the same files and cold runs skip
 provisioning and the relogin; with no current warm build they boot the base disk and provision it.
-On the GNOME images it installs the shell extension, the keyboard layout and accessibility
-settings, and masks GNOME Software, whose banners and prompts would cover the app under test.
+On the GNOME images (one script for Fedora and Arch, `images/_shared/gnome/provision.sh`) it
+installs the shell extension, the keyboard layout and accessibility settings, and masks GNOME
+Software, whose banners and prompts would cover the app under test.
 Every script has `DESK_TIMEZONE` (an IANA name), `DESK_POSIX_TZ` (its POSIX rule, from the host's
 zone file, for OpenWrt) and `DESK_LAYOUT` in its environment; the installs themselves are UTC and
 US.

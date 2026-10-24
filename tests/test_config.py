@@ -18,7 +18,7 @@ class Variants(unittest.TestCase):
 
     def test_variant_paths_stay_relative_to_their_image(self):
         ck = load_image("fedora-44-cockpit")
-        self.assertEqual(ck.provision_scripts, ["../fedora-44-gnome/provision.sh", "provision.sh"])
+        self.assertEqual(ck.provision_scripts, ["../_shared/gnome/provision.sh", "provision.sh"])
         for script in ck.provision_scripts:
             self.assertTrue((ck.dir / script).is_file(), script)
         for d in ck.files:
@@ -65,12 +65,12 @@ class HostImages(unittest.TestCase):
 
     def test_a_variant_of_a_shipped_image(self):
         self.define("fedora-44-gnome-xx", 'base = "fedora-44-gnome"\n'
-                    'provision = ["../fedora-44-gnome/provision.sh", "provision.sh"]\n', **{"provision.sh": "true\n"})
+                    'provision = ["../_shared/gnome/provision.sh", "provision.sh"]\n', **{"provision.sh": "true\n"})
         self.assertIn("fedora-44-gnome-xx", list_images())
         xx = load_image("fedora-44-gnome-xx")
         self.assertEqual(xx.base_disk, load_image("fedora-44-gnome").base_disk)
         self.assertEqual([xx.path(s) for s in xx.provision_scripts],
-                         [IMAGES_DIR / "fedora-44-gnome" / "provision.sh", LOCAL_IMAGES / "fedora-44-gnome-xx" / "provision.sh"])
+                         [IMAGES_DIR / "_shared" / "gnome" / "provision.sh", LOCAL_IMAGES / "fedora-44-gnome-xx" / "provision.sh"])
         [files] = xx.files
         self.assertTrue((xx.path(files) / "desk-helper@desk.local" / "extension.js").is_file())
 

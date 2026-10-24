@@ -57,7 +57,7 @@ class Release(unittest.TestCase):
         with zipfile.ZipFile(self.pyz) as z:
             names = set(z.namelist())
             build = json.loads(z.read("BUILD.json"))
-            provision = z.getinfo("images/fedora-44-gnome/provision.sh")
+            provision = z.getinfo("images/_shared/gnome/provision.sh")
         self.assertLessEqual({"__main__.py", "desk/cli.py", "desk/guest_a11y.py", "images/windows-11/image.toml",
                               "images/_shared/windows/agent.ps1", "skill/SKILL.md"}, names)
         self.assertFalse([n for n in names if n.startswith(("tests/", ".git", "dist/")) or "__pycache__" in n])
@@ -88,7 +88,7 @@ class Release(unittest.TestCase):
         self.assertIn(f"desk v9.9.9-test (release ", r.stdout)
         self.assertIn(str(self.pyz), r.stdout)
         [unpacked] = (home / ".cache" / "desk").iterdir()
-        self.assertTrue(os.access(unpacked / "images/fedora-44-gnome/provision.sh", os.X_OK))
+        self.assertTrue(os.access(unpacked / "images/_shared/gnome/provision.sh", os.X_OK))
 
     def test_install_and_update_without_the_repository(self):
         home = self.home()
