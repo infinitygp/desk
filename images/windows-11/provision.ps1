@@ -23,11 +23,21 @@ New-ItemProperty $store -Name AutoDownload -Value 2 -PropertyType DWord -Force |
 # Defender skips where tests run and write programs (profiles, program folders, temporary files and
 # installers), so it takes no time from them. Tamper Protection keeps real-time protection on (only
 # a click in Windows Security turns it off), but a local administrator may still exclude folders;
-# AMSI blocks a script that excludes the whole drive as malicious.
+# AMSI blocks a script that excludes the whole drive as malicious. The install's Defender is the
+# ISO's: a few minutes after boot it updates its platform and restarts, and meanwhile its settings
+# can be neither read nor changed (0x800106ba), so they are tried until they hold.
 $skip = 'C:\Users', 'C:\desk', 'C:\Program Files', 'C:\Program Files (x86)', 'C:\ProgramData', 'C:\Windows\Temp', 'C:\Windows\Installer'
-Add-MpPreference -ExclusionPath $skip
-$missing = $skip | Where-Object { (Get-MpPreference).ExclusionPath -notcontains $_ }
-if ($missing) { throw "Defender did not exclude $($missing -join ', ')" }
+$deadline = (Get-Date).AddMinutes(10)
+while ($true) {
+    try {
+        Add-MpPreference -ExclusionPath $skip
+        $missing = $skip | Where-Object { (Get-MpPreference).ExclusionPath -notcontains $_ }
+        if (-not $missing) { break }
+        $why = "did not exclude $($missing -join ', ')"
+    } catch { $why = $_.Exception.Message.Trim() }
+    if ((Get-Date) -gt $deadline) { throw "Defender, for 10 minutes: $why" }
+    Start-Sleep 10
+}
 
 # The same desktop every time: Windows Spotlight changes the wallpaper daily and adds a "Learn
 # about this picture" icon, which would differ between screenshots and between icon layouts.
