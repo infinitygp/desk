@@ -252,6 +252,20 @@ class ChromiumPages(unittest.TestCase):
             with self.assertRaisesRegex(LookupError, "did not answer in time"):
                 guest_a11y.showing_walk(top, lambda a: None, time.monotonic() - 1)
 
+    def test_the_responsive_design_mode_is_looked_for_outside_the_page(self):
+        class Untouched(Tree):
+            def get_child_count(self):
+                raise AssertionError("the page's own tree was walked")
+
+        top = Tree("frame", children=[Tree("panel", children=[Tree("document web", children=[Untouched("table")])])])
+        app = Tree("application", "Firefox", toolkit=("Gecko", "158.0.1"))
+        app.get_process_id = lambda: 7
+        with mock.patch.object(guest_a11y, "front_toplevel", return_value=({"title": ""}, app, top)), \
+                mock.patch.object(guest_a11y, "shell_windows", return_value=[]), \
+                mock.patch.object(guest_a11y, "Mapper"), \
+                mock.patch.object(guest_a11y, "states", return_value={"showing"}):
+            self.assertEqual(guest_a11y.rdm({}), {"open": False})
+
     def test_the_page_behind_docked_devtools(self):
         # The address bar first, then DevTools (desk browser viewport opens them), then the page.
         bar = Tree("entry", attrs={"class": guest_a11y.OMNIBOX})

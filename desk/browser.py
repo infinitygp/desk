@@ -208,7 +208,14 @@ def open_url(run, target: str, timeout: float = 30, browser: str | None = None) 
             time.sleep(1)
     arrived = seen = None
     while time.monotonic() < deadline and not arrived:
-        shown = a11y.page_url(run)
+        try:
+            shown = a11y.page_url(run)
+        except guest.NoConnection:
+            raise
+        except DeskError:
+            # A browser busy loading the page answers its tree slowly: asked again while there is time.
+            time.sleep(0.5)
+            continue
         current = shown.get("url")
         seen = current or seen
         # The document is there; what follows "#" a page may rewrite itself (its own routes),

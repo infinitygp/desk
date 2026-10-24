@@ -879,7 +879,9 @@ def rdm(opts) -> dict:
         if a.get_role_name() == "embedded" and (a.get_name() or "").startswith(RDM_TOOLBAR):
             found.append(a)
             return True
-        return None
+        # The toolbar is the browser's (frame > panel > scroll pane > internal frame), never inside
+        # a page: a large page would otherwise take the walk past its time.
+        return False if a.get_role_name() == "document web" else None
 
     showing_walk(top, visit, time.monotonic() + 5)
     if not found or base is None:

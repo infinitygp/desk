@@ -103,7 +103,13 @@ class Open(unittest.TestCase):
             (opened if opened is not None else []).append(command)
             return started
 
-        with mock.patch("desk.browser.a11y.page_url", side_effect=lambda run: next(answers, last)), \
+        def page_url(run):
+            page = next(answers, last)
+            if isinstance(page, Exception):
+                raise page
+            return page
+
+        with mock.patch("desk.browser.a11y.page_url", side_effect=page_url), \
                 mock.patch("desk.browser.a11y.focus",
                            side_effect=lambda run, name: (focused if focused is not None else []).append(name)), \
                 mock.patch("desk.browser.guest.ssh_run", side_effect=ssh_run), \
@@ -113,6 +119,10 @@ class Open(unittest.TestCase):
     def test_loaded(self):
         self.assertEqual(self.open([{"url": "about:home"}, {"url": "https://app.test/"}]),
                          ("https://app.test/", "https://app.test/"))
+
+    def test_a_browser_busy_loading_is_asked_again(self):
+        slow = DeskError("the focused window did not answer in time while its accessibility tree was read")
+        self.assertEqual(self.open([{"url": "about:home"}, slow, {"url": "https://app.test/"}])[0], "https://app.test/")
 
     def test_sent_elsewhere_by_the_site(self):
         self.assertEqual(self.open([{"url": "about:home"}, {"url": "https://app.test/login"}], "https://app.test/x"),
