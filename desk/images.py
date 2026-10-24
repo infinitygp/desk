@@ -17,7 +17,7 @@ from pathlib import Path
 import libvirt
 
 from . import display, guest, steps
-from .config import BASE, CACHE, IMAGES_DIR, LOGS, SSH_KEY, WARM, DeskError, ImageSpec
+from .config import BASE, CACHE, IMAGE_ROOTS, LOGS, SSH_KEY, WARM, DeskError, ImageSpec
 from .virt import conn, free_port, lookup, prepare_domain_xml, qemu_img_overlay, reflink_copy
 
 
@@ -82,20 +82,23 @@ def _settings(spec: ImageSpec, keys) -> str:
     return json.dumps(data, sort_keys=True, default=str)
 
 
-def _hash_files(h, base: Path, rels: list[str]) -> None:
+def _hash_files(h, spec: ImageSpec, rels: list[str]) -> None:
+    roots = [r.resolve() for r in IMAGE_ROOTS]
     for rel in rels:
-        src = (base / rel).resolve()
+        src = spec.path(rel).resolve()
         for f in [src] if src.is_file() else sorted(q for q in src.rglob("*") if q.is_file()):
-            h.update(str(f.relative_to(IMAGES_DIR)).encode() + b"\0" + f.read_bytes() + b"\0")
+            # Named within its root: a definition moved to the host's own keeps its builds.
+            name = next((f.relative_to(r) for r in roots if f.is_relative_to(r)), f)
+            h.update(str(name).encode() + b"\0" + f.read_bytes() + b"\0")
 
 
 def install_fingerprint(spec: ImageSpec) -> str:
     h = hashlib.sha256(_settings(spec, INSTALL_KEYS).encode())
     # Install files that provisioning copies again at every warm-up (Windows' agent) do not
     # need a new install when they change.
-    refreshed = {(spec.dir / f).resolve() for f in spec.files or []}
-    _hash_files(h, spec.dir, [f for f in (spec.kickstart, spec.user_data, spec.unattend, spec.disk_files) if f]
-                + [f for f in spec.unattend_files or [] if (spec.dir / f).resolve() not in refreshed])
+    refreshed = {spec.path(f).resolve() for f in spec.files or []}
+    _hash_files(h, spec, [f for f in (spec.kickstart, spec.user_data, spec.unattend, spec.disk_files) if f]
+                + [f for f in spec.unattend_files or [] if spec.path(f).resolve() not in refreshed])
     return h.hexdigest()
 
 
@@ -103,7 +106,7 @@ def warm_fingerprint(spec: ImageSpec) -> str:
     """Everything a warm state depends on besides the base disk: the whole image definition and
     the provisioning scripts and files."""
     h = hashlib.sha256(_settings(spec, {f.name for f in fields(spec)} - set(NOT_IN_GUEST)).encode())
-    _hash_files(h, spec.dir, spec.provision_scripts + list(spec.files or []) + ([spec.prepare] if spec.prepare else []))
+    _hash_files(h, spec, spec.provision_scripts + list(spec.files or []) + ([spec.prepare] if spec.prepare else []))
     return h.hexdigest()
 
 
@@ -250,7 +253,7 @@ def _fetch_disk_image(spec: ImageSpec) -> Path:
 
 
 def _render(spec: ImageSpec, template: str) -> str:
-    return _fill(spec, (spec.dir / template).read_text(), template)
+    return _fill(spec, spec.path(template).read_text(), template)
 
 
 def _pubkey() -> str:
@@ -359,7 +362,7 @@ def _disk_files_tar(spec: ImageSpec, out: Path) -> None:
     """`disk_files` as a tar of files owned by root, 0644 or 0755 whatever the checkout's umask
     (dropbear refuses keys in a group-writable /etc/dropbear), text files filled in like the other
     templates. No directory entries: directories already in the image keep their modes."""
-    src = (spec.dir / spec.disk_files).resolve()
+    src = spec.path(spec.disk_files).resolve()
     with tarfile.open(out, "w") as tar:
         for f in sorted(src.rglob("*")):
             if f.is_dir() and not f.is_symlink():
@@ -410,10 +413,10 @@ def _unattend_iso(spec: ImageSpec, work: Path) -> Path:
     root = work / "unattend"
     shutil.rmtree(root, ignore_errors=True)
     root.mkdir(parents=True)
-    xml = (spec.dir / spec.unattend).read_text().replace("@IMAGE_INDEX@", str(spec.image_index))
+    xml = spec.path(spec.unattend).read_text().replace("@IMAGE_INDEX@", str(spec.image_index))
     (root / "Autounattend.xml").write_text(xml)
     for item in spec.unattend_files or []:
-        src = (spec.dir / item).resolve()
+        src = spec.path(item).resolve()
         for f in ([src] if src.is_file() else sorted(src.iterdir())):
             shutil.copy(f, root / f.name)
     (root / "authorized_keys").write_text(_pubkey())
@@ -528,14 +531,14 @@ def provision(spec: ImageSpec, port: int, relogin: bool = True) -> None:
             "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }; "
             "Get-ChildItem C:\\desk -File | ForEach-Object { $_.IsReadOnly = $false }"), capture=True, timeout=60)
         for d in spec.files:
-            for f in sorted((spec.dir / d).resolve().iterdir()):
+            for f in sorted(spec.path(d).resolve().iterdir()):
                 if guest.scp(port, str(f), f"{spec.root_user}@127.0.0.1:C:/desk/{f.name}") != 0:
                     raise DeskError(f"copying {f.name} to the guest failed")
     elif spec.files:
         buf = io.BytesIO()
         with tarfile.open(fileobj=buf, mode="w") as tar:
             for d in spec.files:
-                src = (spec.dir / d).resolve()
+                src = spec.path(d).resolve()
                 for item in sorted(src.iterdir()):
                     tar.add(item, arcname=item.name)
         r = guest.ssh_run(port, spec.root_user, "rm -rf /tmp/desk-provision && mkdir -p /tmp/desk-provision/files && "
@@ -547,13 +550,13 @@ def provision(spec: ImageSpec, port: int, relogin: bool = True) -> None:
             if spec.family == "windows":
                 # Not piped to `-Command -`: PowerShell reads that like an interactive prompt and
                 # silently skips a multi-line block at the end of the script.
-                if guest.scp(port, str(spec.dir / script), f"{spec.root_user}@127.0.0.1:C:/desk/provision.ps1") != 0:
+                if guest.scp(port, str(spec.path(script)), f"{spec.root_user}@127.0.0.1:C:/desk/provision.ps1") != 0:
                     r = subprocess.CompletedProcess([], 255, b"", b"copying the script failed")
                 else:
                     r = guest.ssh_run(port, spec.root_user, "powershell.exe -NoProfile -ExecutionPolicy Bypass "
                                       "-File C:\\desk\\provision.ps1", capture=True, timeout=PROVISION_TIMEOUT)
             else:
-                r = guest.ssh_run(port, spec.root_user, f"{spec.shell} -s", input=(spec.dir / script).read_bytes(), capture=True,
+                r = guest.ssh_run(port, spec.root_user, f"{spec.shell} -s", input=spec.path(script).read_bytes(), capture=True,
                                   timeout=PROVISION_TIMEOUT)
             # 255: the connection itself broke. Windows does that now and then during its first
             # boot after setup; provisioning scripts are idempotent, so run it again.

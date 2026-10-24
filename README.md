@@ -58,7 +58,6 @@ A host keeps the images it tests on: none is required, and nothing builds them u
 |---|---|---|
 | `fedora-44-gnome` | kickstart over the network | default |
 | `fedora-45-gnome` | kickstart, the beta's installer tree, the release's packages | next release; follows it once it is out |
-| `fedora-44-gnome-pl` | variant of `fedora-44-gnome` | Polish locale; shares the base disk, own warm state |
 | `fedora-44-cockpit` | variant of `fedora-44-gnome` | Cockpit, Firefox logged in with administrative access |
 
 The images with a desktop on Linux have Chromium (`chromium` in `ks.cfg` and `user-data`), the
@@ -116,6 +115,12 @@ bin/desk image list                    # state, build date, last selftest, licen
 
 Shared provisioning files live in `images/_shared/`. A variant (`base = "..."` in its
 `image.toml`) inherits the base image's settings and adds provisioning scripts.
+
+Images only one host needs (a variant in its language, one for its hardware) are defined on that
+host, in `~/.config/desk/images/<name>/` (`$XDG_CONFIG_HOME`), laid out like `images/`. desk lists
+and maintains them with the shipped ones, and their paths reach the shipped definitions as if they
+were among them (`provision = ["../fedora-44-gnome/provision.sh", "provision.sh"]`). A name is in
+one of the two places only; a definition moved from one to the other keeps its builds.
 
 `prepare = "prepare.py"` in `image.toml` runs `prepare(steps)` on the host once the provisioned
 session is up, before the warm state is saved (and after cold boots): what a user does before the

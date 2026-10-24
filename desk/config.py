@@ -30,6 +30,10 @@ def version() -> str:
 # What differs from host to host lives outside the repository: where images and runs are kept
 # (`home`), which libvirt to use (`uri`). The environment wins over the file.
 CONFIG_FILE = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "desk" / "config.toml"
+# Image definitions of this host's own (one in its language, one for its hardware), beside the
+# shipped ones and like them, a directory per image.
+LOCAL_IMAGES = CONFIG_FILE.parent / "images"
+IMAGE_ROOTS = (IMAGES_DIR, LOCAL_IMAGES)
 
 
 def _local() -> dict:
@@ -224,6 +228,19 @@ class ImageSpec:
             raise DeskError(f"{what} needs a desktop session, and {self.name} has none (its screen is a text "
                             "console); use desk exec, desk forward PORT for a web interface, desk shot, key, type")
 
+    def path(self, rel: str) -> Path:
+        """A file the definition names, relative to its directory. The shipped definitions and the
+        host's own are one tree for this: a host's variant reaches its base's files as
+        `../fedora-44-gnome/provision.sh` like a shipped one."""
+        own = self.dir / rel
+        if own.exists():
+            return own
+        for root in IMAGE_ROOTS:
+            p = Path(os.path.normpath(root / self.dir.name / rel))
+            if root != self.dir.parent and p.exists():
+                return p
+        return own
+
     @property
     def provision_scripts(self) -> list[str]:
         if not self.provision:
@@ -236,16 +253,22 @@ class ImageSpec:
         return WARM / (f"{self.name}.{self.warm_version}" if self.warm_version else self.name)
 
 
+def _image_dir(name: str) -> Path | None:
+    found = [root / name for root in IMAGE_ROOTS if (root / name / "image.toml").is_file()]
+    if len(found) > 1:
+        raise DeskError(f"image {name!r} is defined twice, in {found[0]} and in {found[1]}: rename the host's own")
+    return found[0] if found else None
+
+
 def load_image(name: str) -> ImageSpec:
-    d = IMAGES_DIR / name
+    d = _image_dir(name)
+    if d is None:
+        raise DeskError(f"unknown image {name!r} (known: {', '.join(list_images()) or 'none'})")
     spec = d / "image.toml"
-    if not spec.is_file():
-        known = ", ".join(sorted(p.name for p in IMAGES_DIR.iterdir() if (p / "image.toml").is_file()))
-        raise DeskError(f"unknown image {name!r} (known: {known or 'none'})")
     data = _toml(spec)
     if "base" in data:
-        parent_dir = IMAGES_DIR / data["base"]
-        if not (parent_dir / "image.toml").is_file():
+        parent_dir = _image_dir(data["base"])
+        if parent_dir is None:
             raise DeskError(f"{name}: its base image {data['base']!r} does not exist")
         parent = _toml(parent_dir / "image.toml")
         if "base" in parent:
@@ -279,4 +302,5 @@ def _toml(path: Path) -> dict:
 
 
 def list_images() -> list[str]:
-    return sorted(p.name for p in IMAGES_DIR.iterdir() if (p / "image.toml").is_file())
+    return sorted({p.name for root in IMAGE_ROOTS if root.is_dir()
+                   for p in root.iterdir() if (p / "image.toml").is_file()})

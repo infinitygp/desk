@@ -16,7 +16,6 @@ class Families(unittest.TestCase):
         fams = maintain.families()
         self.assertEqual(fams["fedora-44-gnome"][0], "fedora-44-gnome")
         self.assertIn("fedora-44-cockpit", fams["fedora-44-gnome"])
-        self.assertIn("fedora-44-gnome-pl", fams["fedora-44-gnome"])
         self.assertNotIn("fedora-44-cockpit", fams)
         self.assertEqual(fams["windows-11"], ["windows-11"])
 
@@ -165,7 +164,7 @@ class BusyMember(unittest.TestCase):
                 return True
             raise Busy(f"warm state of {m} is in use by another run")
 
-        warm = {"fedora-44-gnome": [], "fedora-44-gnome-pl": ["definition changed"] if new_variant else []}
+        warm = {"fedora-44-gnome": [], "fedora-44-cockpit": ["definition changed"] if new_variant else []}
         with mock.patch("desk.maintain.runs.image_lock", return_value=nullcontext()), \
                 mock.patch("desk.maintain.runs.check_memory"), \
                 mock.patch("desk.maintain.base_reasons", return_value=[]), \
@@ -173,7 +172,7 @@ class BusyMember(unittest.TestCase):
                 mock.patch("desk.maintain.images.warm", return_value="20261019-000000"), \
                 mock.patch("desk.maintain.images.promote") as promote, \
                 mock.patch("desk.selftest.run_selftest", side_effect=selftest):
-            lines = maintain._family("fedora-44-gnome", ["fedora-44-gnome", "fedora-44-gnome-pl"], Path("/x"), False)
+            lines = maintain._family("fedora-44-gnome", ["fedora-44-gnome", "fedora-44-cockpit"], Path("/x"), False)
         return lines, promote
 
     def test_the_new_build_of_another_member_is_promoted(self):

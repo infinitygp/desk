@@ -1,3 +1,0 @@
-# Fedora 44 Workstation in Polish: system locale, GNOME, Firefox and native widgets.
-base = "fedora-44-gnome"
-provision = ["../fedora-44-gnome/provision.sh", "provision.sh"]

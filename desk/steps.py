@@ -127,7 +127,7 @@ def run_prepare(spec: ImageSpec, target, hook: str = "prepare") -> None:
     functions in it are further steps a test can call by name (desk prepare NAME)."""
     if not spec.prepare:
         return
-    script = runpy.run_path(str(spec.dir / spec.prepare))
+    script = runpy.run_path(str(spec.path(spec.prepare)))
     hooks = {k: v for k, v in script.items() if callable(v) and not k.startswith("_") and k.islower()}
     if hook not in hooks:
         raise DeskError(f"{spec.name} has no prepare step {hook!r} (has: {', '.join(sorted(hooks))})")

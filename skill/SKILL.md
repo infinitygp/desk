@@ -170,11 +170,10 @@ itself after 30 minutes (`--limit`).
 `desk image list` shows them and which of them this host has built: a host keeps the images it
 tests on, not all of them. When the image a test needs is not built, build that one
 (`desk maintain --only NAME` builds, warms and selftests it; or `desk image build NAME`, then
-`desk image warm NAME`; 10-25 minutes and 5-25 GB, so not the others along with it); a variant (`-pl`, `-cockpit`) only needs `desk image warm NAME` once its
+`desk image warm NAME`; 10-25 minutes and 5-25 GB, so not the others along with it); a variant (`-cockpit`) only needs `desk image warm NAME` once its
 base is there, and without a warm state a run still starts, cold, in ~20 s.
 `fedora-44-gnome` is the default; `fedora-45-gnome` is the next
-Fedora release (beta until it is out); `fedora-44-gnome-pl` is the same
-system in Polish (UI, Firefox, formats) for testing Polish interfaces; `fedora-44-cockpit` has
+Fedora release (beta until it is out); `fedora-44-cockpit` has
 Cockpit open in Firefox, logged in as tester with administrative access (its Chromium trusts
 Cockpit's certificate too, logged out); `arch-gnome` is Arch Linux
 (rolling, pacman, no SELinux) with the newest GNOME and libraries; `windows-11` is Windows 11
@@ -295,8 +294,7 @@ then (`runs/<id>/failed-start.png`).
 
 - The desktop guests run GNOME on Wayland with user `tester` (password `tester`) with
   ordinary sudo, so sudo, polkit and Cockpit's administrative access ask for that password as on a
-  real machine (`desk exec --root` does not need it), 1280x800, en_US locale (pl_PL in the -pl
-  variant), Polish (programmer's)
+  real machine (`desk exec --root` does not need it), 1280x800, en_US locale, Polish (programmer's)
   keyboard layout = US plus AltGr letters,
   animations, screen lock and the hot corner off, session starts on the desktop rather than the
   overview. GNOME Software is masked, so no update banners or prompts cover the app under test

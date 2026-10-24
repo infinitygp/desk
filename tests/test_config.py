@@ -1,24 +1,28 @@
+import shutil
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
-from desk.config import load_image
+from desk.config import IMAGES_DIR, LOCAL_IMAGES, DeskError, list_images, load_image
 
 
 class Variants(unittest.TestCase):
     def test_variant_inherits_base(self):
         base = load_image("fedora-44-gnome")
-        pl = load_image("fedora-44-gnome-pl")
-        self.assertEqual(pl.base_disk, base.base_disk)
-        self.assertEqual(pl.base_xml, base.base_xml)
-        self.assertNotEqual(pl.warm_dir, base.warm_dir)
-        self.assertEqual((pl.user, pl.ready, pl.relogin, pl.layout), (base.user, base.ready, base.relogin, base.layout))
+        ck = load_image("fedora-44-cockpit")
+        self.assertEqual(ck.base_disk, base.base_disk)
+        self.assertEqual(ck.base_xml, base.base_xml)
+        self.assertNotEqual(ck.warm_dir, base.warm_dir)
+        self.assertEqual((ck.user, ck.ready, ck.relogin, ck.layout), (base.user, base.ready, base.relogin, base.layout))
 
     def test_variant_paths_stay_relative_to_their_image(self):
-        pl = load_image("fedora-44-gnome-pl")
-        self.assertEqual(pl.provision_scripts, ["../fedora-44-gnome/provision.sh", "provision.sh"])
-        for script in pl.provision_scripts:
-            self.assertTrue((pl.dir / script).is_file(), script)
-        for d in pl.files:
-            self.assertTrue((pl.dir / d / "desk-helper@desk.local" / "extension.js").is_file(), d)
+        ck = load_image("fedora-44-cockpit")
+        self.assertEqual(ck.provision_scripts, ["../fedora-44-gnome/provision.sh", "provision.sh"])
+        for script in ck.provision_scripts:
+            self.assertTrue((ck.dir / script).is_file(), script)
+        for d in ck.files:
+            self.assertTrue((ck.dir / d / "desk-helper@desk.local" / "extension.js").is_file(), d)
 
     def test_installers(self):
         self.assertEqual(load_image("fedora-44-gnome").installer, "kickstart")
@@ -41,12 +45,55 @@ class Variants(unittest.TestCase):
 
         from desk.config import BASE, WARM
 
-        pl = load_image("fedora-44-gnome-pl")
-        self.assertEqual(pl.base_dir, BASE / "fedora-44-gnome")
-        self.assertEqual(pl.warm_dir, WARM / "fedora-44-gnome-pl")
-        built = replace(pl, base_version="20261005-030000", warm_version="20261005-040000")
+        ck = load_image("fedora-44-cockpit")
+        self.assertEqual(ck.base_dir, BASE / "fedora-44-gnome")
+        self.assertEqual(ck.warm_dir, WARM / "fedora-44-cockpit")
+        built = replace(ck, base_version="20261005-030000", warm_version="20261005-040000")
         self.assertEqual(built.base_disk, BASE / "fedora-44-gnome.20261005-030000" / "disk.qcow2")
-        self.assertEqual(built.warm_dir, WARM / "fedora-44-gnome-pl.20261005-040000")
+        self.assertEqual(built.warm_dir, WARM / "fedora-44-cockpit.20261005-040000")
+
+
+class HostImages(unittest.TestCase):
+    """Definitions of the host's own, in ~/.config/desk/images beside the shipped ones."""
+
+    def define(self, name: str, toml: str, **files: str) -> None:
+        d = LOCAL_IMAGES / name
+        d.mkdir(parents=True)
+        self.addCleanup(shutil.rmtree, d)
+        for f, text in {"image.toml": toml, **files}.items():
+            (d / f).write_text(text)
+
+    def test_a_variant_of_a_shipped_image(self):
+        self.define("fedora-44-gnome-xx", 'base = "fedora-44-gnome"\n'
+                    'provision = ["../fedora-44-gnome/provision.sh", "provision.sh"]\n', **{"provision.sh": "true\n"})
+        self.assertIn("fedora-44-gnome-xx", list_images())
+        xx = load_image("fedora-44-gnome-xx")
+        self.assertEqual(xx.base_disk, load_image("fedora-44-gnome").base_disk)
+        self.assertEqual([xx.path(s) for s in xx.provision_scripts],
+                         [IMAGES_DIR / "fedora-44-gnome" / "provision.sh", LOCAL_IMAGES / "fedora-44-gnome-xx" / "provision.sh"])
+        [files] = xx.files
+        self.assertTrue((xx.path(files) / "desk-helper@desk.local" / "extension.js").is_file())
+
+    def test_a_definition_moved_to_the_host_keeps_its_builds(self):
+        from desk import images
+
+        shipped = load_image("fedora-44-cockpit")
+        expected = images.install_fingerprint(shipped), images.warm_fingerprint(shipped)
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp)
+        shutil.copytree(IMAGES_DIR, tmp / "shipped", ignore=shutil.ignore_patterns("fedora-44-cockpit"))
+        shutil.copytree(IMAGES_DIR / "fedora-44-cockpit", tmp / "own" / "fedora-44-cockpit")
+        roots = (tmp / "shipped", tmp / "own")
+        with mock.patch("desk.config.IMAGE_ROOTS", roots), mock.patch("desk.images.IMAGE_ROOTS", roots):
+            moved = load_image("fedora-44-cockpit")
+            self.assertEqual(moved.dir, tmp / "own" / "fedora-44-cockpit")
+            self.assertEqual(moved.path(moved.prepare), tmp / "own" / "fedora-44-cockpit" / "prepare.py")
+            self.assertEqual((images.install_fingerprint(moved), images.warm_fingerprint(moved)), expected)
+
+    def test_a_name_defined_twice_is_refused(self):
+        self.define("fedora-44-gnome", 'base = "arch-gnome"\n')
+        with self.assertRaisesRegex(DeskError, "defined twice"):
+            load_image("fedora-44-gnome")
 
 
 class WindowsCommands(unittest.TestCase):

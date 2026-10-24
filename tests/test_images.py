@@ -50,7 +50,7 @@ class Fingerprints(unittest.TestCase):
         self.assertIn("secure_boot", images._settings(replace(spec, secure_boot=False), images.INSTALL_KEYS))
 
     def test_versions_do_not_change_fingerprints(self):
-        spec = load_image("fedora-44-gnome-pl")
+        spec = load_image("fedora-44-cockpit")
         built = replace(spec, base_version="20261005-030000", warm_version="20261005-040000")
         self.assertEqual(images.warm_fingerprint(spec), images.warm_fingerprint(built))
         self.assertEqual(images.install_fingerprint(spec), images.install_fingerprint(built))
