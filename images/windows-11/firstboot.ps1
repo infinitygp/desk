@@ -89,6 +89,13 @@ foreach ($s in 'edgeupdate', 'edgeupdatem', 'SysMain', 'WSearch', 'DiagTrack') {
 # Delivery Optimization refuses Set-Service, but not its registry key.
 Reg 'HKLM:\SYSTEM\CurrentControlSet\Services\DoSvc' Start 4
 
+# .NET compiles its native images in the background some time after an install; until it has, every
+# PowerShell start (each desk exec) takes about 0.7 s longer, and every run would do the work again.
+foreach ($f in 'Framework', 'Framework64') {
+    & "$env:WINDIR\Microsoft.NET\$f\v4.0.30319\ngen.exe" executeQueuedItems /nologo | Out-Null
+    if ($LASTEXITCODE) { $problems += "ngen ($f) exited $LASTEXITCODE" }
+}
+
 Get-Service sshd, QEMU-GA -ErrorAction SilentlyContinue | Format-Table -AutoSize
 # What every later step of the harness depends on; without these the image only fails later, as
 # "SSH not reachable", with nothing pointing back at the install.
