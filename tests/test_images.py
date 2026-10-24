@@ -79,6 +79,49 @@ class Fingerprints(unittest.TestCase):
         self.assertNotIn("../_shared/windows", rels)
 
 
+class GuestSettings(unittest.TestCase):
+    """The time zone and layout reach the guest through provisioning, so they are its warm state."""
+
+    def test_a_new_zone_or_layout_is_a_new_warm_state_not_a_new_install(self):
+        spec = replace(load_image("fedora-44-gnome"), timezone="UTC", layout="us")
+        for other in (replace(spec, timezone="Asia/Kolkata"), replace(spec, layout="pl")):
+            self.assertEqual(images.install_fingerprint(other), images.install_fingerprint(spec))
+            self.assertNotEqual(images.warm_fingerprint(other), images.warm_fingerprint(spec))
+
+    def test_posix_rules_for_openwrt(self):
+        self.assertEqual(images.posix_tz("Europe/Warsaw"), "CET-1CEST,M3.5.0,M10.5.0/3")
+        self.assertEqual(images.posix_tz("UTC"), "UTC0")
+        with tempfile.TemporaryDirectory() as tmp, mock.patch("zoneinfo.TZPATH", (tmp,)), \
+                self.assertRaisesRegex(images.DeskError, "no TZif file with a POSIX rule for Europe/Warsaw"):
+            images.posix_tz("Europe/Warsaw")
+        with tempfile.TemporaryDirectory() as tmp, mock.patch("zoneinfo.TZPATH", (tmp,)):
+            (Path(tmp) / "Old").write_bytes(b"TZif\0" + b"\0" * 40)  # version 1: no footer
+            with self.assertRaises(images.DeskError):
+                images.posix_tz("Old")
+
+    def provisioned(self, spec) -> list[str]:
+        ok = subprocess.CompletedProcess([], 0, b"", b"")
+        with mock.patch("desk.images.guest.ssh_run", return_value=ok) as ssh, \
+                mock.patch("desk.images.guest.scp", return_value=0):
+            images.provision(spec, 1, relogin=False)
+        return [c.args[2] for c in ssh.call_args_list]
+
+    def test_linux_scripts_get_them_in_their_environment(self):
+        spec = replace(load_image("fedora-44-gnome"), timezone="Asia/Kolkata", layout="pl")
+        commands = [c for c in self.provisioned(spec) if c.endswith(" -s")]
+        self.assertEqual(commands, ["DESK_TIMEZONE=Asia/Kolkata DESK_LAYOUT=pl bash -s"])
+        # OpenWrt has no zone files: the rule comes along.
+        openwrt = replace(load_image("openwrt-25.12"), timezone="Asia/Kolkata", layout="us")
+        commands = [c for c in self.provisioned(openwrt) if c.endswith(" -s")]
+        self.assertEqual(commands, ["DESK_TIMEZONE=Asia/Kolkata DESK_LAYOUT=us DESK_POSIX_TZ=IST-5:30 sh -s"])
+
+    def test_windows_scripts_get_them_in_their_environment(self):
+        spec = replace(load_image("windows-11"), timezone="America/New_York", layout="us")
+        [command] = [c for c in self.provisioned(spec) if "provision.ps1" in c]
+        self.assertTrue(command.startswith("$env:DESK_TIMEZONE = 'America/New_York'; $env:DESK_LAYOUT = 'us'; "
+                                           "powershell.exe "), command)
+
+
 class Fetch(unittest.TestCase):
     SHA = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"  # of b"hello"
 

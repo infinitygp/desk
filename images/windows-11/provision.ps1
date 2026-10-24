@@ -8,12 +8,34 @@ $run = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 # agent-loop.ps1 starts the agent again when it ends.
 Set-ItemProperty $run -Name desk-agent -Value 'conhost.exe --headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\desk\agent-loop.ps1'
 
-# English (US) with the Polish (Programmers) layout. An earlier image listed Polish as a language
-# of its own, which made Store apps (Notepad) show Polish while Windows itself is English.
+# English (US) with the keyboard layout desk types through: US, or Polish (Programmers), the US
+# layout plus AltGr letters. An earlier image listed Polish as a language of its own, which made
+# Store apps (Notepad) show Polish while Windows itself is English.
+$tip = @{ us = '0409:00000409'; pl = '0409:00000415' }[$env:DESK_LAYOUT]
+if (-not $tip) { throw "no keyboard layout for DESK_LAYOUT '$env:DESK_LAYOUT'" }
 $langs = New-WinUserLanguageList en-US
 $langs[0].InputMethodTips.Clear()
-$langs[0].InputMethodTips.Add('0409:00000415')
+$langs[0].InputMethodTips.Add($tip)
 Set-WinUserLanguageList $langs -Force
+
+# The host's time zone, from desk as an IANA name; ICU, which Windows ships, knows its Windows id.
+Add-Type -TypeDefinition @'
+using System.Runtime.InteropServices;
+using System.Text;
+public static class DeskZone {
+    [DllImport("icu.dll", CharSet = CharSet.Unicode)]
+    static extern int ucal_getWindowsTimeZoneID(string id, int len, StringBuilder winid, int capacity, ref int status);
+    public static string Windows(string iana) {
+        var id = new StringBuilder(128);
+        int status = 0;
+        int n = ucal_getWindowsTimeZoneID(iana, iana.Length, id, id.Capacity, ref status);
+        return status > 0 || n == 0 ? null : id.ToString(0, n);
+    }
+}
+'@
+$zone = [DeskZone]::Windows($env:DESK_TIMEZONE)
+if (-not $zone) { throw "Windows has no time zone for '$env:DESK_TIMEZONE'" }
+Set-TimeZone -Id $zone
 
 # The Store updating Calculator or Notepad mid-test makes them fail to start.
 $store = 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore'

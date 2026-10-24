@@ -107,7 +107,11 @@ def warm_reasons(spec: ImageSpec) -> list[str]:
     reasons = []
     if meta.get("base") != str(spec.base_dir.resolve()):
         reasons.append("base build changed")
-    if meta.get("fingerprint") != images.warm_fingerprint(spec):
+    if "timezone" not in meta:
+        reasons.append("made before desk recorded its guest's time zone and layout")
+    elif (meta["timezone"], meta.get("layout")) != (spec.timezone, spec.layout):
+        reasons.append(f"guests get {spec.timezone} and the {spec.layout} layout now")
+    elif meta.get("fingerprint") != images.warm_fingerprint(spec):
         reasons.append("image definition changed")
     if not (cur / images.PROVISIONED).exists():
         reasons.append("no provisioned disk for cold runs")

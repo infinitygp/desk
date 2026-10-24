@@ -29,7 +29,6 @@ reboot = "shutdown.exe /r /t 0 /f"
 # A full shutdown: without /hybrid, the next boot does not resume a hibernated kernel.
 poweroff = "shutdown.exe /s /t 0 /f"
 boot_id = "(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToFileTimeUtc()"
-layout = "pl"
 provision = "provision.ps1"
 # Windows has no way to restart just the desktop session from SSH; a reboot logs in again.
 relogin = "shutdown.exe /r /t 0 /f"

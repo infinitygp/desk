@@ -38,12 +38,13 @@ enabled-extensions=['desk-helper@desk.local']
 CONF
 dconf update
 
-# Polish (programmer's) is the US layout plus AltGr letters, so `desk type` can enter
-# Polish text with real key presses while every US key stays where it was. GNOME copied
-# the layout into the user's settings at first login, so set it there as well.
-localectl set-x11-keymap pl
+# The host's time zone and the keyboard layout desk types through (us, or pl: Polish
+# (programmer's), the US layout plus AltGr letters), from desk. GNOME copied the layout into the
+# user's settings at first login, so set it there as well.
+timedatectl set-timezone "$DESK_TIMEZONE"
+localectl set-x11-keymap "$DESK_LAYOUT"
 as_tester() { runuser -u tester -- env XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus "$@"; }
-as_tester gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'pl')]"
+as_tester gsettings set org.gnome.desktop.input-sources sources "[('xkb', '$DESK_LAYOUT')]"
 
 # The accessibility tree (`desk a11y`). GTK4 exposes it regardless; Gecko, Chromium/Electron
 # and Qt only when an assistive technology is announced (org.a11y.Status) or when forced

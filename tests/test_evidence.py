@@ -219,12 +219,15 @@ class UnitFailures(unittest.TestCase):
 
 class DnfTimes(unittest.TestCase):
     def test_utc_becomes_the_guests_local_time_whatever_the_hosts(self):
+        from zoneinfo import ZoneInfo
+
         text = "installed foo-1.0-1.noarch\n 3 dnf install -y /tmp/foo.rpm 2026-10-08 21:30:00     1"
         for host in ("UTC", "America/New_York"):
             with self.subTest(host=host), mock.patch.dict("os.environ", {"TZ": host}):
                 time.tzset()
-                self.assertEqual(local_dnf_times(text).splitlines(),
+                self.assertEqual(local_dnf_times(text, ZoneInfo("Europe/Warsaw")).splitlines(),
                                  ["installed foo-1.0-1.noarch", " 3 dnf install -y /tmp/foo.rpm 2026-10-08 23:30:00     1"])
+                self.assertIn("2026-10-08 17:30:00", local_dnf_times(text, ZoneInfo("America/New_York")))
         time.tzset()
 
 

@@ -63,8 +63,9 @@ def _image_list() -> None:
         notes = [f"variant of {spec.base}"] if spec.base else []
         if (spec.warm_dir / "memory.save").exists():
             state = "warm"
-            if not runs.warm_is_current(spec):
-                notes.append("warm state predates the base build (desk image warm --force)")
+            stale = runs.warm_stale(spec)
+            if stale:
+                notes.append(f"warm state {stale} (desk image warm --force)")
         else:
             state = "base" if spec.base_xml.exists() else "-"
         meta = spec.base_dir / "meta.json"
@@ -716,8 +717,9 @@ def cmd_clock(args) -> None:
     if args.value == "reset":
         clock.reset(run)
     elif args.step:
+        tz = clock.zone(run)
         for t, started in clock.advance(run, args.value, args.step, timeout=args.timeout):
-            stamp = datetime.fromtimestamp(t, clock.GUEST_TZ).strftime("%Y-%m-%d %H:%M")
+            stamp = datetime.fromtimestamp(t, tz).strftime("%Y-%m-%d %H:%M")
             print(f"{stamp}: " + (", ".join(started) if started else "nothing started"), flush=True)
     elif args.value:
         clock.set_time(run, args.value)

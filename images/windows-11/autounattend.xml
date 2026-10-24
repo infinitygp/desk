@@ -50,17 +50,16 @@
  </settings>
  <settings pass="specialize">
   <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
-   <ComputerName>DESK-WIN11</ComputerName><TimeZone>Central European Standard Time</TimeZone>
+   <ComputerName>DESK-WIN11</ComputerName><TimeZone>UTC</TimeZone>
   </component>
  </settings>
  <settings pass="oobeSystem">
   <component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
-   <!-- English (US) with the Polish (Programmers) layout: the US layout plus AltGr letters, which
-        `desk type` relies on. 0415:00000415 would add Polish as a display language as well. -->
-   <InputLocale>0409:00000415</InputLocale><SystemLocale>en-US</SystemLocale><UILanguage>en-US</UILanguage><UserLocale>en-US</UserLocale>
+   <!-- English (US). The time zone and the keyboard layout desk was given are set by provision.ps1. -->
+   <InputLocale>0409:00000409</InputLocale><SystemLocale>en-US</SystemLocale><UILanguage>en-US</UILanguage><UserLocale>en-US</UserLocale>
   </component>
   <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
-   <TimeZone>Central European Standard Time</TimeZone>
+   <TimeZone>UTC</TimeZone>
    <OOBE><HideEULAPage>true</HideEULAPage><HideOnlineAccountScreens>true</HideOnlineAccountScreens><HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE><HideOEMRegistrationScreen>true</HideOEMRegistrationScreen><ProtectYourPC>3</ProtectYourPC></OOBE>
    <UserAccounts><LocalAccounts><LocalAccount wcm:action="add"><Name>tester</Name><Group>Administrators</Group><DisplayName>Tester</DisplayName>
     <Password><Value>tester</Value><PlainText>true</PlainText></Password></LocalAccount></LocalAccounts></UserAccounts>

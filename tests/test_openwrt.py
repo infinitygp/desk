@@ -90,9 +90,11 @@ Sat Oct 10 01:06:32 2026 kern.err kernel: [    0.386099] Speculative Return Stac
 Sat Oct 10 01:06:33 2026 daemon.warn netifd: Wireless module not found
 Sat Oct 10 01:07:00 2026 kern.info kernel: [   40.1] foo[123]: segfault at 0 ip 00 sp 00 error 4
 """
-        # 2026-10-10 01:00:00 in Warsaw (CEST)
+        # 2026-10-10 01:00:00 in Warsaw (CEST), where the guest's logd writes its times
+        from zoneinfo import ZoneInfo
+
         out = openwrt_sections({"services": json.dumps(services), "log": log, "packages": "installed nano-9.2-r1"},
-                               since=1791586800)
+                               since=1791586800, tz=ZoneInfo("Europe/Warsaw"))
         self.assertEqual(out["failed"], "crashy/instance1: not running (exit 3)")
         self.assertEqual(out["journal"], "2026-10-10T01:06:02+02:00 daemon.err root: crashy: giving up")
         self.assertIn("crash loop", out["unitfailures"])

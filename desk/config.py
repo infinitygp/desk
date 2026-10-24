@@ -6,6 +6,7 @@ import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 PROJECT = Path(__file__).resolve().parent.parent
 IMAGES_DIR = PROJECT / "images"
@@ -28,12 +29,26 @@ def version() -> str:
     return f"{described or 'unknown'} (checkout {PROJECT})"
 
 # What differs from host to host lives outside the repository: where images and runs are kept
-# (`home`), which libvirt to use (`uri`). The environment wins over the file.
+# (`home`), which libvirt to use (`uri`), the guests' time zone and keyboard layout. The
+# environment wins over the file.
 CONFIG_FILE = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "desk" / "config.toml"
 # Image definitions of this host's own (one in its language, one for its hardware), beside the
 # shipped ones and like them, a directory per image.
 LOCAL_IMAGES = CONFIG_FILE.parent / "images"
 IMAGE_ROOTS = (IMAGES_DIR, LOCAL_IMAGES)
+
+
+# The layouts `desk type` knows: US, and Polish (programmer's), which is US plus AltGr letters.
+# Any other layout moves keys (y and z, digits), which typing by key codes cannot know.
+LAYOUTS = ("us", "pl")
+
+
+def _zone(name) -> bool:
+    try:
+        ZoneInfo(name)
+        return True
+    except (ZoneInfoNotFoundError, ValueError, TypeError):
+        return False
 
 
 def _local() -> dict:
@@ -44,9 +59,14 @@ def _local() -> dict:
         return {}
     except (OSError, tomllib.TOMLDecodeError) as e:
         _refuse(str(e))
-    unknown = set(data) - {"home", "uri"}
+    unknown = set(data) - {"home", "uri", "timezone", "layout"}
     if unknown or not all(isinstance(v, str) for v in data.values()):
-        _refuse(f"it takes home = \"/path\" and uri = \"qemu:///session\" (got {sorted(data)})")
+        _refuse(f"it takes home = \"/path\", uri = \"qemu:///session\", timezone = \"Europe/Berlin\" and "
+                f"layout = \"us\" (got {sorted(data)})")
+    if "timezone" in data and not _zone(data["timezone"]):
+        _refuse(f"timezone {data['timezone']!r} is no time zone this host knows (timedatectl list-timezones)")
+    if data.get("layout", "us") not in LAYOUTS:
+        _refuse(f"layout is one of {', '.join(LAYOUTS)} (got {data['layout']!r})")
     return data
 
 
@@ -60,6 +80,21 @@ LOCAL = _local()
 HOME = Path(os.environ.get("DESK_HOME") or LOCAL.get("home")
             or Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "desk").expanduser()
 URI = os.environ.get("DESK_URI") or LOCAL.get("uri") or "qemu:///session"
+
+
+def host_timezone(localtime: Path = Path("/etc/localtime")) -> str | None:
+    """The host's time zone, None when it cannot be told: /etc/localtime links into the zone files."""
+    try:
+        name = os.readlink(localtime).partition("zoneinfo/")[2].removeprefix("posix/")
+    except OSError:
+        return None
+    # right/: clocks counting leap seconds, 27 s off what guests and Windows keep.
+    return name if _zone(name) and not name.startswith("right/") else None
+
+
+# What images get unless they set their own: provisioning puts them into the guest.
+TIMEZONE = LOCAL.get("timezone") or host_timezone() or "UTC"
+LAYOUT = LOCAL.get("layout", "us")
 
 BASE = HOME / "base"
 WARM = HOME / "warm"
@@ -126,7 +161,11 @@ class ImageSpec:
     base: str | None = None
     agent_wrapper: list[str] | None = None
     relogin: str | None = None
+    # The guest's keyboard layout (one of LAYOUTS), which `desk type` maps characters to keys for,
+    # and its time zone, in which desk clock and the report read times without a zone. Both are
+    # config.toml's or the host's unless image.toml sets them; provisioning applies them.
     layout: str = "us"
+    timezone: str = "UTC"
     # "windows": boot `iso` with an answer-file CD built from `unattend` and `unattend_files`.
     unattend: str | None = None
     unattend_files: list[str] | None = None
@@ -286,6 +325,12 @@ def load_image(name: str) -> ImageSpec:
         data = {**parent, **data}
     for key in ("base_version", "warm_version"):
         data.pop(key, None)
+    data.setdefault("layout", LAYOUT)
+    data.setdefault("timezone", TIMEZONE)
+    if data["layout"] not in LAYOUTS:
+        raise DeskError(f"{spec}: layout is one of {', '.join(LAYOUTS)} (got {data['layout']!r})")
+    if not _zone(data["timezone"]):
+        raise DeskError(f"{spec}: timezone {data['timezone']!r} is no time zone this host knows")
     try:
         return ImageSpec(name=name, dir=d, **data)
     except TypeError as e:

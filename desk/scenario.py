@@ -8,6 +8,7 @@ import shlex
 import subprocess
 import time
 import tomllib
+from datetime import UTC
 from pathlib import Path
 
 from . import a11y, browser, clock, disks, display, evidence, guest, record, runs, usb
@@ -159,7 +160,7 @@ def load(path: Path) -> dict:
         if action == "disk_add":
             _checked(path, f"step {i}", disks.parse, step[action])
         if action == "clock" and step[action] != "reset":
-            _checked(path, f"step {i}", clock.parse, step[action], 0.0)
+            _checked(path, f"step {i}", clock.parse, step[action], 0.0, UTC)  # whether it reads, in any zone
         if "step" in step:
             _checked(path, f"step {i}", clock.duration, step["step"])
     return data
@@ -378,7 +379,7 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None) -> bo
             disks.add(run, *disks.parse(d))
         for device in data.get("usb", []):
             usb.add(run, device)
-        ok = _run_steps(run, spec, data)
+        ok = _run_steps(run, runs.spec_for(run), data)
     finally:
         # Also when the VM is gone: the steps and why the guest was lost are in its directory.
         report, videos = evidence.finish(run, keep=keep, running=keep, stopped=True)
@@ -406,7 +407,7 @@ def continue_scenario(path: Path, run, first: int, image: str | None = None) -> 
         raise DeskError(f"--from {first}: the scenario has steps 1 to {total}")
     _warn(data)
     run.log_event(scenario=str(path.resolve()), steps=total, first=first)
-    ok = _run_steps(run, spec, data, first)
+    ok = _run_steps(run, runs.spec_for(run), data, first)
     print(f"steps {first}-{total} passed" if ok else "scenario FAILED")
     print(f"run {run.id} still running: desk down {run.id} writes the report")
     return ok

@@ -41,8 +41,9 @@ gets a new device number on the host: `desk usb add` it again.
 ## Guest clock
 
 For what depends on time (schedules, timers, expiry, retention): `desk clock +3d` (also `-2h30m`;
-units s m h d w) or `desk clock '2026-12-24 23:59'` (guest local time, Europe/Warsaw) moves the
-guest's clock, which keeps running from there; `desk clock` shows it. The guest's own time sync is
+units s m h d w) or `desk clock '2026-12-24 23:59'` (guest local time: the host's time zone unless
+its `config.toml` sets one) moves the guest's clock, which keeps running from there; `desk clock`
+shows it. The guest's own time sync is
 switched off (timedatectl / w32time) and desk keeps the offset across snapshot restores and
 `desk reboot`. `desk clock reset` goes back to the host's time and turns time sync on again.
 Timers that were due in the skipped time fire right after the jump, as after a suspend, but each

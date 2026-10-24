@@ -11,7 +11,7 @@ import sys
 import time
 import xml.etree.ElementTree as ET
 from contextlib import ExitStack, contextmanager
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 
 import libvirt
@@ -143,6 +143,10 @@ class Run:
     # directory it works in; holder is the agent's PID, to tell when it is gone.
     label: str = ""
     holder: int = 0
+    # The guest's time zone and keyboard layout, as its provisioning set them; "": the image's
+    # (runs from before desk kept them).
+    timezone: str = ""
+    layout: str = ""
 
     @property
     def since(self) -> float:
@@ -366,14 +370,29 @@ def check_memory(spec: ImageSpec) -> None:
         raise Busy(f"not enough free memory for {spec.name}: {why}{hint} (desk down <id>, or --force)")
 
 
-def warm_meta(spec: ImageSpec) -> dict:
-    meta = spec.warm_dir / "meta.json"
+def _meta(warm_dir: Path) -> dict:
+    meta = warm_dir / "meta.json"
     return json.loads(meta.read_text()) if meta.exists() else {}
 
 
+def warm_meta(spec: ImageSpec) -> dict:
+    return _meta(spec.warm_dir)
+
+
+def warm_stale(spec: ImageSpec) -> str | None:
+    """Why the warm state is not to be used as it is; None: it is made from the current base build
+    and says what its guest has."""
+    meta = warm_meta(spec)
+    if not spec.base_dir.exists() or meta.get("base") != str(spec.base_dir.resolve()):
+        return "predates its base image"
+    if "timezone" not in meta:
+        # Made by a desk that did not record them: its guest's zone and layout are not known.
+        return "does not say which time zone and keyboard layout its guest has"
+    return None
+
+
 def warm_is_current(spec: ImageSpec) -> bool:
-    """The warm state was made from the base build that is current now."""
-    return spec.base_dir.exists() and warm_meta(spec).get("base") == str(spec.base_dir.resolve())
+    return warm_stale(spec) is None
 
 
 def cold_reason(spec: ImageSpec, warm_dir: Path | None = None) -> str | None:
@@ -381,8 +400,9 @@ def cold_reason(spec: ImageSpec, warm_dir: Path | None = None) -> str | None:
     warm = (warm_dir or spec.warm_dir) / "memory.save"
     if not warm.exists():
         return f"no warm state for {spec.name} (desk image warm {spec.name})"
-    if not warm_is_current(spec):
-        return f"warm state of {spec.name} predates its base image (desk image warm {spec.name} --force)"
+    stale = warm_stale(spec)
+    if stale:
+        return f"warm state of {spec.name} {stale} (desk image warm {spec.name} --force)"
     saved_xml = conn().saveImageGetXMLDesc(str(warm), libvirt.VIR_DOMAIN_SAVE_IMAGE_XML_SECURE)
     if uuid_active(domain_uuid(saved_xml)):
         # Restores share the save image's UUID, so only one can run at a time.
@@ -655,6 +675,11 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
                 print(f"[desk] booting cold: the warm state has {saved[0]} MiB and {saved[1]} vCPUs, "
                       f"this run {spec.memory_mib} MiB and {spec.vcpus}")
                 cold, saved_xml = True, None
+    # The provisioned disk of a current warm build spares provisioning and a relogin, and gives
+    # cold runs the files warm ones start from.
+    fresh = cold and not ((warm_dir / images.PROVISIONED).exists() and warm_is_current(spec))
+    # What the guest was provisioned with: the warm build's, or this spec's when the run provisions.
+    made = {} if fresh else _meta(warm_dir)
     rd.mkdir(parents=True)
     # A restore must also keep the saved domain name; run ids stay independent of it.
     domain = f"desk-{run_id}" if cold else ET.fromstring(saved_xml).findtext("name")
@@ -664,7 +689,8 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
               user=spec.user, created=now, last_used=now, vnc_password=secrets.token_urlsafe(6)[:8],
               agent_port=free_port() if spec.agent_port else 0, displays=displays,
               resolution=list(resolution) if resolution else None,
-              label=label or auto_label, holder=holder)
+              label=label or auto_label, holder=holder,
+              timezone=made.get("timezone", spec.timezone), layout=made.get("layout", spec.layout))
     run.save()
     # In use by this process until it ends: a scenario or selftest keeps its run through steps
     # longer than the idle limit.
@@ -673,9 +699,6 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
     disk, nvram = rd / "disk.qcow2", rd / "VARS.qcow2"
     try:
         if cold:
-            # The provisioned disk of a current warm build spares provisioning and a relogin, and
-            # gives cold runs the files warm ones start from.
-            fresh = not ((warm_dir / images.PROVISIONED).exists() and warm_is_current(spec))
             qemu_img_overlay(base_dir / "disk.qcow2" if fresh else warm_dir / images.PROVISIONED, disk)
             reflink_copy((base_dir if fresh else warm_dir) / "VARS.qcow2", nvram)
             template = (base_dir / "domain.xml").read_text()
@@ -707,7 +730,7 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
                 images.provision(spec, run.ssh_port)
             from . import steps
 
-            steps.run_prepare(spec, run)
+            steps.run_prepare(spec_for(run), run)
             with run.edit() as r:
                 r.ready = time.time()
     except BaseException:
@@ -744,4 +767,7 @@ def down(run: Run, keep: bool = False) -> None:
 
 
 def spec_for(run: Run) -> ImageSpec:
-    return load_image(run.image)
+    """The run's image with the time zone and layout its guest has, which config.toml may have
+    changed since its warm state was made."""
+    spec = load_image(run.image)
+    return replace(spec, timezone=run.timezone or spec.timezone, layout=run.layout or spec.layout)

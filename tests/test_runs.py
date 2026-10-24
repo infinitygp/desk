@@ -238,6 +238,11 @@ class ColdReason(unittest.TestCase):
                 (home / "warm" / "fedora-44-gnome" / "meta.json").write_text('{"base": "/some/other/build"}')
                 (home / "base" / "fedora-44-gnome").mkdir(parents=True)
                 self.assertIn("predates its base image", runs.cold_reason(spec))
+                base = str((home / "base" / "fedora-44-gnome").resolve())
+                # Made by a desk that did not record its guest's time zone and layout.
+                (home / "warm" / "fedora-44-gnome" / "meta.json").write_text(json.dumps({"base": base}))
+                self.assertIn("does not say which time zone and keyboard layout", runs.cold_reason(spec))
+                self.assertFalse(runs.warm_is_current(spec))
 
 
 class Up(unittest.TestCase):
@@ -295,7 +300,8 @@ class Up(unittest.TestCase):
         warm = self.home / "warm" / "fedora-44-gnome"
         warm.mkdir(parents=True)
         (warm / "memory.save").write_bytes(b"")
-        (warm / "meta.json").write_text(json.dumps({"base": str((self.home / "base" / "fedora-44-gnome").resolve())}))
+        (warm / "meta.json").write_text(json.dumps({"base": str((self.home / "base" / "fedora-44-gnome").resolve()),
+                                                    "timezone": "UTC", "layout": "us"}))
         self.conn.saveImageGetXMLDesc.return_value = ("<domain><name>desk-warm-x</name><uuid>u</uuid>"
                                                       "<memory unit='KiB'>4194304</memory><vcpu>4</vcpu></domain>")
         prepared = mock.Mock(return_value="<domain/>")
@@ -307,6 +313,48 @@ class Up(unittest.TestCase):
         self.conn.restoreFlags.assert_not_called()
         self.assertEqual(self.events[0], ("domain started", True))
         self.assertEqual((prepared.call_args.kwargs["memory_mib"], prepared.call_args.kwargs["vcpus"]), (8192, 4))
+
+    def test_a_run_that_provisions_keeps_the_images_zone_and_layout(self):
+        from dataclasses import replace
+
+        from desk.config import load_image
+
+        with mock.patch("sys.stdout"):
+            run = runs.up(replace(load_image("fedora-44-gnome"), timezone="Asia/Kolkata", layout="pl"), run_id="t")
+        self.assertIn(("provisioning", False), self.events)
+        self.assertEqual((runs.load("t").timezone, runs.load("t").layout), ("Asia/Kolkata", "pl"))
+        self.assertEqual(run.timezone, "Asia/Kolkata")
+
+    def test_a_run_from_a_warm_build_keeps_the_zone_and_layout_it_was_made_with(self):
+        from dataclasses import replace
+
+        from desk import images
+        from desk.config import load_image
+
+        warm = self.home / "warm" / "fedora-44-gnome"
+        warm.mkdir(parents=True)
+        (warm / images.PROVISIONED).write_bytes(b"")
+        (warm / "VARS.qcow2").write_bytes(b"")
+        (warm / "meta.json").write_text(json.dumps({"base": str((self.home / "base" / "fedora-44-gnome").resolve()),
+                                                    "timezone": "America/New_York", "layout": "us"}))
+        # config.toml says otherwise now; the guest has what its build was provisioned with.
+        spec = replace(load_image("fedora-44-gnome"), timezone="Asia/Kolkata", layout="pl")
+        with mock.patch("sys.stdout"):
+            runs.up(spec, run_id="t", cold=True)
+        self.assertNotIn(("provisioning", False), self.events)
+        self.assertEqual((runs.load("t").timezone, runs.load("t").layout), ("America/New_York", "us"))
+
+    def test_a_warm_build_that_does_not_say_what_its_guest_has_is_provisioned_again(self):
+        from desk import images
+        from desk.config import load_image
+
+        warm = self.home / "warm" / "fedora-44-gnome"
+        warm.mkdir(parents=True)
+        (warm / images.PROVISIONED).write_bytes(b"")
+        (warm / "meta.json").write_text(json.dumps({"base": str((self.home / "base" / "fedora-44-gnome").resolve())}))
+        with mock.patch("sys.stdout"):
+            runs.up(load_image("fedora-44-gnome"), run_id="t", cold=True)
+        self.assertIn(("provisioning", False), self.events)
 
     def test_a_start_that_fails_gives_the_lock_back_too(self):
         from desk.config import load_image

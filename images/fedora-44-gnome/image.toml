@@ -15,7 +15,5 @@ ready = "systemctl --user is-active --quiet graphical-session.target"
 agent_wrapper = ["/usr/local/libexec/desk-ga-run"]
 # Run as root after provision.sh so the session picks up the shell extension (Wayland cannot restart the shell in place).
 relogin = "systemctl restart gdm"
-# Guest keyboard layout set by provision.sh; `desk type` maps characters to keys for it.
-layout = "pl"
 # `desk maintain` reinstalls it this often, so tests run against current updates.
 rebuild_days = 14

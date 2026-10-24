@@ -59,12 +59,14 @@ enabled-extensions=['desk-helper@desk.local']
 CONF
 dconf update
 
-# Polish (programmer's) layout = US plus AltGr letters, for `desk type`; and the a11y switches
-# that Gecko, Chromium and Qt look for. GNOME copied defaults into the user's settings at first
-# login, so set them there as well.
-localectl set-x11-keymap pl
+# The host's time zone and the keyboard layout desk types through (us, or pl: Polish
+# (programmer's), US plus AltGr letters), from desk; and the a11y switches that Gecko, Chromium
+# and Qt look for. GNOME copied defaults into the user's settings at first login, so set them
+# there as well.
+timedatectl set-timezone "$DESK_TIMEZONE"
+localectl set-x11-keymap "$DESK_LAYOUT"
 as_tester() { runuser -u tester -- env XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus "$@"; }
-as_tester gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'pl')]"
+as_tester gsettings set org.gnome.desktop.input-sources sources "[('xkb', '$DESK_LAYOUT')]"
 as_tester gsettings set org.gnome.desktop.interface toolkit-accessibility true
 install -d -o tester -g tester /home/tester/.config /home/tester/.config/environment.d
 cat > /home/tester/.config/environment.d/50-desk-a11y.conf <<'CONF'

@@ -10,10 +10,8 @@ uci set dhcp.lan.ignore='1'
 uci set dhcp.lan.ra='disabled'
 uci set dhcp.lan.dhcpv6='disabled'
 uci commit dhcp
-# Every desk image runs in this zone; desk clock takes times without a zone as its local time.
+# The time zone stays UTC until provisioning sets the one desk was given.
 uci set system.@system[0].hostname='desk-openwrt'
-uci set system.@system[0].zonename='Europe/Warsaw'
-uci set system.@system[0].timezone='CET-1CEST,M3.5.0,M10.5.0/3'
 uci commit system
 # The password of every desk image's user is its name (LuCI asks for it).
 (echo '@PASSWORD@'; sleep 1; echo '@PASSWORD@') | passwd root >/dev/null 2>&1

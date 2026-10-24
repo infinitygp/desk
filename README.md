@@ -85,8 +85,12 @@ names (kickstart or `user-data`, `provision.sh`, `prepare.py`); shared provision
 - `installer` (`kickstart`, `cloudimg`, `disk`, `windows`) and `family` (`linux`, `windows`,
   `openwrt`): how the image is installed and how desk talks to the guest.
 - `desktop = false`: the screen is a text console; commands that need a session refuse.
-- `layout`: the keyboard layout `desk type` types through; `pl`, Polish (programmer's), is US
-  plus AltGr letters.
+- `layout` and `timezone`: the guest's keyboard layout, which `desk type` types through (`us`, or
+  `pl`: Polish (programmer's), US plus AltGr letters, so Polish letters are real key presses too;
+  any other layout moves keys desk cannot know of), and its time zone, in which `desk clock` and
+  the report read guest times. Both come from `config.toml` or the host unless the image sets them
+  (Host setup), and provisioning applies them, so a change is a new warm state; a run keeps the
+  ones its guest was provisioned with in `run.json`.
 - `sound`: an emulated sound card without host output (`windows-11`: `ich9`), so programs get an
   audio device to play to.
 - `secure_boot = false` for a boot loader that is not signed for UEFI Secure Boot (Arch).
@@ -121,6 +125,9 @@ is saved and what cold runs boot, so both start from the same files and cold run
 provisioning and the relogin; with no current warm build they boot the base disk and provision it.
 On the GNOME images it installs the shell extension, the keyboard layout and accessibility
 settings, and masks GNOME Software, whose banners and prompts would cover the app under test.
+Every script has `DESK_TIMEZONE` (an IANA name), `DESK_POSIX_TZ` (its POSIX rule, from the host's
+zone file, for OpenWrt) and `DESK_LAYOUT` in its environment; the installs themselves are UTC and
+US.
 
 ### Browsers on Linux
 
@@ -188,6 +195,8 @@ What else differs from Firefox:
   theme and taskbar settings where the Settings app writes them.
 - Notepad's first-run teaching tip is marked closed in its settings: UI Automation gets nothing
   from its window while the tip is open.
+- Provisioning turns the IANA time zone into Windows' id with ICU's `ucal_getWindowsTimeZoneID`
+  (`icu.dll`, part of Windows), and the layout into the en-US input method (00000409 or 00000415).
 - Before the warm state is saved, `idle` empties the standby list, the file cache that would make
   up almost half of the saved memory.
 
@@ -210,10 +219,10 @@ the logged-in session (`images/_shared/windows/agent.ps1`, its port forwarded li
 - The install checks the image from `disk_image_url` against the `sha256sums` next to it, grows its
   last partition and ext4 to `disk_gb` (parted, guestfish) and writes `disk_files` onto it: the SSH
   key, a uci-defaults script (LAN as a DHCP client on passt, so SSH and LuCI come in through the
-  LAN zone; the Warsaw time zone; root's password) and an `rc.local` that powers the first boot
+  LAN zone; root's password) and an `rc.local` that powers the first boot
   off, which ends the install (~30 s).
-- Provisioning (`sh -s`, no bash) adds qemu-ga and the SFTP server (scp) and keeps the system log
-  in `/desk/syslog`.
+- Provisioning (`sh -s`, no bash) adds qemu-ga and the SFTP server (scp), keeps the system log
+  in `/desk/syslog` and sets the time zone as a POSIX rule (OpenWrt has no zone files).
 - Commands that need a desktop refuse; screenshots show the text console. `desk exec`'s time
   limit is a `setsid` watchdog (BusyBox has no `timeout`), and `desk forward` leads to the LAN
   address, where router services listen.
@@ -388,12 +397,16 @@ The user needs `/dev/kvm` (the `kvm` group where it is not open to everybody); V
 
 What is the host's own lives outside the repository: images, runs and reports in
 `~/.local/share/desk` unless `~/.config/desk/config.toml` says otherwise (`$DESK_HOME` and
-`$DESK_URI` win over the file), and the host's own image definitions in `~/.config/desk/images/`.
+`$DESK_URI` win over the file), the guests' time zone and keyboard layout, and the host's own
+image definitions in `~/.config/desk/images/`. `desk doctor` shows the time zone and layout guests
+get and where they come from.
 
 ```toml
 # ~/.config/desk/config.toml
 home = "/srv/desk"           # a file system with reflinks (btrfs, XFS) and room: 5-25 GiB an image
 uri = "qemu:///session"      # the default
+timezone = "Europe/Berlin"   # default: the host's (where /etc/localtime links), else UTC
+layout = "pl"                # us (the default) or pl
 ```
 
 Snapshots, warm-ups and `desk diff` copy disks as reflinks; on a file system without them every

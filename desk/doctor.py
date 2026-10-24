@@ -228,7 +228,8 @@ def images() -> tuple[list[str], dict[str, list[str]]]:
         for what in missing:
             wanted.setdefault(what, []).append(name)
         if (spec.warm_dir / "memory.save").exists():
-            state = "warm" if runs.warm_is_current(spec) else "warm state older than its base (boots cold)"
+            stale = runs.warm_stale(spec)
+            state = f"warm state that {stale} (boots cold)" if stale else "warm"
         elif spec.base_xml.exists():
             state = f"installed, no warm state (boots cold; desk image warm {name})"
         elif spec.base:
@@ -251,6 +252,14 @@ def timer_line() -> str:
             "--install-timer does it weekly)")
 
 
+def guest_settings() -> str:
+    """The time zone and keyboard layout images get, and where they come from."""
+    zone = ("config.toml" if config.LOCAL.get("timezone") else "the host's" if config.host_timezone()
+            else "the host's could not be read from /etc/localtime; timezone in config.toml sets one")
+    layout = "config.toml" if config.LOCAL.get("layout") else "the default; config.toml can set pl"
+    return f"time zone {config.TIMEZONE} ({zone}), keyboard layout {config.LAYOUT} ({layout})"
+
+
 def run() -> bool:
     """Print the findings; False when something is missing without which no run can start."""
     try:
@@ -263,6 +272,7 @@ def run() -> bool:
     line, connection_problem = libvirt_connection()
     print(line)
     print(f"host       {family or 'neither Arch nor Fedora: package names below are theirs'}")
+    print(f"guests     {guest_settings()}")
 
     image_lines, wanted = images()
     by_installer = {n.what: n for needs in INSTALLERS.values() for n in needs}

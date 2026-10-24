@@ -15,6 +15,5 @@ files = ["../_shared/gnome"]
 ready = "systemctl --user is-active --quiet graphical-session.target"
 # Run as root after provision.sh so the session picks up the shell extension.
 relogin = "systemctl restart gdm"
-layout = "pl"
 # A rolling release drifts quickly; a fresh install keeps tests close to what users have.
 rebuild_days = 14

@@ -100,13 +100,23 @@ class Due(unittest.TestCase):
     def test_warm(self):
         self.assertEqual(maintain.warm_reasons(self.spec), ["no warm state"])
         base = self.build("base")
-        warm = self.build("warm", base=str(base), fingerprint=images.warm_fingerprint(self.spec))
+        made = dict(base=str(base), fingerprint=images.warm_fingerprint(self.spec), timezone=self.spec.timezone,
+                    layout=self.spec.layout)
+        warm = self.build("warm", **made)
         self.assertEqual(maintain.warm_reasons(self.spec), ["no warm state"])  # no saved memory yet
         (warm / "memory.save").write_bytes(b"")
         # Made before cold runs booted the provisioned disk.
         self.assertEqual(maintain.warm_reasons(self.spec), ["no provisioned disk for cold runs"])
         (warm / images.PROVISIONED).write_bytes(b"")
         self.assertEqual(maintain.warm_reasons(self.spec), [])
+        # config.toml or the host's zone changed since.
+        meta = json.loads((warm / "meta.json").read_text())
+        (warm / "meta.json").write_text(json.dumps({**meta, "timezone": "Asia/Kolkata"}))
+        self.assertEqual(maintain.warm_reasons(self.spec),
+                         [f"guests get {self.spec.timezone} and the {self.spec.layout} layout now"])
+        (warm / "meta.json").write_text(json.dumps({k: v for k, v in meta.items() if k not in ("timezone", "layout")}))
+        self.assertEqual(maintain.warm_reasons(self.spec), ["made before desk recorded its guest's time zone and layout"])
+        (warm / "meta.json").write_text(json.dumps(meta))
         self.build("base")
         self.assertEqual(maintain.warm_reasons(self.spec), ["base build changed"])
 

@@ -177,7 +177,9 @@ def run_selftest(image: str, reboot: bool = False, keep: bool = False, spec: Ima
         return "7×6=42 through a11y clicks"
 
     def typing():
-        text = "Zażółć gęślą jaźń ĄĆĘŁŃÓŚŹŻ 123 !@#"
+        layout = runs.spec_for(run).layout  # the guest's, which a new config.toml does not change
+        text = ("Zażółć gęślą jaźń ĄĆĘŁŃÓŚŹŻ 123 !@#" if layout == "pl"
+                else "Pack my box with five dozen liquor jugs 123 !@#")
         if spec.family == "windows":
             # Started once only: a second start opens another window, which takes the focus
             # whenever it comes up, in the middle of typing too. Notepad's first-run tip, which
@@ -188,7 +190,7 @@ def run_selftest(image: str, reboot: bool = False, keep: bool = False, spec: Ima
             _wait_focused(run, sc["editor"], sc["editor_window"])
         else:
             _launch(run, sc["editor"], sc["editor_window"])
-        display.type_text(run.dom(), text, layout=spec.layout)
+        display.type_text(run.dom(), text, layout=layout)
         display.wait_stable(run.dom())
         value = _node(run, sc["editor_role"])["value"]
         _check(value == text, f"editor holds {value!r}")
@@ -252,7 +254,7 @@ def run_selftest(image: str, reboot: bool = False, keep: bool = False, spec: Ima
             step("exec through guest agent", agent)
             if spec.desktop:
                 step("a11y + click by name", calculator)
-                step("type (incl. Polish letters)", typing)
+                step("type with real key presses", typing)
             else:
                 step("package from a file (push/pull)", package)
                 step("web interface (desk forward)", web)

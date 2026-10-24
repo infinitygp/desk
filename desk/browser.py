@@ -367,6 +367,7 @@ def viewport(run, size: str, browser: str | None = None) -> str:
     # typed again once.
     for attempt in range(2 if chromium else 1):
         for node, value in zip(specs, (width, height), strict=True):
+            # Digits, which every layout desk knows has where US has them.
             note = a11y.replace_text(run, node, str(value), spec.layout)
             display.key(run.dom(), "ret")
             if note:

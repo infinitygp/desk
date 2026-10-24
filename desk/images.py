@@ -5,12 +5,14 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import tarfile
 import tempfile
 import subprocess
 import time
 import xml.etree.ElementTree as ET
+import zoneinfo
 from dataclasses import MISSING, fields, replace
 from pathlib import Path
 
@@ -519,9 +521,32 @@ PROVISION_TIMEOUT = 3600
 PROVISIONED = "provisioned.qcow2"
 
 
+def posix_tz(name: str) -> str:
+    """The POSIX TZ string of a time zone, for OpenWrt, which has no zone files: the footer of the
+    host's TZif file (version 2 on)."""
+    for root in zoneinfo.TZPATH:
+        f = Path(root) / name
+        if f.is_file():
+            data = f.read_bytes()
+            footer = data[:-1].rpartition(b"\n")[2]
+            if data[:4] == b"TZif" and data[4:5] >= b"2" and data.endswith(b"\n") and footer.isascii() \
+                    and footer.decode().isprintable() and footer:
+                return footer.decode()
+    raise DeskError(f"no TZif file with a POSIX rule for {name} in {', '.join(zoneinfo.TZPATH)} (tzdata)")
+
+
+def provision_env(spec: ImageSpec) -> dict[str, str]:
+    """What the provisioning scripts are told about the host's choices."""
+    env = {"DESK_TIMEZONE": spec.timezone, "DESK_LAYOUT": spec.layout}
+    if spec.family == "openwrt":
+        env["DESK_POSIX_TZ"] = posix_tz(spec.timezone)
+    return env
+
+
 def provision(spec: ImageSpec, port: int, relogin: bool = True) -> None:
     if not spec.provision_scripts:
         return
+    env = provision_env(spec)
     if spec.files and spec.family == "windows":
         # Windows guests keep the harness's helpers in C:\desk; scp speaks to its OpenSSH. Files
         # copied there from the answer-file CD are read-only, and the running agent should not
@@ -554,10 +579,13 @@ def provision(spec: ImageSpec, port: int, relogin: bool = True) -> None:
                 if guest.scp(port, str(spec.path(script)), f"{spec.root_user}@127.0.0.1:C:/desk/provision.ps1") != 0:
                     r = subprocess.CompletedProcess([], 255, b"", b"copying the script failed")
                 else:
-                    r = guest.ssh_run(port, spec.root_user, "powershell.exe -NoProfile -ExecutionPolicy Bypass "
-                                      "-File C:\\desk\\provision.ps1", capture=True, timeout=PROVISION_TIMEOUT)
+                    # The SSH session is PowerShell's, whose environment the script inherits.
+                    r = guest.ssh_run(port, spec.root_user, "".join(f"$env:{k} = '{v}'; " for k, v in env.items())
+                                      + "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\\desk\\provision.ps1",
+                                      capture=True, timeout=PROVISION_TIMEOUT)
             else:
-                r = guest.ssh_run(port, spec.root_user, f"{spec.shell} -s", input=spec.path(script).read_bytes(), capture=True,
+                r = guest.ssh_run(port, spec.root_user, "".join(f"{k}={shlex.quote(v)} " for k, v in env.items())
+                                  + f"{spec.shell} -s", input=spec.path(script).read_bytes(), capture=True,
                                   timeout=PROVISION_TIMEOUT)
             # 255: the connection itself broke. Windows does that now and then during its first
             # boot after setup; provisioning scripts are idempotent, so run it again.
@@ -709,7 +737,8 @@ def warm(spec: ImageSpec, force: bool = False, promote_it: bool = True) -> str:
         raise
     disk.chmod(0o444)
     meta = {"image": spec.name, "created": time.time(), "base": str(base_dir),
-            "fingerprint": warm_fingerprint(spec), "expires": expires}
+            "fingerprint": warm_fingerprint(spec), "expires": expires, "timezone": spec.timezone,
+            "layout": spec.layout}
     (wd / "meta.json").write_text(json.dumps(meta, indent=2))
     if promote_it:
         promote(link, wd)

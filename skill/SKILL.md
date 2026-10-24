@@ -36,7 +36,7 @@ desk wait --change                  # until its window has appeared and settled
 desk a11y                           # focused window as text: @refs, roles, names, values, click points
 desk click @e7                      # click an element from that listing (real mouse click)
 desk click --name "Log in"          # or find it by name on the fly
-desk type 'Zażółć gęślą jaźń'       # real key presses, Polish letters included
+desk type 'hello world'             # real key presses (Polish letters too on the pl layout)
 desk shot                           # prints the PNG's path and size (.../shots/0001.png 1280x800); Read it
 desk down                           # destroy the VM and its files (--keep to keep them)
 ```
@@ -56,7 +56,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk set-text @eN TEXT` | Replace an editable field's text as a user would: focus it, select all, type (or paste what the keyboard cannot type); web forms (React) see it; says when the field shows something else afterwards |
 | `desk shot [--label L] [-o FILE] [--settle S] [--region X,Y,W,H \| --window NAME] [--zoom N]` | Screenshot once the screen is still (up to 3 s; `--settle 0` = now); `--region`/`--window` cut out a part, `--zoom 2` enlarges it to judge details |
 | `desk move X Y`, `desk drag X1 Y1 X2 Y2`, `desk scroll X Y DY` | Pointer; `DY>0` scrolls down |
-| `desk type TEXT [--anywhere]` | Type with real key presses: ASCII and Polish letters; text starting with a dash works. In a browser it refuses when no text field has the focus (the page would take the keys as shortcuts); `--anywhere` types anyway |
+| `desk type TEXT [--anywhere]` | Type with real key presses: ASCII, and Polish letters where the guest's layout is pl (`desk doctor` names the one new guests get); text starting with a dash works. In a browser it refuses when no text field has the focus (the page would take the keys as shortcuts); `--anywhere` types anyway |
 | `desk key COMBO...` | `super`, `enter`, `esc`, `tab`, `ctrl+alt+t`, `shift+f10`, `alt+f4`, `f5`, letters |
 | `desk snapshot save NAME`, `desk snapshot restore NAME`, `desk snapshot list`, `desk snapshot delete NAME` | Save the running guest (~3-5 s) and go back to it (~1-3 s) |
 | `desk up IMAGE --resolution WxH --scale N --displays N`, `desk display [--resolution WxH] [--scale N]` | Monitors: mode, scaling in percent, several displays ([system.md](system.md)) |
@@ -135,7 +135,8 @@ guest shell; `--root` and `--gui` apply to the whole snippet.
 - Layouts that are still building move what `desk a11y` listed a moment ago; clicks by @ref or name
   look the position up again, but a click by pixels from an old listing can miss. Typing after a
   missed click is refused in a browser rather than sent to the page as shortcuts.
-- `desk type` only knows ASCII and Polish letters; for anything else use `desk set-text`.
+- `desk type` only knows ASCII, and Polish letters on the pl layout; for anything else use
+  `desk set-text`.
 - In a GTK file chooser, `ctrl+l`, type the path, then click "Open": Enter may only accept the
   path completion.
 - `pgrep -f`/`pkill -f PATTERN` in `desk exec --gui -- '...'` also matches the `systemd-run` that
@@ -295,8 +296,9 @@ then (`runs/<id>/failed-start.png`).
 
 - The desktop guests run GNOME on Wayland with user `tester` (password `tester`) with
   ordinary sudo, so sudo, polkit and Cockpit's administrative access ask for that password as on a
-  real machine (`desk exec --root` does not need it), 1280x800, en_US locale, Polish (programmer's)
-  keyboard layout = US plus AltGr letters,
+  real machine (`desk exec --root` does not need it), 1280x800, en_US locale, the host's time zone,
+  the US keyboard layout (Polish (programmer's), US plus AltGr letters, where the host's
+  `config.toml` says `layout = "pl"`),
   animations, screen lock and the hot corner off, session starts on the desktop rather than the
   overview. GNOME Software is masked, so no update banners or prompts cover the app under test
   and the overview's search does not list it; to test something about Software itself:

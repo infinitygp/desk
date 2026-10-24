@@ -96,6 +96,67 @@ class HostImages(unittest.TestCase):
             load_image("fedora-44-gnome")
 
 
+class GuestSettings(unittest.TestCase):
+    """The guests' time zone and keyboard layout: the image's, else config.toml's, else the host's."""
+
+    define = HostImages.define
+
+    def test_the_hosts_zone_is_where_localtime_links(self):
+        from desk.config import host_timezone
+
+        with tempfile.TemporaryDirectory() as tmp:
+            link = Path(tmp) / "localtime"
+            link.symlink_to("../usr/share/zoneinfo/Asia/Kolkata")
+            self.assertEqual(host_timezone(link), "Asia/Kolkata")
+            link.unlink()
+            link.symlink_to("/usr/share/zoneinfo/posix/Asia/Kolkata")
+            self.assertEqual(host_timezone(link), "Asia/Kolkata")
+            link.unlink()
+            link.symlink_to("/usr/share/zoneinfo/right/Asia/Kolkata")
+            self.assertIsNone(host_timezone(link))
+            link.unlink()
+            link.symlink_to("/usr/share/zoneinfo/Nowhere/Fake")
+            self.assertIsNone(host_timezone(link))
+            link.unlink()
+            link.write_bytes(b"TZif2")  # a copy says nothing of its name
+            self.assertIsNone(host_timezone(link))
+            self.assertIsNone(host_timezone(Path(tmp) / "missing"))
+
+    def test_images_get_the_hosts_unless_they_set_their_own(self):
+        with mock.patch("desk.config.TIMEZONE", "America/New_York"), mock.patch("desk.config.LAYOUT", "pl"):
+            spec = load_image("fedora-44-gnome")
+            self.assertEqual((spec.timezone, spec.layout), ("America/New_York", "pl"))
+            self.define("fedora-44-gnome-xx", 'base = "fedora-44-gnome"\ntimezone = "Asia/Kolkata"\nlayout = "us"\n')
+            spec = load_image("fedora-44-gnome-xx")
+            self.assertEqual((spec.timezone, spec.layout), ("Asia/Kolkata", "us"))
+
+    def test_what_desk_cannot_apply_is_refused(self):
+        self.define("fedora-44-gnome-de", 'base = "fedora-44-gnome"\nlayout = "de"\n')
+        with self.assertRaisesRegex(DeskError, "layout is one of us, pl"):
+            load_image("fedora-44-gnome-de")
+        self.define("fedora-44-gnome-mars", 'base = "fedora-44-gnome"\ntimezone = "Mars/Olympus"\n')
+        with self.assertRaisesRegex(DeskError, "no time zone this host knows"):
+            load_image("fedora-44-gnome-mars")
+
+    def test_config_toml_with_what_desk_cannot_apply_is_refused(self):
+        from desk import config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "config.toml"
+            for text, said in (('layout = "de"\n', "layout is one of us, pl"),
+                               ('timezone = "Mars/Olympus"\n', "no time zone this host knows"),
+                               ('keyboard = "pl"\n', "it takes home")):
+                f.write_text(text)
+                with self.subTest(text=text), mock.patch("desk.config.CONFIG_FILE", f), \
+                        mock.patch("sys.stderr") as err, self.assertRaises(SystemExit) as e:
+                    config._local()
+                self.assertEqual(e.exception.code, 2)
+                self.assertIn(said, "".join(c.args[0] for c in err.write.call_args_list))
+            f.write_text('timezone = "Asia/Kolkata"\nlayout = "pl"\n')
+            with mock.patch("desk.config.CONFIG_FILE", f):
+                self.assertEqual(config._local(), {"timezone": "Asia/Kolkata", "layout": "pl"})
+
+
 class WindowsCommands(unittest.TestCase):
     def test_linux_commands_untouched(self):
         spec = load_image("fedora-44-gnome")

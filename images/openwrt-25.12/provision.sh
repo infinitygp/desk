@@ -23,6 +23,10 @@ done
 mkdir -p /desk
 uci set system.@system[0].log_file='/desk/syslog'
 uci set system.@system[0].log_size='1024'
+# The host's time zone, from desk; with no zone files OpenWrt takes it as a POSIX rule.
+uci set system.@system[0].zonename="$DESK_TIMEZONE"
+uci set system.@system[0].timezone="$DESK_POSIX_TZ"
 uci commit system
+/etc/init.d/system reload
 /etc/init.d/log restart
 apk list -I 2>/dev/null | cut -d' ' -f1 | sort > /desk/packages

@@ -2,7 +2,8 @@
 # First boot of the Arch cloud image: installs GNOME, then powers off for `desk image build`.
 # @SSH_PUBKEY@ and @PASSWORD_HASH@ are replaced by `desk image build`.
 hostname: desk-arch
-timezone: Europe/Warsaw
+# UTC until provisioning sets the zone desk was given (DESK_TIMEZONE).
+timezone: Etc/UTC
 disable_root: false
 ssh_pwauth: false
 users:

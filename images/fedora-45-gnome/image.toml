@@ -14,6 +14,5 @@ files = ["../_shared/gnome"]
 ready = "systemctl --user is-active --quiet graphical-session.target"
 agent_wrapper = ["/usr/local/libexec/desk-ga-run"]
 relogin = "systemctl restart gdm"
-layout = "pl"
 # A pre-release moves fast.
 rebuild_days = 7

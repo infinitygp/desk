@@ -10,7 +10,7 @@ import sys
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, tzinfo
 from pathlib import Path
 
 from . import browser, guest
@@ -230,7 +230,7 @@ def format_changes(ch: FileChanges, limit: int = 200) -> str:
 
 
 def guest_problems(run) -> dict[str, str]:
-    from .clock import guest_since
+    from .clock import guest_since, zone
 
     spec = load_image(run.image)
     since = guest_since(run)
@@ -256,7 +256,7 @@ def guest_problems(run) -> dict[str, str]:
         raise DeskError(f"collecting the guest's logs gave nothing (exit {r.returncode}): "
                         + (r.stderr.decode(errors="replace").strip()[-300:] or "no output"))
     out = {k: "\n".join(v).strip() for k, v in sections.items()}
-    return openwrt_sections(out, since) if spec.family == "openwrt" else out
+    return openwrt_sections(out, since, zone(run)) if spec.family == "openwrt" else out
 
 
 # Sat Oct 10 00:54:12 2026 daemon.warn odhcpd[2081]: text (logd, in the guest's local time)
@@ -273,12 +273,11 @@ OPENWRT_NOISE = re.compile(
     r"procd: Got unexpected signal 1$")
 
 
-def openwrt_sections(raw: dict[str, str], since: float) -> dict[str, str]:
+def openwrt_sections(raw: dict[str, str], since: float, tz: tzinfo) -> dict[str, str]:
     """OpenWrt's sections in the Linux ones' terms: services procd keeps that are not running
     (failed), crash loops (unitfailures, before reboots too), warnings and errors of the log
-    since `since` (journal, ISO times), segfaults (coredumps) and package changes."""
-    from .clock import GUEST_TZ
-
+    since `since` (journal, ISO times; logd writes the guest's local time, `tz`), segfaults
+    (coredumps) and package changes."""
     failed = []
     try:
         services = json.loads(raw.get("services") or "{}")
@@ -296,7 +295,7 @@ def openwrt_sections(raw: dict[str, str], since: float) -> dict[str, str]:
         if not m:
             continue
         month, day, clock, year, facility, level, text = m.groups()
-        when = datetime.strptime(f"{year} {month} {day} {clock}", "%Y %b %d %H:%M:%S").replace(tzinfo=GUEST_TZ)
+        when = datetime.strptime(f"{year} {month} {day} {clock}", "%Y %b %d %H:%M:%S").replace(tzinfo=tz)
         if when.timestamp() < since:
             continue
         stamped = f"{when.isoformat()} {facility}.{level} {text}"
@@ -329,12 +328,10 @@ def unit_failures(text: str) -> list[str]:
 DNF_TIME = re.compile(r"(?<!\d)(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(?!\d)")
 
 
-def local_dnf_times(text: str) -> str:
-    from .clock import GUEST_TZ
-
+def local_dnf_times(text: str, tz: tzinfo) -> str:
     def local(m: re.Match) -> str:
         utc = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
-        return utc.astimezone(GUEST_TZ).strftime("%Y-%m-%d %H:%M:%S")
+        return utc.astimezone(tz).strftime("%Y-%m-%d %H:%M:%S")
 
     return "\n".join(DNF_TIME.sub(local, line) if not line.startswith("installed ") else line
                      for line in text.splitlines())
@@ -399,7 +396,9 @@ def collect(run, diff: bool = False) -> Path:
             problems = {"error": str(e)}
             print(f"[desk] warning: the report has no guest logs: {e}", file=sys.stderr)
         if family == "linux" and problems.get("packages"):
-            problems["packages"] = local_dnf_times(problems["packages"])
+            from .clock import zone
+
+            problems["packages"] = local_dnf_times(problems["packages"], zone(run))
         for key in ("journal", "avc", "packages"):
             if problems.get(key):
                 (out / f"{key}.txt").write_text(problems[key] + "\n")

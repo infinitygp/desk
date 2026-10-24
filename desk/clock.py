@@ -6,20 +6,25 @@ import json
 import re
 import shlex
 import time
-from datetime import datetime
+from datetime import datetime, tzinfo
 from zoneinfo import ZoneInfo
 
 from . import guest
 from .config import DeskError, load_image
 
-# Every image is installed in this time zone; times given without a zone are the guest's local time.
-GUEST_TZ = ZoneInfo("Europe/Warsaw")
 UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 7 * 86400}
 RELATIVE = re.compile(r"([+-])((?:\d+[smhdw])+)")
 
 
-def parse(value: str, now: float) -> float:
-    """`+3d`, `-2h30m` (from the guest's current time) or `2026-12-24 23:59` (guest local time)."""
+def zone(run) -> ZoneInfo:
+    """The guest's time zone, in which times given without a zone are read."""
+    from .runs import spec_for
+
+    return ZoneInfo(spec_for(run).timezone)
+
+
+def parse(value: str, now: float, tz: tzinfo) -> float:
+    """`+3d`, `-2h30m` (from the guest's current time) or `2026-12-24 23:59` (local time in `tz`)."""
     m = RELATIVE.fullmatch(value.strip())
     if m:
         delta = sum(int(n) * UNITS[u] for n, u in re.findall(r"(\d+)([smhdw])", m.group(2)))
@@ -29,7 +34,7 @@ def parse(value: str, now: float) -> float:
     except ValueError:
         raise DeskError(f"time is +3d, -2h30m (s m h d w) or 2026-12-24 23:59 (got {value!r})") from None
     if when.tzinfo is None:
-        when = when.replace(tzinfo=GUEST_TZ)
+        when = when.replace(tzinfo=tz)
     return when.timestamp()
 
 
@@ -70,7 +75,7 @@ def apply(run) -> None:
 
 
 def set_time(run, value: str) -> float:
-    target = parse(value, time.time() + run.clock_offset)
+    target = parse(value, time.time() + run.clock_offset, zone(run))
     _sync(run, False)
     _jump(run, target)
     run.log_event(clock=value, offset=round(run.clock_offset))
@@ -160,7 +165,7 @@ def advance(run, value: str, step: str, timeout: float = 600):
     time after each step and the units that started."""
     spec = load_image(run.image)
     current = time.time() + run.clock_offset
-    target, size = parse(value, current), duration(step)
+    target, size = parse(value, current, zone(run)), duration(step)
     if target <= current:
         raise DeskError("--step moves the clock forward only")
     _sync(run, False)
@@ -185,10 +190,11 @@ def reset(run) -> None:
     run.log_event(clock="reset")
 
 
-def describe(run, now: float | None = None) -> str:
+def describe(run, now: float | None = None, tz: tzinfo | None = None) -> str:
     t = guest_time(run) if now is None else now
+    tz = tz or zone(run)
     host = time.time()
-    shown = datetime.fromtimestamp(t, GUEST_TZ)
+    shown = datetime.fromtimestamp(t, tz)
     off = t - host
     if abs(off) < 2:
         return f"{shown:%Y-%m-%d %H:%M:%S %Z} (as the host)"
@@ -196,7 +202,7 @@ def describe(run, now: float | None = None) -> str:
     sign, off = ("+" if off > 0 else "-"), round(abs(off))
     d, rest = divmod(off, 86400)
     note = ""
-    here = datetime.fromtimestamp(host, GUEST_TZ)
+    here = datetime.fromtimestamp(host, tz)
     if shown.utcoffset() != here.utcoffset():
         # Offsets count real time; across a change of summer time the wall clock shows an hour more or less.
         note = f"; {shown:%Z} there, {here:%Z} now, so the wall clock differs by {_wall(shown, here)}"

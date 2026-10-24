@@ -4,28 +4,49 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 from desk import clock
 from desk.config import DeskError
 
 
+WARSAW = ZoneInfo("Europe/Warsaw")
+
+
 class Parse(unittest.TestCase):
     def test_relative(self):
-        self.assertEqual(clock.parse("+3d", 1000.0), 1000.0 + 3 * 86400)
-        self.assertEqual(clock.parse("-2h30m", 100000.0), 100000.0 - 9000)
-        self.assertEqual(clock.parse("+1w", 0.0), 7 * 86400)
+        self.assertEqual(clock.parse("+3d", 1000.0, WARSAW), 1000.0 + 3 * 86400)
+        self.assertEqual(clock.parse("-2h30m", 100000.0, WARSAW), 100000.0 - 9000)
+        self.assertEqual(clock.parse("+1w", 0.0, WARSAW), 7 * 86400)
 
     def test_absolute_is_guest_local_time(self):
-        # 24 December: CET, UTC+1.
-        self.assertEqual(clock.parse("2026-12-24 23:59", 0.0),
+        # 24 December: CET, UTC+1; in New York EST, UTC-5.
+        self.assertEqual(clock.parse("2026-12-24 23:59", 0.0, WARSAW),
                          datetime.fromisoformat("2026-12-24T22:59:00+00:00").timestamp())
-        self.assertEqual(clock.parse("2026-07-01T12:00:00+00:00", 0.0),
+        self.assertEqual(clock.parse("2026-12-24 23:59", 0.0, ZoneInfo("America/New_York")),
+                         datetime.fromisoformat("2026-12-25T04:59:00+00:00").timestamp())
+        self.assertEqual(clock.parse("2026-07-01T12:00:00+00:00", 0.0, WARSAW),
                          datetime.fromisoformat("2026-07-01T12:00:00+00:00").timestamp())
 
     def test_bad(self):
         for bad in ("3d", "+3x", "+", "tomorrow", ""):
             with self.subTest(bad=bad), self.assertRaises(DeskError):
-                clock.parse(bad, 0.0)
+                clock.parse(bad, 0.0, WARSAW)
+
+    def test_the_zone_is_the_runs(self):
+        from unittest import mock
+
+        from desk import runs
+
+        run = runs.Run(id="r", image="fedora-44-gnome", domain="d", ssh_port=1, user="tester", created=0.0,
+                       timezone="Asia/Kolkata", layout="pl")
+        self.assertEqual(clock.zone(run), ZoneInfo("Asia/Kolkata"))
+        # A run from before desk kept them: the image's.
+        legacy = runs.Run(id="r", image="fedora-44-gnome", domain="d", ssh_port=1, user="tester", created=0.0)
+        with mock.patch("desk.config.TIMEZONE", "America/New_York"), mock.patch("desk.config.LAYOUT", "us"):
+            self.assertEqual(clock.zone(legacy), ZoneInfo("America/New_York"))
+            self.assertEqual(runs.spec_for(run).layout, "pl")
+            self.assertEqual(runs.spec_for(legacy).layout, "us")
 
 
 class GuestSince(unittest.TestCase):
@@ -57,5 +78,5 @@ class Describe(unittest.TestCase):
         import time
 
         # The guest's clock is read a moment before the host's.
-        shown = clock.describe(None, now=time.time() + 31 * 86400 - 0.05)
+        shown = clock.describe(None, now=time.time() + 31 * 86400 - 0.05, tz=WARSAW)
         self.assertIn("host +31d 00:00:00", shown)
