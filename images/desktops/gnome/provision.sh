@@ -67,7 +67,6 @@ download-updates=false
 
 [org/gnome/shell]
 welcome-dialog-last-shown-version='999'
-enabled-extensions=['desk-helper@desk.local']
 CONF
 dconf update
 
@@ -78,6 +77,21 @@ timedatectl set-timezone "$DESK_TIMEZONE"
 localectl set-x11-keymap "$DESK_LAYOUT"
 as_tester() { runuser -u tester -- env XDG_RUNTIME_DIR=/run/user/1000 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus "$@"; }
 as_tester gsettings set org.gnome.desktop.input-sources sources "[('xkb', '$DESK_LAYOUT')]"
+
+# The shell extension, added to the extensions the user has on, so the distribution's own (the
+# Ubuntu dock) stay on.
+as_tester python3 -c '
+from gi.repository import Gio
+s = Gio.Settings.new("org.gnome.shell")
+on = s.get_strv("enabled-extensions")
+if "desk-helper@desk.local" not in on:
+    s.set_strv("enabled-extensions", on + ["desk-helper@desk.local"])
+Gio.Settings.sync()'
+# GNOME 51 dumps core now and then while the warm-up shuts down, and the unit started after the
+# shell fails turns every extension off for good (disable-user-extensions), the desk helper too,
+# so a warm state came up without it. The crash stays in the journal; the extensions stay on.
+systemctl --global mask org.gnome.Shell-disable-extensions.service
+as_tester gsettings set org.gnome.shell disable-user-extensions false
 
 # The accessibility tree (`desk a11y`). GTK4 exposes it regardless; Gecko, Chromium/Electron
 # and Qt only when an assistive technology is announced (org.a11y.Status) or when forced
