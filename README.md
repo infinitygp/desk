@@ -84,7 +84,10 @@ again once the agent is back, but not an action, which may have been done. Comma
 `powershell -EncodedCommand`, since Windows' command line mangles quotes.
 The install updates Edge and WebView2 once and turns off what works in the background during
 tests and no test needs: their updater (it went on with an update inside every run), SysMain, the
-search indexer, telemetry and Delivery Optimization. Before the warm state is saved, `idle`
+search indexer, telemetry and Delivery Optimization. Provisioning excludes from Defender, whose
+real-time protection Tamper Protection keeps on, the folders where tests run and write programs
+(`C:\Users`, the program folders, `C:\ProgramData`, Windows' `Temp` and `Installer`); AMSI blocks a
+script that excludes the whole drive. Before the warm state is saved, `idle`
 empties the standby list, the file cache that made up almost half of the saved memory (4.7 GB
 before, 2.7 GB after).
 Provisioning opts in to early feature updates and enables the taskbar position and size

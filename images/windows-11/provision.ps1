@@ -20,6 +20,15 @@ $store = 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore'
 if (-not (Test-Path $store)) { New-Item $store -Force | Out-Null }
 New-ItemProperty $store -Name AutoDownload -Value 2 -PropertyType DWord -Force | Out-Null
 
+# Defender skips where tests run and write programs (profiles, program folders, temporary files and
+# installers), so it takes no time from them. Tamper Protection keeps real-time protection on (only
+# a click in Windows Security turns it off), but a local administrator may still exclude folders;
+# AMSI blocks a script that excludes the whole drive as malicious.
+$skip = 'C:\Users', 'C:\desk', 'C:\Program Files', 'C:\Program Files (x86)', 'C:\ProgramData', 'C:\Windows\Temp', 'C:\Windows\Installer'
+Add-MpPreference -ExclusionPath $skip
+$missing = $skip | Where-Object { (Get-MpPreference).ExclusionPath -notcontains $_ }
+if ($missing) { throw "Defender did not exclude $($missing -join ', ')" }
+
 # The same desktop every time: Windows Spotlight changes the wallpaper daily and adds a "Learn
 # about this picture" icon, which would differ between screenshots and between icon layouts.
 $cloud = 'HKCU:\Software\Policies\Microsoft\Windows\CloudContent'
