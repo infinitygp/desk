@@ -5,7 +5,7 @@ description: Test desktop applications and system packages (rpm, Arch packages, 
 
 # desk: disposable desktop VMs
 
-`desk` (on PATH; `desk doctor` prints where its source and image definitions are, and where
+`desk` (on PATH; `desk doctor` prints where its source and this host's images are, and where
 runs and reports are kept on this host)
 starts a throwaway VM from a golden image with a logged-in desktop in about two seconds, and
 drives it like a person would: real mouse and keyboard input from outside the guest, the screen
@@ -145,7 +145,7 @@ guest shell; `--root` and `--gui` apply to the whole snippet.
 - `dnf` prints its progress on stderr even with `-q`; add `>/dev/null 2>&1` and check the result with
   `rpm -q` / `rpm -V` instead of reading the transaction log.
 - Web UIs on `https://localhost` with a self-signed certificate (a Cockpit installed by the test
-  itself; `fedora-44-cockpit`'s browsers trust its own) show the browser's warning on every new
+  itself; `fedora-44-gnome-cockpit`'s browsers trust its own) show the browser's warning on every new
   run: `desk click --name Advanced`, then `desk click --name Proceed` (it scrolls itself).
 
 ## Evidence report
@@ -169,18 +169,23 @@ itself after 30 minutes (`--limit`).
 
 ## Images
 
-`desk image list` shows them and which of them this host has built: a host keeps the images it
-tests on, not all of them. When the image a test needs is not built, build that one
-(`desk maintain --only NAME` builds, warms and selftests it; or `desk image build NAME`, then
-`desk image warm NAME`; 10-25 minutes and 5-25 GB, so not the others along with it); a variant (`-cockpit`) only needs `desk image warm NAME` once its
-base is there, and without a warm state a run still starts, cold, in ~20 s.
-`fedora-44-gnome` is the default; `fedora-45-gnome` is the next
-Fedora release (beta until it is out); `fedora-44-cockpit` has
-Cockpit open in Firefox, logged in as tester with administrative access (its Chromium trusts
-Cockpit's certificate too, logged out); `arch-gnome` is Arch Linux
-(rolling, pacman, no SELinux) with the newest GNOME and libraries; `windows-11` is Windows 11
-Enterprise (evaluation) for Windows builds and installers; `openwrt-25.12` is OpenWrt 25.12 without
-a desktop, for OpenWrt packages and LuCI apps. Images are as old as their last build
+An image is made of blocks, and its name says which: a distro, the desktop it runs, addons on top
+(`fedora-44-gnome-cockpit` is Fedora 44 with GNOME and Cockpit). `desk image list` shows the
+images this host has defined and which of them it has built: a host keeps the images it tests on,
+not all of them. When `desk up` says an image is not defined here, it prints the
+`desk image add ...` that defines it; run that, then build that one image (`desk maintain --only
+NAME` builds, warms and selftests it; 10-25 minutes and 5-25 GB, so not the others along with
+it). An image with an addon runs on the install of the one without (`-cockpit` on
+`fedora-44-gnome`) and only needs its own warm state once that is built; without a warm state a
+run still starts, cold, in ~20 s. `desk image blocks` lists what images can be made of,
+`desk image show NAME` the settings an image ends up with.
+
+`fedora-44-gnome` is the default; `fedora-45-gnome` is the next Fedora release (beta until it is
+out); `fedora-44-gnome-cockpit` has Cockpit open in Firefox, logged in as tester with
+administrative access (its Chromium trusts Cockpit's certificate too, logged out); `arch-gnome` is
+Arch Linux (rolling, pacman, no SELinux) with the newest GNOME and libraries; `windows-11` is
+Windows 11 Enterprise (evaluation) for Windows builds and installers; `openwrt-25.12` is OpenWrt
+25.12 without a desktop, for OpenWrt packages and LuCI apps. Images are as old as their last build
 (`desk image list` shows the date) unless the host renews them with `desk maintain`, by hand or
 from its weekly timer; if `desk up` prints a warning about a failed maintenance or a licence
 running out, pass it on to the user.
@@ -206,7 +211,7 @@ runs and what the host had (free disk, memory, swap, other runs), as a full disk
 report (and the video with `record = true`) shows every step in its timeline.
 
 ```toml
-image = "fedora-44-cockpit"
+image = "fedora-44-gnome-cockpit"
 record = true
 [build]
 run = "make rpm"
@@ -331,7 +336,7 @@ then (`runs/<id>/failed-start.png`).
   silently installing it; install it afterwards only to continue the test.
 - `desk selftest <image>` checks the image and the harness end to end. `desk maintain` renews
   the images in use on the host, those with a warm state (rebuilds, selftests, switches builds), when it is run, by hand or
-  from the weekly timer a host may have (`desk doctor` says). After changing an image definition
-  in `images/<name>/` of the source repository, run `desk maintain --only <name>`: it rebuilds what
-  changed and switches only after the selftest passes (`desk image build --force` /
-  `desk image warm --force` switch without testing).
+  from the weekly timer a host may have (`desk doctor` says). After changing a block in
+  `images/` of the source repository, run `desk maintain --only <name>` for an image that uses it:
+  it rebuilds what changed and switches only after the selftest passes (`desk image build --force`
+  / `desk image warm --force` switch without testing).

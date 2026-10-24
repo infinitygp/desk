@@ -23,7 +23,7 @@ PARTED = """BYT;
 class Image(unittest.TestCase):
     def test_headless_openwrt(self):
         spec = load_image("openwrt-25.12")
-        self.assertEqual((spec.installer, spec.family, spec.desktop, spec.shell), ("disk", "openwrt", False, "sh"))
+        self.assertEqual((spec.installer, spec.family, spec.desktop, spec.shell), ("disk", "openwrt", "", "sh"))
         self.assertTrue((spec.dir / spec.disk_files / "etc/uci-defaults/99-desk").is_file())
         with self.assertRaisesRegex(DeskError, "has none"):
             spec.need_desktop("desk a11y")

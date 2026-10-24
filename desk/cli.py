@@ -5,12 +5,12 @@ import re
 import subprocess
 import sys
 import time
-from dataclasses import replace
+from dataclasses import fields, replace
 from datetime import datetime
 from pathlib import Path
 
-from . import a11y, browser, display, evidence, guest, images, record, runs
-from .config import DeskError, list_images, load_image, version
+from . import a11y, browser, config, display, evidence, guest, images, record, runs
+from .config import BASE, WARM, DeskError, list_images, load_image, version
 
 
 def _emit_shot(run: runs.Run, png: bytes, out: str | None, label: str = "") -> None:
@@ -42,7 +42,31 @@ def cmd_image(args) -> None:
     if args.image_cmd == "list":
         _image_list()
         return
+    if args.image_cmd == "blocks":
+        _image_blocks()
+        return
+    if args.image_cmd == "add":
+        names = config.add_image(args.distro, args.desktop, args.addon or [], _image_settings(args))
+        for n in names[:-1]:
+            print(f"added {n}, whose install {names[-1]} runs on")
+        print(f"added {names[-1]}; build, warm and selftest it with: desk maintain --only {names[-1]}")
+        return
+    if args.image_cmd == "set":
+        settings = _image_settings(args)
+        if not settings:
+            raise DeskError("desk image set takes --memory, --cpus or --disk")
+        config.set_image(args.name, settings)
+        print(f"{args.name}: {', '.join(f'{k} = {v}' for k, v in settings.items())} "
+              "(desk maintain makes the builds it needs)")
+        return
+    if args.image_cmd == "rm":
+        config.remove_image(args.name)
+        print(f"removed {args.name}; its builds stay until deleted by hand ({BASE / args.name}*, {WARM / args.name}*)")
+        return
     spec = load_image(args.name)
+    if args.image_cmd == "show":
+        _image_show(spec)
+        return
     # Builds are versioned (images.promote), so runs of the current build may go on meanwhile.
     with runs.image_lock(spec.name):
         if args.image_cmd == "build":
@@ -53,11 +77,54 @@ def cmd_image(args) -> None:
         runs.prune_versions()
 
 
+def _image_settings(args) -> dict:
+    """What `desk image add/set` sets besides the blocks, as image settings."""
+    given = {"memory_mib": args.memory, "vcpus": args.cpus, "disk_gb": args.disk}
+    return {k: v for k, v in given.items() if v is not None}
+
+
+def _shown(value) -> str:
+    """A setting as `desk image show` prints it: files within their root, a script by its first line."""
+    if isinstance(value, list):
+        return "[" + ", ".join(_shown(v) for v in value) + "]"
+    if isinstance(value, str) and value.startswith("/"):
+        p = Path(value)
+        return str(p.relative_to(config.IMAGES_DIR)) if p.is_relative_to(config.IMAGES_DIR) else value
+    if isinstance(value, str) and "\n" in value.strip():
+        return config._toml_value(value.strip().partition("\n")[0] + " ...")
+    return config._toml_value(value)
+
+
+def _image_show(spec) -> None:
+    """The settings an image's blocks add up to, those that differ from ImageSpec's defaults."""
+    data = config.read_image(spec.name)
+    print(f"# {config._image_file(spec.name)}: " + " + ".join(
+        [data["distro"], *([data["desktop"]] if data["desktop"] else []), *data["addons"]]))
+    for f in fields(spec):
+        value = getattr(spec, f.name)
+        if f.name not in ("name", "dir", "base_version", "warm_version") and value != f.default:
+            print(f"{f.name} = {_shown(value)}")
+
+
+def _image_blocks() -> None:
+    for kind in config.KINDS:
+        print(kind)
+        for name, d in config.blocks(kind).items():
+            data = config._toml(d / "block.toml")
+            also = config.BLOCK_ONLY[kind]
+            note = f" ({also}: {', '.join(data[also])})" if also and also in data else ""
+            print(f"  {name:<16}{config.describe(d)}{note}")
+
+
 def _image_list() -> None:
     from .maintain import days_left, load_status
 
     status = load_status()
-    print(f"{'IMAGE':<22}{'STATE':<8}{'BUILT':<12}{'SELFTEST':<20}NOTES")
+    # Builds stay when their definition goes (older desks shipped definitions of their own).
+    current = {p.name for d in (BASE, WARM) if d.is_dir() for p in d.iterdir() if p.is_symlink()}
+    orphans = sorted(current - set(list_images()))
+    w = max([22, *(len(n) + 2 for n in [*list_images(), *orphans])])
+    print(f"{'IMAGE':<{w}}{'STATE':<8}{'BUILT':<12}{'SELFTEST':<20}NOTES")
     for name in list_images():
         spec = load_image(name)
         notes = [f"variant of {spec.base}"] if spec.base else []
@@ -85,7 +152,11 @@ def _image_list() -> None:
         if m and not m["ok"]:
             what = "skipped" if m["ok"] is None else "failed"
             notes.append(f"maintenance {what} {time.strftime('%m-%d', time.localtime(m['t']))}: {m['note']}")
-        print(f"{name:<22}{state:<8}{built:<12}{test:<20}{'; '.join(notes)}")
+        print(f"{name:<{w}}{state:<8}{built:<12}{test:<20}{'; '.join(notes)}")
+    for name in orphans:
+        command = config.add_command(name)
+        print(f"{name:<{w}}{'-':<8}{'-':<12}{'-':<20}builds without a definition: "
+              + (f"use them again after {command}" if command else "delete them by hand"))
 
 
 def _resolution(text: str | None) -> tuple[int, int] | None:
@@ -207,6 +278,13 @@ def _memory_arg(text: str) -> int:
     if not m:
         raise argparse.ArgumentTypeError(f"memory is a number with M or G, e.g. 8G (got {text!r})")
     return int(m[1]) * (1024 if m[2] == "G" else 1)
+
+
+def _disk_arg(text: str) -> int:
+    m = re.fullmatch(r"([1-9][0-9]*)G", text)
+    if not m:
+        raise argparse.ArgumentTypeError(f"a disk size is a number of GB with G, e.g. 60G (got {text!r})")
+    return int(m[1])
 
 
 def _cpus_arg(text: str) -> int:
@@ -561,10 +639,10 @@ def cmd_reboot(args) -> None:
         steps.run_prepare(spec, run)
         run.log_event(prepare="prepare")
         png, _ = display.wait_stable(dom, timeout=10)
-        print(f"prepared again ({spec.prepare})")
+        print(f"prepared again ({images._named(spec.path(spec.prepare))})")
     elif spec.prepare:
         print(f"note: programs open before the reboot are gone; `desk prepare` sets up again what {spec.name} "
-              "prepares (fedora-44-cockpit: Firefox logged in to Cockpit), or reboot with --prepare")
+              "prepares (fedora-44-gnome-cockpit: Firefox logged in to Cockpit), or reboot with --prepare")
     if args.shot:
         _emit_shot(run, png, None, "reboot")
 
@@ -850,6 +928,22 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("image", help="golden images")
     isub = p.add_subparsers(dest="image_cmd", required=True)
     isub.add_parser("list")
+    isub.add_parser("blocks", help="the distros, desktops and addons images are made of")
+    ip = isub.add_parser("add", help="define an image of this host: a distro, its desktop, addons")
+    ip.add_argument("distro")
+    ip.add_argument("desktop", nargs="?")
+    ip.add_argument("--addon", action="append", metavar="NAME", help="repeatable, in the order they apply")
+    image_sizes = [ip]
+    ip = isub.add_parser("set", help="change an image's sizes")
+    ip.add_argument("name")
+    image_sizes.append(ip)
+    for ip in image_sizes:
+        ip.add_argument("--memory", type=_memory_arg, metavar="SIZE", help="e.g. 8G (a new warm state)")
+        ip.add_argument("--cpus", type=_cpus_arg, metavar="N", help="vCPUs (a new warm state)")
+        ip.add_argument("--disk", type=_disk_arg, metavar="SIZE", help="e.g. 60G (a new install)")
+    for name, hlp in (("rm", "remove an image's definition (its builds stay)"),
+                      ("show", "the settings an image's blocks add up to")):
+        isub.add_parser(name, help=hlp).add_argument("name")
     for name, hlp in (("build", "unattended install of the base image"),
                       ("warm", "save a logged-in desktop for instant runs")):
         ip = isub.add_parser(name, help=hlp)
@@ -1025,7 +1119,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--timeout", type=float, default=300, help="seconds until the new session must be up")
     p.add_argument("--command", help="reboot with this (as root), e.g. 'dnf offline reboot -y' for an upgrade")
     p.add_argument("--prepare", action="store_true",
-                   help="then redo the image's preparation (fedora-44-cockpit: Firefox logged in to Cockpit)")
+                   help="then redo the image's preparation (fedora-44-gnome-cockpit: Firefox logged in to Cockpit)")
     p.set_defaults(func=cmd_reboot)
 
     p = sub.add_parser("selftest", help="end-to-end check of an image and the harness")
@@ -1105,10 +1199,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--timeout", type=float, default=600, help="seconds to wait for each step to finish")
     p.set_defaults(func=cmd_clock)
 
-    p = sub.add_parser("prepare", help="redo the image's preparation where it is missing (fedora-44-cockpit: "
+    p = sub.add_parser("prepare", help="redo the image's preparation where it is missing (fedora-44-gnome-cockpit: "
                        "Firefox logged in to Cockpit with administrative access), e.g. after a reboot")
     p.add_argument("hook", nargs="?", default="prepare",
-                   help="another step of the image's prepare script (fedora-44-cockpit: admin)")
+                   help="another step of the image's prepare script (fedora-44-gnome-cockpit: admin)")
     _action_opts(p)
     p.set_defaults(func=cmd_prepare)
 

@@ -1,0 +1,6 @@
+# Cockpit, logged in as tester with administrative access in Firefox: for testing Cockpit plugins.
+# Packaging and dependency tests belong on the image without it, which has no Cockpit, like a
+# fresh Workstation.
+distros = ["fedora-44"]
+provision = "provision.sh"
+prepare = "prepare.py"

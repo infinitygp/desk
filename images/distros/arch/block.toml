@@ -1,4 +1,4 @@
-# Arch Linux (rolling) with GNOME on Wayland: the official cloud image, set up by cloud-init.
+# Arch Linux (rolling): the official cloud image, set up by cloud-init; user-data installs GNOME.
 installer = "cloudimg"
 os_variant = "archlinux"
 memory_mib = 4096
@@ -10,10 +10,6 @@ cloud_image_url = "https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_
 secure_boot = false
 user_data = "user-data"
 user = "tester"
-provision = "../_shared/gnome/provision.sh"
-files = ["../_shared/gnome"]
-ready = "systemctl --user is-active --quiet graphical-session.target"
-# Run as root after provisioning so the session picks up the shell extension.
-relogin = "systemctl restart gdm"
 # A rolling release drifts quickly; a fresh install keeps tests close to what users have.
 rebuild_days = 14
+desktops = ["gnome"]

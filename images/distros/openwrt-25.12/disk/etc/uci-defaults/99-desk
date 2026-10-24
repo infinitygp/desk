@@ -1,4 +1,4 @@
-# desk (images/openwrt-25.12): run once at the first boot, like the image's own uci-defaults.
+# desk (images/distros/openwrt-25.12): run once at the first boot, like the image's own uci-defaults.
 # One NIC on passt, which forwards SSH to the address its DHCP hands out: the LAN takes its
 # address by DHCP instead of serving 192.168.1.1, and its firewall zone lets SSH and LuCI in.
 uci set network.lan.proto='dhcp'

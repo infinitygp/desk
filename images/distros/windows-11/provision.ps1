@@ -1,5 +1,5 @@
 # Runs over SSH (as tester, elevated) before the warm state is saved; the reboot that follows
-# (relogin in image.toml) starts the in-session agent again. Keep it idempotent.
+# (relogin in block.toml) starts the in-session agent again. Keep it idempotent.
 # Any error ends it: a setting that could not be made must not end up in a warm state that looks
 # complete.
 $ErrorActionPreference = 'Stop'

@@ -54,7 +54,7 @@ started has finished, and prints which units ran (in a scenario: `clock = "+3d"`
 ## Surviving a system upgrade
 
 Whether a package still works after the user upgrades Fedora: install it on the older release's
-image (`fedora-44-gnome`, `fedora-44-cockpit`), check it works, then upgrade like a user would and
+image (`fedora-44-gnome`, `fedora-44-gnome-cockpit`), check it works, then upgrade like a user would and
 check again (package still installed, services and timers still enabled, the UI still works):
 
 ```bash
@@ -64,7 +64,7 @@ desk reboot --command 'dnf offline reboot -y' --timeout 3600   # boots into the 
 
 In a scenario: `root = "dnf system-upgrade download -y --releasever=45"` (with `timeout = 1800`),
 then `reboot = "dnf offline reboot -y"` with `timeout = 3600`. After the reboot only the desktop
-session is back: programs open before it have to be started again; on `fedora-44-cockpit` a
+session is back: programs open before it have to be started again; on `fedora-44-gnome-cockpit` a
 `prepare = true` step (or `desk prepare`) opens Firefox logged in to Cockpit again. The upgrade itself
 takes about 10 minutes (download ~2 min, offline upgrade and boot ~7 min).
 `fedora-45-gnome` is the next release itself (a beta until it is out).

@@ -4,7 +4,7 @@ Part of the desk skill ([SKILL.md](SKILL.md)); the commands and pitfalls there a
 
 ## Cockpit plugins
 
-Use `fedora-44-cockpit` to test what the plugin does: Firefox shows Cockpit at
+Use `fedora-44-gnome-cockpit` to test what the plugin does: Firefox shows Cockpit at
 `https://localhost:9090`, logged in with administrative access. Chromium trusts Cockpit's
 certificate too but starts logged out: `desk browser open --browser chromium
 https://localhost:9090`, then log in as tester (password tester). Install the plugin's package with

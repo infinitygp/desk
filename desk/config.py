@@ -32,10 +32,15 @@ def version() -> str:
 # (`home`), which libvirt to use (`uri`), the guests' time zone and keyboard layout. The
 # environment wins over the file.
 CONFIG_FILE = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "desk" / "config.toml"
-# Image definitions of this host's own (one in its language, one for its hardware), beside the
-# shipped ones and like them, a directory per image.
-LOCAL_IMAGES = CONFIG_FILE.parent / "images"
-IMAGE_ROOTS = (IMAGES_DIR, LOCAL_IMAGES)
+CONFIG_DIR = CONFIG_FILE.parent
+# Images are made of blocks: a distro (how it is installed and talked to), the desktop it runs and
+# addons on top, each a directory with a block.toml of ImageSpec settings and the files these
+# name. The shipped ones are in images/, the host's own (one in its language, one for its
+# hardware) beside config.toml, laid out alike.
+BLOCK_ROOTS = (IMAGES_DIR, CONFIG_DIR)
+KINDS = ("distros", "desktops", "addons")
+# The images this host has: a file each, written by `desk image add`, naming its blocks.
+IMAGES = CONFIG_DIR / "images"
 
 
 # The layouts `desk type` knows: US, and Polish (programmer's), which is US plus AltGr letters.
@@ -163,7 +168,7 @@ class ImageSpec:
     relogin: str | None = None
     # The guest's keyboard layout (one of LAYOUTS), which `desk type` maps characters to keys for,
     # and its time zone, in which desk clock and the report read times without a zone. Both are
-    # config.toml's or the host's unless image.toml sets them; provisioning applies them.
+    # config.toml's or the host's unless the image's file sets them; provisioning applies them.
     layout: str = "us"
     timezone: str = "UTC"
     # "windows": boot `iso` with an answer-file CD built from `unattend` and `unattend_files`.
@@ -188,9 +193,10 @@ class ImageSpec:
     # How the harness talks to this kind of guest: "linux" (systemd, bash), "windows" or
     # "openwrt" (BusyBox ash, procd, apk).
     family: str = "linux"
-    # A graphical session to drive (a11y, browser, programs started in it). Without one the
-    # screen is a text console: screenshots, keys and typing still work.
-    desktop: bool = True
+    # The graphical session to drive (a11y, browser, programs started in it): the desktop block's
+    # name, "windows" for Windows'. "": the screen is a text console, where screenshots, keys and
+    # typing still work.
+    desktop: str = ""
     # Account for `exec --root` and system work: Linux has its own root key, a Windows
     # administrator gets a full token over SSH anyway.
     root_user: str = "root"
@@ -207,7 +213,7 @@ class ImageSpec:
     # Prints the minutes left until the guest's licence runs out (Windows evaluation); read at
     # every warm-up, so `desk maintain` reinstalls in time and `desk up` warns.
     expiry: str | None = None
-    # Not from image.toml: a specific build instead of the current one (`desk maintain` tests a
+    # Not from a definition: a specific build instead of the current one (`desk maintain` tests a
     # new build before making it current).
     base_version: str | None = None
     warm_version: str | None = None
@@ -268,17 +274,9 @@ class ImageSpec:
                             "console); use desk exec, desk forward PORT for a web interface, desk shot, key, type")
 
     def path(self, rel: str) -> Path:
-        """A file the definition names, relative to its directory. The shipped definitions and the
-        host's own are one tree for this: a host's variant reaches its base's files as
-        `../fedora-44-gnome/provision.sh` like a shipped one."""
-        own = self.dir / rel
-        if own.exists():
-            return own
-        for root in IMAGE_ROOTS:
-            p = Path(os.path.normpath(root / self.dir.name / rel))
-            if root != self.dir.parent and p.exists():
-                return p
-        return own
+        """A file the definition names: blocks name theirs relative to themselves, which composing
+        the image turns into absolute paths."""
+        return self.dir / rel
 
     @property
     def provision_scripts(self) -> list[str]:
@@ -292,50 +290,202 @@ class ImageSpec:
         return WARM / (f"{self.name}.{self.warm_version}" if self.warm_version else self.name)
 
 
-def _image_dir(name: str) -> Path | None:
-    found = [root / name for root in IMAGE_ROOTS if (root / name / "image.toml").is_file()]
-    if len(found) > 1:
-        raise DeskError(f"image {name!r} is defined twice, in {found[0]} and in {found[1]}: rename the host's own")
-    return found[0] if found else None
+# What decides how the base disk gets installed; any change means a new install. Memory and
+# vCPUs are not among them: the warm-up and every run set them, so a change is a new warm state.
+INSTALL_KEYS = ("installer", "location", "kickstart", "iso", "iso_url", "iso_sha256", "kernel", "initrd",
+                "extra_args", "user_data", "cloud_image_url", "secure_boot", "release", "unattend",
+                "unattend_files", "image_index", "virtio_win_iso", "openssh_msi", "os_variant",
+                "disk_gb", "disk_image_url", "disk_files", "install_marker")
+# Settings that name files of their block.
+PATH_KEYS = ("kickstart", "user_data", "unattend", "disk_files", "prepare")
+# Lists of files that the blocks of an image add up to, in the order distro, desktop, addons.
+LIST_KEYS = ("unattend_files", "provision", "files")
+# What a block says about the others besides its settings: the desktops a distro was tried with
+# (none: it comes with its own, as Windows does, or has none), the distros an addon works on.
+BLOCK_ONLY = {"distros": "desktops", "desktops": None, "addons": "distros"}
+# What an image's file sets besides naming its blocks: settings that name no files.
+NOT_OVERRIDES = {"name", "dir", "base", "base_version", "warm_version", *PATH_KEYS, *LIST_KEYS}
+
+
+def blocks(kind: str) -> dict[str, Path]:
+    """The blocks of a kind by name, shipped and the host's own."""
+    found: dict[str, Path] = {}
+    for root in BLOCK_ROOTS:
+        d = root / kind
+        for p in sorted(d.iterdir()) if d.is_dir() else []:
+            if not (p / "block.toml").is_file():
+                continue
+            if p.name in found:
+                raise DeskError(f"{kind[:-1]} {p.name!r} is defined twice, in {found[p.name]} and in {p}: "
+                                "rename the host's own")
+            if kind != "distros" and "-" in p.name:
+                raise DeskError(f"{p}: the name of a {kind[:-1]} has no '-', which separates the blocks in "
+                                "image names")
+            found[p.name] = p
+    return found
+
+
+def describe(block: Path) -> str:
+    """What a block is: the first sentence of the comment its block.toml starts with."""
+    words = []
+    for line in (block / "block.toml").read_text().splitlines():
+        if not line.startswith("#"):
+            break
+        words.append(line.lstrip("#").strip())
+    text = " ".join(words)
+    return text[:text.index(". ") + 1] if ". " in text else text
+
+
+def _block(kind: str, name: str) -> tuple[Path, dict]:
+    """A block's settings, its files as absolute paths."""
+    d = blocks(kind).get(name)
+    if d is None:
+        raise DeskError(f"no {kind[:-1]} {name!r} (there are: {', '.join(blocks(kind)) or 'none'})")
+    data = _toml(d / "block.toml")
+
+    def resolve(rel: str) -> str:
+        p = Path(os.path.normpath(d / rel))
+        if not p.exists():
+            raise DeskError(f"{d / 'block.toml'}: {rel} does not exist")
+        return str(p)
+
+    for key in PATH_KEYS:
+        if key in data:
+            data[key] = resolve(data[key])
+    for key in LIST_KEYS:
+        if key in data:
+            data[key] = [resolve(x) for x in ([data[key]] if isinstance(data[key], str) else data[key])]
+    return d, data
+
+
+def image_name(distro: str, desktop: str | None, addons: list[str]) -> str:
+    return "-".join([distro, *([desktop] if desktop else []), *addons])
+
+
+def parse_name(name: str) -> tuple[str, str | None, list[str]] | None:
+    """The blocks an image name stands for, None when it names no distro."""
+    for distro in sorted(blocks("distros"), key=len, reverse=True):
+        if name == distro:
+            return distro, None, []
+        if name.startswith(f"{distro}-"):
+            desktop, *addons = name[len(distro) + 1:].split("-")
+            return distro, desktop, addons
+    return None
+
+
+def _layers(distro: str, desktop: str | None, addons: list[str]) -> tuple[Path, list[dict], list[dict]]:
+    """The distro's directory, its and the desktop's settings, the addons'; refuses what does not go
+    together."""
+    d_dir, d = _block("distros", distro)
+    desktops = d.pop("desktops", None)
+    if desktops is None and desktop:
+        raise DeskError(f"{distro} comes with its desktop or has none; it takes no other (got {desktop!r})")
+    if desktops is not None and desktop not in desktops:
+        raise DeskError(f"{distro} needs one of the desktops {', '.join(desktops)}"
+                        + (f" (got {desktop!r})" if desktop else ""))
+    base = [d]
+    if desktop:
+        base.append({**_block("desktops", desktop)[1], "desktop": desktop})
+    if len(set(addons)) != len(addons):
+        raise DeskError(f"an addon named twice: {', '.join(addons)}")
+    extra = []
+    for a in addons:
+        data = _block("addons", a)[1]
+        allowed = data.pop("distros", None)
+        if allowed is not None and distro not in allowed:
+            raise DeskError(f"the addon {a} works on {', '.join(allowed)}, not on {distro}")
+        extra.append(data)
+    return d_dir, base, extra
+
+
+def variant_of(distro: str, desktop: str | None, addons: list[str]) -> str | None:
+    """The image whose install an image with these blocks shares: the one without its addons, when
+    these only add to the warm state."""
+    _, _, extra = _layers(distro, desktop, addons)
+    if not addons or any(k in INSTALL_KEYS for layer in extra for k in layer):
+        return None
+    return image_name(distro, desktop, [])
+
+
+def _image_file(name: str) -> Path:
+    return IMAGES / f"{name}.toml"
+
+
+def add_command(name: str) -> str | None:
+    """The `desk image add` that defines an image of this name, None when no blocks make it."""
+    parts = parse_name(name)
+    if parts is None:
+        return None
+    try:
+        _layers(*parts)
+    except DeskError:
+        return None
+    distro, desktop, addons = parts
+    return " ".join(["desk image add", distro, *([desktop] if desktop else []), *(f"--addon {a}" for a in addons)])
+
+
+def _unknown(name: str) -> str:
+    known = f"defined here: {', '.join(list_images()) or 'none'}"
+    command = add_command(name)
+    if command is None:
+        return f"unknown image {name!r} ({known}; desk image blocks lists what images are made of)"
+    return f"image {name!r} is not defined on this host ({known}); define it with: {command}"
+
+
+def read_image(name: str) -> dict:
+    """What an image's file says: its blocks and the settings it overrides."""
+    f = _image_file(name)
+    if not f.is_file():
+        raise DeskError(_unknown(name))
+    data = _toml(f)
+    if not isinstance(data.get("distro"), str):
+        raise DeskError(f"{f}: no distro")
+    data.setdefault("desktop", None)
+    data.setdefault("addons", [])
+    want = image_name(data["distro"], data["desktop"], data["addons"])
+    if want != name:
+        raise DeskError(f"{f}: its blocks make the image {want}, so the file is {_image_file(want).name}")
+    wrong = sorted(k for k in data if k in NOT_OVERRIDES)
+    if wrong:
+        raise DeskError(f"{f}: an image's file names its blocks and sets sizes and the like, not {', '.join(wrong)}"
+                        " (a block of the host's own holds files)")
+    return data
 
 
 def load_image(name: str) -> ImageSpec:
-    d = _image_dir(name)
-    if d is None:
-        raise DeskError(f"unknown image {name!r} (known: {', '.join(list_images()) or 'none'})")
-    spec = d / "image.toml"
-    data = _toml(spec)
-    if "base" in data:
-        parent_dir = _image_dir(data["base"])
-        if parent_dir is None:
-            raise DeskError(f"{name}: its base image {data['base']!r} does not exist")
-        parent = _toml(parent_dir / "image.toml")
-        if "base" in parent:
-            raise DeskError(f"{name}: a variant must be based on an installed image, not on another variant")
-        # Inherit everything; the parent's file references stay relative to the parent.
-        rel = Path("..") / data["base"]
-        for key in ("kickstart", "user_data", "prepare"):
-            if parent.get(key):
-                parent[key] = str(rel / parent[key])
-        if parent.get("files"):
-            parent["files"] = [str(rel / f) for f in parent["files"]]
-        if parent.get("provision"):
-            pv = parent["provision"]
-            parent["provision"] = [str(rel / x) for x in ([pv] if isinstance(pv, str) else pv)]
-        data = {**parent, **data}
-    for key in ("base_version", "warm_version"):
-        data.pop(key, None)
-    data.setdefault("layout", LAYOUT)
-    data.setdefault("timezone", TIMEZONE)
-    if data["layout"] not in LAYOUTS:
-        raise DeskError(f"{spec}: layout is one of {', '.join(LAYOUTS)} (got {data['layout']!r})")
-    if not _zone(data["timezone"]):
-        raise DeskError(f"{spec}: timezone {data['timezone']!r} is no time zone this host knows")
+    data = read_image(name)
+    distro, desktop, addons = data.pop("distro"), data.pop("desktop"), data.pop("addons")
+    d_dir, layers, extra = _layers(distro, desktop, addons)
+    spec: dict = {}
+    for layer in layers + extra:
+        for key, value in layer.items():
+            if key in LIST_KEYS:
+                spec[key] = spec.get(key, []) + value
+            elif key == "prepare" and "prepare" in spec:
+                raise DeskError(f"{name}: two of its blocks bring a prepare script")
+            else:
+                spec[key] = value
+    base = variant_of(distro, desktop, addons)
+    if base:
+        # A variant runs on its base's install, so it has its sizes too unless it sets its own.
+        own = sorted(k for k in data if k in INSTALL_KEYS)
+        if own:
+            raise DeskError(f"{name} runs on the install of {base}: set {', '.join(own)} there")
+        spec.update({k: v for k, v in read_image(base).items() if k not in ("distro", "desktop", "addons")})
+        spec["base"] = base
+    spec.update(data)
+    spec.setdefault("layout", LAYOUT)
+    spec.setdefault("timezone", TIMEZONE)
+    f = _image_file(name)
+    if spec["layout"] not in LAYOUTS:
+        raise DeskError(f"{f}: layout is one of {', '.join(LAYOUTS)} (got {spec['layout']!r})")
+    if not _zone(spec["timezone"]):
+        raise DeskError(f"{f}: timezone {spec['timezone']!r} is no time zone this host knows")
     try:
-        return ImageSpec(name=name, dir=d, **data)
+        return ImageSpec(name=name, dir=d_dir, **spec)
     except TypeError as e:
         # An unknown or a missing setting.
-        raise DeskError(f"{spec}: {str(e).replace('ImageSpec.__init__() ', '')}") from None
+        raise DeskError(f"{f}: {str(e).replace('ImageSpec.__init__() ', '')}") from None
 
 
 def _toml(path: Path) -> dict:
@@ -347,5 +497,83 @@ def _toml(path: Path) -> dict:
 
 
 def list_images() -> list[str]:
-    return sorted({p.name for root in IMAGE_ROOTS if root.is_dir()
-                   for p in root.iterdir() if (p / "image.toml").is_file()})
+    if not IMAGES.is_dir():
+        return []
+    old = sorted(p for p in IMAGES.iterdir() if (p / "image.toml").is_file())
+    if old:
+        raise DeskError(f"{old[0]} is the definition of an older desk: images are made of blocks now. Move its "
+                        f"files into a block of the host's own ({CONFIG_DIR}/addons/NAME/block.toml), add the "
+                        "image with desk image add and delete the directory")
+    return sorted(p.stem for p in IMAGES.glob("*.toml"))
+
+
+def _toml_value(v) -> str:
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, int):
+        return str(v)
+    if isinstance(v, list):
+        return "[" + ", ".join(_toml_value(x) for x in v) + "]"
+    # A JSON string is a TOML basic string.
+    return json.dumps(str(v), ensure_ascii=False)
+
+
+def write_image(name: str, data: dict) -> Path:
+    """An image's file: its blocks first, then the settings it overrides."""
+    IMAGES.mkdir(parents=True, exist_ok=True)
+    lines = ["# Written by desk image add and desk image set, which keep no comments; editing it by hand is fine."]
+    for key in ("distro", "desktop", "addons", *sorted(set(data) - {"distro", "desktop", "addons"})):
+        if data.get(key) not in (None, []):
+            lines.append(f"{key} = {_toml_value(data[key])}")
+    f = _image_file(name)
+    tmp = f.with_name(f".{f.name}.{os.getpid()}")
+    tmp.write_text("\n".join(lines) + "\n")
+    os.replace(tmp, f)
+    return f
+
+
+def add_image(distro: str, desktop: str | None, addons: list[str], settings: dict) -> list[str]:
+    """Define an image, and the one whose install it runs on when that is missing; the names
+    written, that one first."""
+    name = image_name(distro, desktop, addons)
+    if _image_file(name).exists():
+        raise DeskError(f"{name} is defined already ({_image_file(name)}); desk image set {name} changes it")
+    written = []
+    base = variant_of(distro, desktop, addons)
+    if base and not _image_file(base).exists():
+        write_image(base, {"distro": distro, "desktop": desktop})
+        written.append(base)
+    write_image(name, {"distro": distro, "desktop": desktop, "addons": addons, **settings})
+    try:
+        load_image(name)
+    except DeskError:
+        for n in [name, *written]:
+            _image_file(n).unlink()
+        raise
+    return [*written, name]
+
+
+def set_image(name: str, settings: dict) -> None:
+    data = read_image(name)
+    before = _image_file(name).read_bytes()
+    write_image(name, {**data, **settings})
+    try:
+        load_image(name)
+    except DeskError:
+        _image_file(name).write_bytes(before)
+        raise
+
+
+def remove_image(name: str) -> None:
+    read_image(name)
+    users = []
+    for other in list_images():
+        try:
+            if load_image(other).base == name:
+                users.append(other)
+        except DeskError:
+            pass
+    if users:
+        raise DeskError(f"{', '.join(users)} runs on the install of {name}; "
+                        f"remove {'it' if len(users) == 1 else 'them'} first")
+    _image_file(name).unlink()

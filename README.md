@@ -32,14 +32,14 @@ of it) with `gh`, logged in: the first line would then be
 `gh release download --repo OWNER/desk --pattern desk.pyz --output ~/.local/bin/desk`.
 
 On its first start a release unpacks itself into `~/.cache/desk/<build>/` and runs from there,
-so the image definitions and the helpers it starts or copies into guests are ordinary files;
+so the blocks and the helpers it starts or copies into guests are ordinary files;
 builds unpacked earlier go after a week unused. `desk --version` says which release runs and
 from where.
 
 To work on desk, clone the repository instead; `bin/desk install` links `bin/desk` into
 `~/.local/bin` and the skill directory into `~/.agents/skills/desk`, so edits show at once, and
 leaves a desk that is already there alone. A checkout and a release of the same commit see the
-same image definitions, so switching between them rebuilds nothing.
+same blocks, so switching between them rebuilds nothing.
 
 ## Layout
 
@@ -49,42 +49,67 @@ scripts/             build.py makes desk.pyz, the release; pyz_main.py is its en
 skill/               agent skill: SKILL.md, and a file per task it points to
 desk/                harness code (guest_a11y.py runs inside the guest)
 tests/               unit tests
-images/<name>/       image.toml, kickstart, provision.sh
+images/              blocks images are made of: distros/, desktops/, addons/ (Images)
 <home>/              base/, warm/, runs/, reports/, maintain/, cache/, logs/, keys/, ssh/  (see Host setup)
 ```
 
 ## Images
 
-A host keeps the images it tests on: none is required, and nothing builds one unasked.
-`desk image list` and `desk doctor` show which are there.
+An image is made of blocks: a distro (how it is installed and how desk talks to it), the desktop
+it runs and addons on top. A host defines the images it tests on with `desk image add`, which
+writes `~/.config/desk/images/<name>.toml`; none is required, and nothing builds one unasked. The
+name is the blocks (`fedora-44-gnome`, `fedora-44-gnome-cockpit`), so a scenario's `image` means
+the same on every host, and `desk up` of an image the host has not defined prints the
+`desk image add` that defines it.
 
-| Image | Install | Notes |
-|---|---|---|
-| `fedora-44-gnome` | kickstart over the network | the default |
-| `fedora-45-gnome` | kickstart, the beta's installer tree, the release's packages | next release; follows it once it is out |
-| `fedora-44-cockpit` | variant of `fedora-44-gnome` | Cockpit, Firefox logged in with administrative access |
-| `arch-gnome` | official cloud image, GNOME installed by cloud-init (NoCloud seed) | rolling; no Secure Boot, no Firefox |
-| `windows-11` | evaluation ISO + `autounattend.xml` on a second CD | 90-day evaluation, reinstalled by `desk maintain` |
-| `openwrt-25.12` | the release's disk image (x86-64 ext4 combined, EFI), grown and preconfigured offline | no desktop: BusyBox ash, procd, apk, LuCI |
+| Block | Kind | Install, or what it adds | Notes |
+|---|---|---|---|
+| `fedora-44` | distro | kickstart over the network, Workstation | desktops: `gnome` |
+| `fedora-45` | distro | kickstart, the beta's installer tree, the release's packages | next release; follows it once it is out |
+| `arch` | distro | official cloud image, GNOME installed by cloud-init (NoCloud seed) | rolling; no Secure Boot, no Firefox |
+| `windows-11` | distro | evaluation ISO + `autounattend.xml` on a second CD | comes with its desktop; 90-day evaluation, reinstalled by `desk maintain` |
+| `openwrt-25.12` | distro | the release's disk image (x86-64 ext4 combined, EFI), grown and preconfigured offline | no desktop: BusyBox ash, procd, apk, LuCI |
+| `gnome` | desktop | shell extension, settings for steady screenshots, accessibility | |
+| `cockpit` | addon | Cockpit, Firefox logged in with administrative access | Fedora 44 |
 
 The Linux images with a desktop have Chromium, the Fedora ones Firefox as well.
 
 ```bash
-bin/desk image build fedora-44-gnome   # unattended install, ~10 min, needs network
-bin/desk image warm fedora-44-gnome    # boot, provision, shut down, boot again, save the desktop
-bin/desk image shot windows-11         # look at a graphical installer while it runs
-bin/desk image list                    # state, build date, last selftest, licence, problems
+bin/desk image blocks                              # the distros, desktops and addons there are
+bin/desk image add fedora-44 gnome                 # defines fedora-44-gnome on this host
+bin/desk image add fedora-44 gnome --addon cockpit # fedora-44-gnome-cockpit
+bin/desk image set fedora-44-gnome --memory 8G     # sizes (--disk 60G is a new install)
+bin/desk image show fedora-44-gnome-cockpit        # the settings its blocks add up to
+bin/desk maintain --only fedora-44-gnome           # build, warm and selftest it
+bin/desk image build fedora-44-gnome               # by hand: unattended install, ~10 min, needs network
+bin/desk image warm fedora-44-gnome                # boot, provision, shut down, boot again, save the desktop
+bin/desk image shot windows-11                     # look at a graphical installer while it runs
+bin/desk image list                                # state, build date, last selftest, licence, problems
+bin/desk image rm fedora-44-gnome-cockpit          # the definition; its builds stay until deleted by hand
 ```
 
 ### Definitions
 
-`images/<name>/image.toml` sets the fields of `ImageSpec` (`desk/config.py`), next to the files it
-names (kickstart or `user-data`, `provision.sh`, `prepare.py`); shared provisioning files live in
-`images/_shared/`. The settings that shape a run:
+A block is a directory with a `block.toml` of `ImageSpec` fields (`desk/config.py`), next to the
+files it names relative to itself (kickstart or `user-data`, `provision.sh`, `prepare.py`); the
+first sentence of its first comment is what `desk image blocks` says of it. An image layers its
+distro, its desktop and its addons in that order:
+
+- A setting of a later block wins; `provision`, `files` and `unattend_files` add up, and only one
+  block brings a `prepare`.
+- A distro lists the desktops it was tried with (`desktops`); one without the list comes with its
+  desktop (Windows) or has none (OpenWrt). An addon may list the distros it works on (`distros`).
+  `desk image add` refuses other combinations.
+- The image's own file names its blocks and sets what names no file: sizes, `layout`,
+  `timezone`, `rebuild_days`. `desk image add` and `desk image set` write it whole, without
+  comments; it may be edited by hand as well.
+
+The settings that shape a run:
 
 - `installer` (`kickstart`, `cloudimg`, `disk`, `windows`) and `family` (`linux`, `windows`,
   `openwrt`): how the image is installed and how desk talks to the guest.
-- `desktop = false`: the screen is a text console; commands that need a session refuse.
+- `desktop`: the session desk drives, set to the desktop block's name (`windows` on Windows).
+  Without one the screen is a text console, and commands that need a session refuse.
 - `layout` and `timezone`: the guest's keyboard layout, which `desk type` types through (`us`, or
   `pl`: Polish (programmer's), US plus AltGr letters, so Polish letters are real key presses too;
   any other layout moves keys desk cannot know of), and its time zone, in which `desk clock` and
@@ -99,23 +124,26 @@ names (kickstart or `user-data`, `provision.sh`, `prepare.py`); shared provision
   run other sizes, booting cold when they differ from the warm state's.
 - `rebuild_days`, `expiry`, `install_marker`: see Builds and maintenance.
 
-A variant (`base = "..."`) reuses its base's installed disk and has a warm state of its own. It
-inherits every setting, with the base's file references relative to the base; a `provision` of its
-own replaces the base's, so it names the base's script first (`provision =
-["../_shared/gnome/provision.sh", "provision.sh"]`). A variant is not the base of another.
+An image whose addons only add to the warm state (provisioning, files, a prepare script) is a
+variant: it runs on the install of the image without them, which `desk image add` defines too when
+it is missing, and has a warm state of its own. It takes that image's settings unless it sets its
+own; an install setting (`disk_gb`) is set there only.
 
 `prepare = "prepare.py"` runs `prepare(steps)` on the host once the provisioned session is up,
 before the warm state is saved (and after cold boots): what a user does before the tests start,
-with real input (`desk/steps.py`: `gui`, `wait_for`, `click`, `type`, `key`). `fedora-44-cockpit`
+with real input (`desk/steps.py`: `gui`, `wait_for`, `click`, `type`, `key`). The `cockpit` addon
 logs in to Cockpit that way. Its Cockpit serves a certificate from a CA of the image's own, which
 Firefox and Chromium trust, and its session has no idle timeout, since restoring the warm state
 moves the clock forward.
 
-Images only one host needs (a variant in its language, one for its hardware) are defined on that
-host, in `~/.config/desk/images/<name>/` (`$XDG_CONFIG_HOME`), laid out like `images/`. desk lists
-and maintains them with the shipped ones, and their paths reach the shipped definitions as if they
-were among them, as in the variant above. A name is in one of the two places only; a definition
-moved from one to the other keeps its builds.
+Blocks only one host needs (its language, its hardware) are kept on that host, in
+`~/.config/desk/distros/`, `desktops/` and `addons/` (`$XDG_CONFIG_HOME`), laid out like
+`images/`. desk offers them with the shipped ones. A name is in one of the two places only, and a
+block moved from one to the other keeps its builds: fingerprints name files within their root,
+as they do for a checkout and a release of the same commit. A desk before
+blocks kept a directory per image in `~/.config/desk/images/`; desk refuses those until their
+files are in an addon and the image is added again, and `desk image list` shows builds left without
+a definition.
 
 ### Provisioning
 
@@ -123,7 +151,7 @@ Provisioning (`provision`, `files`) runs in the warm-up's first boot, which then
 cleanly. That disk (`provisioned.qcow2` in the warm build) is what the warm state boots before it
 is saved and what cold runs boot, so both start from the same files and cold runs skip
 provisioning and the relogin; with no current warm build they boot the base disk and provision it.
-On the GNOME images (one script for Fedora and Arch, `images/_shared/gnome/provision.sh`) it
+On the GNOME images (one script for Fedora and Arch, `images/desktops/gnome/provision.sh`) it
 installs the shell extension, the keyboard layout and accessibility settings, and masks GNOME
 Software, whose banners and prompts would cover the app under test.
 Every script has `DESK_TIMEZONE` (an IANA name), `DESK_POSIX_TZ` (its POSIX rule, from the host's
@@ -138,7 +166,8 @@ else Firefox.
 Firefox:
 
 - Writes every page's console and uncaught errors to its output, so to the journal
-  (`images/_shared/gnome/desk-firefox.js`), where `desk browser console` and the report read them.
+  (`images/desktops/gnome/files/desk-firefox.js`), where `desk browser console` and the report read
+  them.
   Promises keep their rejection stack without the devtools open, and an autoconfig script
   (`desk.cfg`, loaded into every content process) adds the thrown value and stack of each uncaught
   exception as a `JavaScript error detail:` line, which desk joins to its error.
@@ -149,8 +178,9 @@ Firefox:
 - The Remote Agent (WebDriver BiDi) is not used, as it marks the browser window;
   `desk browser viewport` types the sizes into the responsive design mode.
 
-Chromium gets its policies and flags from `images/_shared/gnome/desk-chromium-*` (Fedora's wrapper
-reads flags from `/etc/chromium/chromium.conf`, Arch's launcher from `/etc/chromium-flags.conf`):
+Chromium gets its policies and flags from `images/desktops/gnome/files/desk-chromium-*` (Fedora's
+wrapper reads flags from `/etc/chromium/chromium.conf`, Arch's launcher from
+`/etc/chromium-flags.conf`):
 
 - `--password-store=basic`: GDM logs in without a password and leaves no unlocked keyring, for
   which Chromium would ask a new password;
@@ -178,7 +208,7 @@ What else differs from Firefox:
 ### Windows
 
 - The ISO, the virtio-win ISO and the Win32-OpenSSH MSI are downloaded into `cache/` when missing
-  and checked against the SHA-256 pinned in `image.toml`.
+  and checked against the SHA-256 pinned in its `block.toml`.
 - No TPM (LabConfig bypass); a virtio disk with the viostor driver loaded by Setup (QEMU 10.2's
   AHCI emulation crashes under Windows); an e1000e NIC (inbox driver); OpenSSH from the MSI with
   PowerShell as the shell; virtio-win guest tools for the display driver and qemu-guest-agent.
@@ -202,7 +232,7 @@ What else differs from Firefox:
   up almost half of the saved memory.
 
 UI Automation and programs on the desktop, which SSH sessions cannot see, go through an agent in
-the logged-in session (`images/_shared/windows/agent.ps1`, its port forwarded like SSH):
+the logged-in session (`images/distros/windows-11/agent/agent.ps1`, its port forwarded like SSH):
 
 - It serves one request at a time, so nothing may hold it: a connection that sends nothing is
   dropped after 5 s, a tree walk ends after 20 s, and a program that is waited for
@@ -398,8 +428,8 @@ The user needs `/dev/kvm` (the `kvm` group where it is not open to everybody); V
 
 What is the host's own lives outside the repository: images, runs and reports in
 `~/.local/share/desk` unless `~/.config/desk/config.toml` says otherwise (`$DESK_HOME` and
-`$DESK_URI` win over the file), the guests' time zone and keyboard layout, and the host's own
-image definitions in `~/.config/desk/images/`. `desk doctor` shows the time zone and layout guests
+`$DESK_URI` win over the file), the guests' time zone and keyboard layout, the host's images in
+`~/.config/desk/images/` and its own blocks beside them (Images). `desk doctor` shows the time zone and layout guests
 get and where they come from.
 
 ```toml

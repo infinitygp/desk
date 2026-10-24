@@ -50,24 +50,30 @@ guest; whatever talks to one is tried in one before it is committed:
 - Scenario files of the projects on the host that use desk (their `test/desk/*.toml`) must still
   pass `bin/desk scenario check`.
 
-### Image definitions (`images/`)
+### Blocks (`images/`)
 
-- After a change run `bin/desk maintain --only NAME`: it reinstalls or re-warms what the change
-  touches, selftests the new build and switches to it only then. `desk image build --force`
-  switches without testing.
+- Images are made of blocks (`images/distros/`, `desktops/`, `addons/`), and a host has the
+  images it defined (`desk image list`). After a change to a block run `bin/desk maintain --only
+  NAME` for an image of each kind that uses it: it reinstalls or re-warms what the change touches,
+  selftests the new build and switches to it only then. `desk image build --force` switches
+  without testing.
+- A desktop goes into a distro's `desktops` list, an addon's distro into its `distros`, once an
+  image of the two was built and passed its selftest. An image whose blocks are new to this host
+  is added for the check (`desk image add`) and removed with its builds afterwards unless the
+  user asked for it.
 - `bin/desk image shot NAME` shows the screen of an install that is running; a graphical
   installer that waits for an answer is the usual reason an install hangs.
 - A build takes long enough for the code to change under it: run it from a copy of the commit,
   `git archive HEAD | tar -x -C ~/.cache/desk-check/tree`, then `~/.cache/desk-check/tree/bin/desk ...`,
   and remove the copy afterwards.
 
-### The Windows agent (`images/_shared/windows/`)
+### The Windows agent (`images/distros/windows-11/agent/`)
 
 It is copied into the guest at every warm-up, so it needs no reinstall. To try a change:
 
 ```bash
 bin/desk up windows-11 --name wagent
-bin/desk -r wagent push images/_shared/windows/agent.ps1 C:/desk/agent.ps1   # uia.ps1 likewise
+bin/desk -r wagent push images/distros/windows-11/agent/agent.ps1 C:/desk/agent.ps1   # uia.ps1 likewise
 bin/desk -r wagent reboot                                                    # logs in again, starts it
 ```
 
@@ -86,7 +92,7 @@ git ls-files -co --exclude-standard | tar -czf ~/.cache/desk-tree.tgz -T -
 bin/desk -r host push ~/.cache/desk-tree.tgz /tmp/
 bin/desk -r host exec -- 'mkdir -p ~/desk && tar -xzf /tmp/desk-tree.tgz -C ~/desk && ~/desk/bin/desk doctor'
 # install what doctor names (desk exec --root -- dnf install -y ...), then the smallest image:
-bin/desk -r host exec --timeout 3000 -- 'cd ~/desk && bin/desk maintain --only openwrt-25.12'
+bin/desk -r host exec --timeout 3000 -- 'cd ~/desk && bin/desk image add openwrt-25.12 && bin/desk maintain --only openwrt-25.12'
 ```
 
 ## Releases

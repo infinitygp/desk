@@ -15,20 +15,20 @@ class Families(unittest.TestCase):
     def test_variants_go_with_their_base(self):
         fams = maintain.families()
         self.assertEqual(fams["fedora-44-gnome"][0], "fedora-44-gnome")
-        self.assertIn("fedora-44-cockpit", fams["fedora-44-gnome"])
-        self.assertNotIn("fedora-44-cockpit", fams)
+        self.assertIn("fedora-44-gnome-cockpit", fams["fedora-44-gnome"])
+        self.assertNotIn("fedora-44-gnome-cockpit", fams)
         self.assertEqual(fams["windows-11"], ["windows-11"])
 
     def test_a_definition_that_cannot_be_read_does_not_stop_the_others(self):
         def load(name):
             if name == "arch-gnome":
-                raise DeskError("images/arch-gnome/image.toml: not valid TOML")
+                raise DeskError("images/arch-gnome.toml: not valid TOML")
             return load_image(name)
 
         with mock.patch("desk.maintain.load_image", load):
             broken = {}
             fams = maintain.families(broken)
-            self.assertEqual(broken, {"arch-gnome": "images/arch-gnome/image.toml: not valid TOML"})
+            self.assertEqual(broken, {"arch-gnome": "images/arch-gnome.toml: not valid TOML"})
             self.assertIn("fedora-44-gnome", fams)
             self.assertNotIn("arch-gnome", fams)
             with self.assertRaises(DeskError):
@@ -174,7 +174,7 @@ class BusyMember(unittest.TestCase):
                 return True
             raise Busy(f"warm state of {m} is in use by another run")
 
-        warm = {"fedora-44-gnome": [], "fedora-44-cockpit": ["definition changed"] if new_variant else []}
+        warm = {"fedora-44-gnome": [], "fedora-44-gnome-cockpit": ["definition changed"] if new_variant else []}
         with mock.patch("desk.maintain.runs.image_lock", return_value=nullcontext()), \
                 mock.patch("desk.maintain.runs.check_memory"), \
                 mock.patch("desk.maintain.base_reasons", return_value=[]), \
@@ -182,7 +182,7 @@ class BusyMember(unittest.TestCase):
                 mock.patch("desk.maintain.images.warm", return_value="20261019-000000"), \
                 mock.patch("desk.maintain.images.promote") as promote, \
                 mock.patch("desk.selftest.run_selftest", side_effect=selftest):
-            lines = maintain._family("fedora-44-gnome", ["fedora-44-gnome", "fedora-44-cockpit"], Path("/x"), False)
+            lines = maintain._family("fedora-44-gnome", ["fedora-44-gnome", "fedora-44-gnome-cockpit"], Path("/x"), False)
         return lines, promote
 
     def test_the_new_build_of_another_member_is_promoted(self):

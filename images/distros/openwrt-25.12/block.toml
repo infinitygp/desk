@@ -12,7 +12,6 @@ disk_gb = 1
 # Its GRUB is not signed.
 secure_boot = false
 family = "openwrt"
-desktop = false
 user = "root"
 ready = "ubus call network.interface.lan status | grep -q '\"up\": true'"
 reboot = "reboot"

@@ -19,7 +19,8 @@ from pathlib import Path
 import libvirt
 
 from . import display, guest, steps
-from .config import BASE, CACHE, IMAGE_ROOTS, LOGS, SSH_KEY, WARM, DeskError, ImageSpec
+from .config import (BASE, BLOCK_ROOTS, CACHE, INSTALL_KEYS, LIST_KEYS, LOGS, PATH_KEYS, SSH_KEY, WARM, DeskError,
+                     ImageSpec)
 from .virt import conn, free_port, lookup, prepare_domain_xml, qemu_img_overlay, reflink_copy
 
 
@@ -61,18 +62,18 @@ def current(link: Path) -> Path | None:
     return link.resolve() if link.is_symlink() and link.exists() else None
 
 
-# What decides how the base disk gets installed; any change means a new install. Memory and
-# vCPUs are not among them: the warm-up and every run set them, so a change is a new warm state.
-INSTALL_KEYS = ("installer", "location", "kickstart", "iso", "iso_url", "iso_sha256", "kernel", "initrd",
-                "extra_args", "user_data", "cloud_image_url", "secure_boot", "release", "unattend",
-                "unattend_files", "image_index", "virtio_win_iso", "openssh_msi", "os_variant",
-                "disk_gb", "disk_image_url", "disk_files", "install_marker")
-
-
 # Image settings that do not change what ends up in the guest (the files the URLs lead to are
 # named, version included, by virtio_win_iso and openssh_msi).
 NOT_IN_GUEST = ("name", "dir", "base_version", "warm_version", "rebuild_days", "expiry",
                 "virtio_win_url", "virtio_win_sha256", "openssh_msi_url", "openssh_msi_sha256")
+
+
+def _named(path: Path) -> str:
+    """A file as fingerprints know it: within its root, so that neither where desk runs from nor a
+    block moved to the host's own makes a new build."""
+    path = path.resolve()
+    return next((str(path.relative_to(r.resolve())) for r in BLOCK_ROOTS if path.is_relative_to(r.resolve())),
+                str(path))
 
 
 def _settings(spec: ImageSpec, keys) -> str:
@@ -80,19 +81,19 @@ def _settings(spec: ImageSpec, keys) -> str:
     ImageSpec with a default does not make every image look changed."""
     data = {}
     for f in fields(spec):
-        if f.name in keys and (f.default is MISSING or getattr(spec, f.name) != f.default):
-            data[f.name] = getattr(spec, f.name)
+        value = getattr(spec, f.name)
+        if f.name in keys and (f.default is MISSING or value != f.default):
+            if f.name in PATH_KEYS + LIST_KEYS and value:
+                value = [_named(spec.path(v)) for v in value] if isinstance(value, list) else _named(spec.path(value))
+            data[f.name] = value
     return json.dumps(data, sort_keys=True, default=str)
 
 
 def _hash_files(h, spec: ImageSpec, rels: list[str]) -> None:
-    roots = [r.resolve() for r in IMAGE_ROOTS]
     for rel in rels:
         src = spec.path(rel).resolve()
         for f in [src] if src.is_file() else sorted(q for q in src.rglob("*") if q.is_file()):
-            # Named within its root: a definition moved to the host's own keeps its builds.
-            name = next((f.relative_to(r) for r in roots if f.is_relative_to(r)), f)
-            h.update(str(name).encode() + b"\0" + f.read_bytes() + b"\0")
+            h.update(_named(f).encode() + b"\0" + f.read_bytes() + b"\0")
 
 
 def install_fingerprint(spec: ImageSpec) -> str:
@@ -703,7 +704,7 @@ def warm(spec: ImageSpec, force: bool = False, promote_it: bool = True) -> str:
         qemu_img_overlay(provisioned, disk)
         boot(disk)
         if spec.prepare:
-            _log(f"preparing the session ({spec.prepare})")
+            _log(f"preparing the session ({_named(spec.path(spec.prepare))})")
             steps.run_prepare(spec, steps.Target(id=name, dir=wd, ssh_port=port, user=spec.user,
                                                  agent_port=agent_ports[0] if agent_ports else 0, domain=dom))
         if spec.idle:

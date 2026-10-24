@@ -1,6 +1,6 @@
 """What a person does at the desktop, as steps a script can run: start a program, wait for an
 element, click it by name, type, press keys. Images use it to prepare their warm state
-(`prepare` in image.toml, e.g. logging in to Cockpit), with the same real input as `desk click`."""
+(the `prepare` of an addon, e.g. logging in to Cockpit), with the same real input as `desk click`."""
 
 import runpy
 import time

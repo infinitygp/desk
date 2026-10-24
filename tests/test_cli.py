@@ -146,3 +146,60 @@ class Copy(unittest.TestCase):
         with self.assertRaises(SystemExit) as e:
             self.copy(124)
         self.assertEqual(e.exception.code, 124)
+
+
+class ImageCommands(unittest.TestCase):
+    def setUp(self):
+        import shutil
+        import tempfile
+        from pathlib import Path
+
+        self.images = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.images)
+        patch = mock.patch("desk.config.IMAGES", self.images)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def desk(self, *argv: str) -> tuple[int, str, str]:
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            try:
+                cli.main(list(argv))
+                code = 0
+            except SystemExit as e:
+                code = e.code
+        return code, out.getvalue(), err.getvalue()
+
+    def test_add_show_set_rm(self):
+        code, out, _ = self.desk("image", "add", "fedora-44", "gnome", "--addon", "cockpit", "--memory", "6G")
+        self.assertEqual(code, 0)
+        self.assertIn("added fedora-44-gnome, whose install fedora-44-gnome-cockpit runs on", out)
+        self.assertIn("desk maintain --only fedora-44-gnome-cockpit", out)
+        code, out, _ = self.desk("image", "show", "fedora-44-gnome-cockpit")
+        self.assertIn("memory_mib = 6144\n", out)
+        self.assertIn("provision = [desktops/gnome/provision.sh, addons/cockpit/provision.sh]\n", out)
+        self.assertIn('base = "fedora-44-gnome"\n', out)
+        self.assertEqual(self.desk("image", "set", "fedora-44-gnome", "--disk", "60G")[0], 0)
+        code, _, err = self.desk("image", "set", "fedora-44-gnome-cockpit", "--disk", "60G")
+        self.assertEqual(code, 2)
+        self.assertIn("set disk_gb there", err)
+        self.assertEqual(self.desk("image", "set", "fedora-44-gnome")[0], 2)
+        self.assertEqual(self.desk("image", "rm", "fedora-44-gnome-cockpit")[0], 0)
+        self.assertEqual(sorted(p.name for p in self.images.iterdir()), ["fedora-44-gnome.toml"])
+
+    def test_what_blocks_do_not_make_is_refused(self):
+        code, _, err = self.desk("image", "add", "windows-11", "gnome")
+        self.assertEqual(code, 2)
+        self.assertIn("windows-11 comes with its desktop", err)
+        code, _, err = self.desk("up", "arch-gnome")
+        self.assertEqual(code, 2)
+        self.assertIn("define it with: desk image add arch gnome", err)
+
+    def test_blocks(self):
+        code, out, _ = self.desk("image", "blocks")
+        self.assertEqual(code, 0)
+        self.assertRegex(out, r"distros\n(  .*\n)*  fedora-44 +Fedora 44 Workstation.*\(desktops: gnome\)")
+        self.assertRegex(out, r"addons\n(  .*\n)*  cockpit +Cockpit.*\(distros: fedora-44\)")

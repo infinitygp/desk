@@ -56,7 +56,7 @@ class Fingerprints(unittest.TestCase):
         self.assertIn("secure_boot", images._settings(replace(spec, secure_boot=False), images.INSTALL_KEYS))
 
     def test_versions_do_not_change_fingerprints(self):
-        spec = load_image("fedora-44-cockpit")
+        spec = load_image("fedora-44-gnome-cockpit")
         built = replace(spec, base_version="20261005-030000", warm_version="20261005-040000")
         self.assertEqual(images.warm_fingerprint(spec), images.warm_fingerprint(built))
         self.assertEqual(images.install_fingerprint(spec), images.install_fingerprint(built))
@@ -71,12 +71,13 @@ class Fingerprints(unittest.TestCase):
 
         spec = load_image("windows-11")
         # The agent travels on the answer-file CD and is copied again at every warm-up.
-        self.assertIn("../_shared/windows", spec.unattend_files)
+        agent, firstboot = (str(spec.dir / f) for f in ("agent", "firstboot.ps1"))
+        self.assertIn(agent, spec.unattend_files)
         with mock.patch.object(images, "_hash_files") as hashed:
             images.install_fingerprint(spec)
         rels = hashed.call_args.args[2]
-        self.assertIn("firstboot.ps1", rels)
-        self.assertNotIn("../_shared/windows", rels)
+        self.assertIn(firstboot, rels)
+        self.assertNotIn(agent, rels)
 
 
 class GuestSettings(unittest.TestCase):

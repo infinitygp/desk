@@ -1,3 +1,4 @@
+# Fedora 44 Workstation, installed over the network with a kickstart; GNOME comes with it.
 # libosinfo on this host has no fedora44 entry yet; fedora43 gives the same device defaults.
 os_variant = "fedora43"
 memory_mib = 4096
@@ -7,13 +8,8 @@ location = "https://dl.fedoraproject.org/pub/fedora/linux/releases/44/Everything
 kickstart = "ks.cfg"
 release = "44"
 user = "tester"
-provision = "../_shared/gnome/provision.sh"
-files = ["../_shared/gnome"]
-# Run over SSH as `user`; the desktop counts as ready once this succeeds and the screen settles.
-ready = "systemctl --user is-active --quiet graphical-session.target"
 # Prefix for `desk exec --agent`; see the wrapper in ks.cfg.
 agent_wrapper = ["/usr/local/libexec/desk-ga-run"]
-# Run as root after provisioning so the session picks up the shell extension (Wayland cannot restart the shell in place).
-relogin = "systemctl restart gdm"
 # `desk maintain` reinstalls it this often, so tests run against current updates.
 rebuild_days = 14
+desktops = ["gnome"]

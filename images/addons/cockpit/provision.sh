@@ -1,5 +1,5 @@
 #!/bin/bash
-# Cockpit on top of fedora-44-gnome's provisioning; prepare.py then logs in to it in Firefox.
+# Cockpit on top of GNOME's provisioning (images/desktops/gnome); prepare.py then logs in to it in Firefox.
 set -euo pipefail
 dnf install -y -q cockpit >/dev/null 2>&1
 # A CA of the image's own signs the certificate Cockpit serves (the last one in ws-certs.d), and
@@ -23,7 +23,7 @@ systemctl enable --now cockpit.socket
 systemctl try-restart cockpit.service
 
 # Firefox and Chromium trust the CA above, so the login page opens without the certificate
-# warning; the rest of their policies come from fedora-44-gnome's provisioning.
+# warning; the rest of their policies come from GNOME's provisioning.
 python3 - <<'PY'
 import base64
 import json

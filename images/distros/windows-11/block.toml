@@ -9,7 +9,7 @@ iso_url = "https://go.microsoft.com/fwlink/?LinkId=2382600&clcid=0x409&culture=e
 iso_sha256 = "bc3f24086ebadc94489066b5ad78089e2cf5c3491e90e790bb81a2b199c10e38"
 unattend = "autounattend.xml"
 # Copied to the answer-file CD next to autounattend.xml; firstboot.ps1 runs at the first logon.
-unattend_files = ["firstboot.ps1", "../_shared/windows"]
+unattend_files = ["firstboot.ps1", "agent"]
 # firstboot.ps1 ends with this line on the serial console, or with what failed.
 install_marker = "desk-firstboot: ok"
 virtio_win_iso = "virtio-win-0.1.302.iso"
@@ -20,8 +20,9 @@ openssh_msi_url = "https://github.com/PowerShell/Win32-OpenSSH/releases/download
 openssh_msi_sha256 = "ddec9c53864280759cf9f74791cefd387100e3946aa849a1c138a4ed1b96b7d9"
 user = "tester"
 family = "windows"
+desktop = "windows"
 root_user = "tester"
-# In-session agent (images/_shared/windows/agent.ps1), forwarded from the host like SSH.
+# In-session agent (agent/agent.ps1), forwarded from the host like SSH.
 agent_port = 47011
 ready = "try { (New-Object Net.Sockets.TcpClient).Connect('127.0.0.1', 47011); exit 0 } catch { exit 1 }"
 sync = "Write-VolumeCache -DriveLetter C"
@@ -33,7 +34,7 @@ provision = "provision.ps1"
 # Windows has no way to restart just the desktop session from SSH; a reboot logs in again.
 relogin = "shutdown.exe /r /t 0 /f"
 # Refreshed in C:\desk at every warm-up, so agent fixes do not need a new install.
-files = ["../_shared/windows"]
+files = ["agent"]
 # Before the warm state is saved: wait (5 min at most, by the clock) for the CPU to calm down, so a restored run
 # does not inherit Windows' first-boot background work, then empty the standby list: the file cache Windows keeps
 # in free memory would be saved with it, about half of the memory state and of the time a restore takes.

@@ -91,7 +91,7 @@ BUILDS = [
     Need("ssh-keygen", "the key the guests trust", tool("ssh-keygen"), "openssh", "openssh"),
 ]
 CURL = Need("curl", "downloading images and installers", tool("curl"), "curl", "curl")
-# What only some images need to be built, by `installer` in image.toml (a kickstart install
+# What only some images need to be built, by the `installer` of their distro (a kickstart install
 # fetches its files through virt-install).
 INSTALLERS = {
     "cloudimg": [
@@ -218,11 +218,18 @@ def images() -> tuple[list[str], dict[str, list[str]]]:
     from . import runs
 
     lines, wanted = [], {}
-    for name in list_images():
+    try:
+        names = list_images()
+    except DeskError as e:
+        return [f"  {e}"], wanted
+    if not names:
+        lines.append("  none defined here (desk image blocks lists what images are made of, "
+                     "desk image add defines one)")
+    for name in names:
         try:
             spec = load_image(name)
         except DeskError as e:
-            lines.append(f"  {name:<22}broken definition: {e}")
+            lines.append(f"  {name:<25}broken definition: {e}")
             continue
         missing = [] if spec.base else [n.what for n in INSTALLERS.get(spec.installer, []) if not n.present()]
         for what in missing:
@@ -236,7 +243,7 @@ def images() -> tuple[list[str], dict[str, list[str]]]:
             state = f"not built (variant of {spec.base}: desk image warm {name})"
         else:
             state = "not built"
-        lines.append(f"  {name:<22}{state}")
+        lines.append(f"  {name:<25}{state}")
     return lines, wanted
 
 
@@ -295,7 +302,8 @@ def run() -> bool:
     for p in problems:
         print(f"problem: {p}")
 
-    print("\nimages (optional: build the ones you test on, desk image build NAME && desk image warm NAME)")
+    print(f"\nimages in {config.IMAGES} (optional: define and build the ones you test on, desk image add, "
+          "desk maintain --only NAME)")
     print("\n".join(image_lines))
     print(f"\nmaintenance (optional): {timer_line()}")
     return not missing["to start runs"] and not kvm() and not connection_problem \

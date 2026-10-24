@@ -19,7 +19,7 @@ def write(text: str) -> Path:
 class Load(unittest.TestCase):
     def test_valid_file(self):
         data = scenario.load(write('''
-image = "fedora-44-cockpit"
+image = "fedora-44-gnome-cockpit"
 record = true
 [build]
 run = "make rpm"
@@ -164,7 +164,7 @@ browser = "firefox"
 
     def test_disks_and_console(self):
         data = scenario.load(write('''
-image = "fedora-44-cockpit"
+image = "fedora-44-gnome-cockpit"
 disks = ["8G:data"]
 [[step]]
 disk_rm = "data"

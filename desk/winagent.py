@@ -1,4 +1,4 @@
-"""Client for the in-session agent on Windows guests (images/_shared/windows/agent.ps1).
+"""Client for the in-session agent on Windows guests (images/distros/windows-11/agent/agent.ps1).
 
 SSH sessions on Windows cannot see the interactive desktop, so UI Automation queries and
 `exec --gui` go to an agent started at logon inside that session, over a forwarded port.
