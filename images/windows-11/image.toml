@@ -36,8 +36,21 @@ relogin = "shutdown.exe /r /t 0 /f"
 # Refreshed in C:\desk at every warm-up, so agent fixes do not need a new install.
 files = ["../_shared/windows"]
 # Before the warm state is saved: wait (5 min at most, by the clock) for the CPU to calm down, so a restored run
-# does not inherit Windows' first-boot background work.
-idle = "$n = 0; $sw = [Diagnostics.Stopwatch]::StartNew(); while ($sw.Elapsed.TotalSeconds -lt 300) { $c = (Get-CimInstance Win32_Processor | Measure-Object LoadPercentage -Average).Average; if ($c -lt 15) { $n++ } else { $n = 0 }; if ($n -ge 6) { exit 0 }; Start-Sleep 5 }; exit 0"
+# does not inherit Windows' first-boot background work, then empty the standby list: the file cache Windows keeps
+# in free memory would be saved with it, about half of the memory state and of the time a restore takes.
+idle = '''
+$n = 0; $sw = [Diagnostics.Stopwatch]::StartNew()
+while ($sw.Elapsed.TotalSeconds -lt 300) {
+    $c = (Get-CimInstance Win32_Processor | Measure-Object LoadPercentage -Average).Average
+    if ($c -lt 15) { $n++ } else { $n = 0 }
+    if ($n -ge 6) { break }
+    Start-Sleep 5
+}
+Add-Type -Namespace Desk -Name Memory -MemberDefinition '[DllImport("ntdll.dll")] public static extern int RtlAdjustPrivilege(int privilege, bool enable, bool thread, out bool was); [DllImport("ntdll.dll")] public static extern int NtSetSystemInformation(int infoClass, ref int command, int length);'
+# SeProfileSingleProcessPrivilege (13), then SystemMemoryListInformation (80) with MemoryPurgeStandbyList (4).
+$was = $false; [void][Desk.Memory]::RtlAdjustPrivilege(13, $true, $false, [ref]$was)
+$purge = 4; exit [Desk.Memory]::NtSetSystemInformation(80, [ref]$purge, 4)
+'''
 # Windows has no audio device in this VM otherwise; apps need one (volume, media sessions).
 sound = "ich9"
 # Minutes left of the evaluation licence.
