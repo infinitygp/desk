@@ -395,3 +395,8 @@ uri = "qemu:///session"      # the default
 Snapshots, warm-ups and `desk diff` copy disks as reflinks; on a file system without them every
 copy is a full one and `desk diff` does not work (`desk doctor` says which it is). With SELinux
 enforcing (Fedora) the default home works as it is: libvirt labels what its VMs use.
+
+## Licence
+
+MIT, see [LICENSE](LICENSE). Tools the images download (ViVeTool, Win32-OpenSSH, virtio-win)
+keep their own licences and are not part of this repository.

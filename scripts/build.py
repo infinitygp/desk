@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 """Builds desk.pyz, the single-file release, from the files of this checkout that git does not
-ignore, as they are in the working tree: the code, the image definitions and the skill, with
-scripts/pyz_main.py as its entry point. Run by the release workflow, and before a tag by hand:
+ignore, as they are in the working tree: the code, the image definitions, the skill and the
+licence, with scripts/pyz_main.py as its entry point. Run by the release workflow, and before a tag by hand:
 
     /usr/bin/python3 scripts/build.py [--version vX.Y.Z] [--output dist/desk.pyz]
 """
@@ -18,7 +18,8 @@ import zipapp
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-PARTS = ["desk", "images", "skill"]
+# LICENSE: the MIT licence asks for its notice in every copy, and a release is one.
+PARTS = ["desk", "images", "skill", "LICENSE"]
 
 
 def git(*args: str) -> str:
