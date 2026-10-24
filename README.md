@@ -86,6 +86,9 @@ names (kickstart or `user-data`, `provision.sh`, `prepare.py`); shared provision
 - `sound`: an emulated sound card without host output (`windows-11`: `ich9`), so programs get an
   audio device to play to.
 - `secure_boot = false` for a boot loader that is not signed for UEFI Secure Boot (Arch).
+- `memory_mib`, `vcpus`: the size of the VM. The warm-up and every run set them on the installed
+  domain, so a change is a new warm state, not a new install; `desk up --memory/--cpus` gives one
+  run other sizes, booting cold when they differ from the warm state's.
 - `rebuild_days`, `expiry`, `install_marker`: see Builds and maintenance.
 
 A variant (`base = "..."`) reuses its base's installed disk and has a warm state of its own. It

@@ -2,12 +2,15 @@ import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from desk.virt import prepare_domain_xml
+from desk.virt import domain_size, prepare_domain_xml
 
 TEMPLATE = """
 <domain type='kvm'>
   <name>build-x</name>
   <uuid>11111111-2222-3333-4444-555555555555</uuid>
+  <memory unit='KiB'>4194304</memory>
+  <currentMemory unit='KiB'>4194304</currentMemory>
+  <vcpu placement='static'>4</vcpu>
   <seclabel type='dynamic' model='selinux'/>
   <os firmware='efi'>
     <type arch='x86_64' machine='q35'>hvm</type>
@@ -39,11 +42,12 @@ TEMPLATE = """
 """
 
 
+ARGS = dict(name="desk-r1", disk=Path("/runs/r1/disk.qcow2"), nvram=Path("/runs/r1/VARS.qcow2"),
+            ssh_port=40000, console_log=Path("/runs/r1/console.log"))
+
+
 def prepare(**kw):
-    args = dict(name="desk-r1", disk=Path("/runs/r1/disk.qcow2"), nvram=Path("/runs/r1/VARS.qcow2"),
-                ssh_port=40000, console_log=Path("/runs/r1/console.log"))
-    args.update(kw)
-    return ET.fromstring(prepare_domain_xml(TEMPLATE, **args))
+    return ET.fromstring(prepare_domain_xml(TEMPLATE, **{**ARGS, **kw}))
 
 
 class PrepareDomainXml(unittest.TestCase):
@@ -66,6 +70,15 @@ class PrepareDomainXml(unittest.TestCase):
         self.assertNotEqual(root.findtext("uuid"), "11111111-2222-3333-4444-555555555555")
         self.assertEqual(prepare(keep_uuid=True).findtext("uuid"), "11111111-2222-3333-4444-555555555555")
         self.assertIsNone(root.find("seclabel"))
+
+    def test_size(self):
+        self.assertEqual(domain_size(prepare_domain_xml(TEMPLATE, **ARGS)), (4096, 4))
+        root = prepare(memory_mib=8192, vcpus=6)
+        self.assertEqual([root.findtext(t) for t in ("memory", "currentMemory", "vcpu")], ["8388608", "8388608", "6"])
+        self.assertEqual(root.find("vcpu").get("placement"), "static")
+        self.assertEqual(root.find("cpu/topology").attrib, {"sockets": "1", "cores": "6", "threads": "1"})
+        # The count a warm state was saved with comes back as it was saved.
+        self.assertIsNone(prepare(memory_mib=4096, vcpus=4).find("cpu"))
 
     def test_boot_and_storage(self):
         root = prepare()

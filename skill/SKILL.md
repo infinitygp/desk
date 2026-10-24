@@ -60,6 +60,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk key COMBO...` | `super`, `enter`, `esc`, `tab`, `ctrl+alt+t`, `shift+f10`, `alt+f4`, `f5`, letters |
 | `desk snapshot save NAME`, `desk snapshot restore NAME`, `desk snapshot list`, `desk snapshot delete NAME` | Save the running guest (~3-5 s) and go back to it (~1-3 s) |
 | `desk up IMAGE --resolution WxH --scale N --displays N`, `desk display [--resolution WxH] [--scale N]` | Monitors: mode, scaling in percent, several displays ([system.md](system.md)) |
+| `desk up IMAGE --memory 8G --cpus N` | Memory and vCPUs of this run instead of the image's (4 GB and 4 on the desktop images, 6 GB on Windows); other than its warm state's, the run boots cold (~25 s) |
 | `desk focus NAME` | Bring a window to the front by application or title (keys go to the focused window); on Windows it fails when Windows keeps the window behind the one in front |
 | `desk scenario run FILE [--keep]`, `desk scenario check FILE` | Run a repeatable test from a TOML file (see below) |
 | `desk wait [--change] [--timeout S]` | Until the screen is still; `--change` first waits for it to change at all |
@@ -318,7 +319,7 @@ then (`runs/<id>/failed-start.png`).
   directory ("claude @ cockpit-example", "(agent gone)" once it has exited). Leave other agents'
   runs alone. Only one run per image is restored from the warm state (~2 s); further ones boot
   cold (~25 s) from the same disk, so they start with the same files, only without the uptime.
-  Each takes ~4 GB RAM; when the host is short of memory (too little available, or already
+  Each takes ~4 GB RAM (`--memory`); when the host is short of memory (too little available, or already
   swapping hard) `desk up` waits up to 10 min for other runs to end, then gives up; scenarios
   started in parallel wait in line that way instead of slowing each other down. Runs idle for 2 h
   are destroyed by the next `desk up` or `desk gc` (`DESK_TTL` seconds to change), their report

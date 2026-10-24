@@ -1,9 +1,11 @@
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -100,6 +102,8 @@ def cmd_up(args) -> None:
 
     resolution = _resolution(args.resolution)
     spec = load_image(args.image)
+    if args.memory or args.cpus:
+        spec = replace(spec, memory_mib=args.memory or spec.memory_mib, vcpus=args.cpus or spec.vcpus)
     # Whatever can be refused without a VM is refused before one is started.
     monitors.check(spec, args.displays, resolution, args.scale)
     extra_disks = [disks.parse(item) for item in args.disk or []]
@@ -195,6 +199,21 @@ def _port_arg(text: str) -> int:
         return _port(text)
     except DeskError as e:
         raise argparse.ArgumentTypeError(str(e)) from None
+
+
+def _memory_arg(text: str) -> int:
+    m = re.fullmatch(r"([1-9][0-9]*)([MG])", text)
+    if not m:
+        raise argparse.ArgumentTypeError(f"memory is a number with M or G, e.g. 8G (got {text!r})")
+    return int(m[1]) * (1024 if m[2] == "G" else 1)
+
+
+def _cpus_arg(text: str) -> int:
+    # More vCPUs than the host has threads only makes them wait for each other.
+    most = os.cpu_count() or 1
+    if not text.isdigit() or not 1 <= int(text) <= most:
+        raise argparse.ArgumentTypeError(f"vCPUs from 1 to {most}, the host's (got {text!r})")
+    return int(text)
 
 
 def _port(text: str) -> int:
@@ -849,6 +868,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--displays", type=int, default=1, help="monitors (boots cold when not 1)")
     p.add_argument("--resolution", help="mode the monitors start in, e.g. 1920x1080 (boots cold)")
     p.add_argument("--scale", type=int, help="scaling in percent, e.g. 150 (Windows: signs in again)")
+    p.add_argument("--memory", type=_memory_arg, metavar="SIZE",
+                   help="memory of this run, e.g. 8G (default: the image's; other than its warm state's: boots cold)")
+    p.add_argument("--cpus", type=_cpus_arg, metavar="N",
+                   help="vCPUs of this run (default: the image's; other than its warm state's: boots cold)")
     p.add_argument("--disk", action="append", metavar="SIZE[:NAME]", help="extra empty disk, e.g. 10G:backup "
                    "(repeatable; desk disk)")
     p.add_argument("--usb", action="append", metavar="VENDOR:PRODUCT|BUS.DEVICE",

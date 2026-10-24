@@ -85,6 +85,7 @@ def prepare_domain_xml(
     template: str, *, name: str, disk: Path, nvram: Path, ssh_port: int, console_log: Path,
     keep_uuid: bool = False, vnc_password: str | None = None, agent_ports: tuple[int, int] | None = None,
     sound: str | None = None, displays: int = 1, resolution: tuple[int, int] | None = None,
+    memory_mib: int | None = None, vcpus: int | None = None,
 ) -> str:
     """Turn the golden image's domain XML into a per-run transient domain.
 
@@ -93,6 +94,25 @@ def prepare_domain_xml(
     """
     root = ET.fromstring(template)
     root.find("name").text = name
+    # The install's size is only where the build started; the image's settings and the run say
+    # what the guest gets.
+    if memory_mib:
+        for tag in ("memory", "currentMemory"):
+            el = root.find(tag)
+            if el is not None:
+                el.set("unit", "KiB")
+                el.text = str(memory_mib * 1024)
+    vcpu = root.find("vcpu")
+    if vcpus and int(vcpu.text) != vcpus:
+        vcpu.text = str(vcpus)
+        # One socket of that many cores: libvirt makes each vCPU a socket of its own, and Windows 11
+        # used four sockets of six. The install's layout stays where the count does (warm states).
+        cpu = root.find("cpu")
+        if cpu is None:
+            cpu = ET.SubElement(root, "cpu")
+        for el in cpu.findall("topology"):
+            cpu.remove(el)
+        ET.SubElement(cpu, "topology", sockets="1", cores=str(vcpus), threads="1")
     uuid_el = root.find("uuid")
     if uuid_el is None:
         uuid_el = ET.SubElement(root, "uuid")
@@ -187,6 +207,12 @@ def prepare_domain_xml(
 
 def domain_uuid(xml: str) -> str:
     return ET.fromstring(xml).findtext("uuid")
+
+
+def domain_size(xml: str) -> tuple[int, int]:
+    """Memory in MiB and vCPUs (libvirt writes memory in KiB)."""
+    root = ET.fromstring(xml)
+    return int(root.findtext("memory")) // 1024, int(root.findtext("vcpu"))
 
 
 def uuid_active(u: str) -> bool:

@@ -5,7 +5,22 @@ from types import SimpleNamespace
 from unittest import mock
 
 from desk import cli, guest
-from desk.cli import _text_args, explain
+from desk.cli import _cpus_arg, _memory_arg, _text_args, explain
+
+
+class Size(unittest.TestCase):
+    def test_memory(self):
+        self.assertEqual((_memory_arg("8G"), _memory_arg("1536M")), (8192, 1536))
+        for text in ("8", "0G", "8GB", "1.5G", "-1G"):
+            with self.subTest(text=text), self.assertRaises(cli.argparse.ArgumentTypeError):
+                _memory_arg(text)
+
+    def test_cpus_up_to_the_hosts(self):
+        with mock.patch("desk.cli.os.cpu_count", return_value=8):
+            self.assertEqual(_cpus_arg("8"), 8)
+            for text in ("0", "9", "x", "-2"):
+                with self.subTest(text=text), self.assertRaises(cli.argparse.ArgumentTypeError):
+                    _cpus_arg(text)
 
 
 class TextArgs(unittest.TestCase):

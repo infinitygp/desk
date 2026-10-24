@@ -59,11 +59,12 @@ def current(link: Path) -> Path | None:
     return link.resolve() if link.is_symlink() and link.exists() else None
 
 
-# What decides how the base disk gets installed; any change means a new install.
+# What decides how the base disk gets installed; any change means a new install. Memory and
+# vCPUs are not among them: the warm-up and every run set them, so a change is a new warm state.
 INSTALL_KEYS = ("installer", "location", "kickstart", "iso", "iso_url", "iso_sha256", "kernel", "initrd",
                 "extra_args", "user_data", "cloud_image_url", "secure_boot", "release", "unattend",
-                "unattend_files", "image_index", "virtio_win_iso", "openssh_msi", "os_variant", "memory_mib",
-                "vcpus", "disk_gb", "disk_image_url", "disk_files", "install_marker")
+                "unattend_files", "image_index", "virtio_win_iso", "openssh_msi", "os_variant",
+                "disk_gb", "disk_image_url", "disk_files", "install_marker")
 
 
 # Image settings that do not change what ends up in the guest (the files the URLs lead to are
@@ -650,7 +651,7 @@ def warm(spec: ImageSpec, force: bool = False, promote_it: bool = True) -> str:
         xml = prepare_domain_xml(
             (base_dir / "domain.xml").read_text(), name=name, disk=on, nvram=nvram, ssh_port=port,
             console_log=wd / "console.log",
-            agent_ports=agent_ports, sound=spec.sound,
+            agent_ports=agent_ports, sound=spec.sound, memory_mib=spec.memory_mib, vcpus=spec.vcpus,
         )
         _log(f"booting {name} from {on.name}")
         dom = conn().createXML(xml, 0)

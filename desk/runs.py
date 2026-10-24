@@ -18,7 +18,7 @@ import libvirt
 
 from . import guest, images
 from .config import HOME, RUNS, Busy, DeskError, ImageSpec, load_image
-from .virt import (conn, domain_uuid, free_port, lookup, prepare_domain_xml, qemu_img_overlay,
+from .virt import (conn, domain_size, domain_uuid, free_port, lookup, prepare_domain_xml, qemu_img_overlay,
                    reflink_copy, uuid_active)
 
 # Head room left for the host when deciding whether another VM fits.
@@ -649,6 +649,12 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
             cold = True
         else:
             saved_xml = conn().saveImageGetXMLDesc(str(warm), libvirt.VIR_DOMAIN_SAVE_IMAGE_XML_SECURE)
+            saved = domain_size(saved_xml)
+            if saved != (spec.memory_mib, spec.vcpus):
+                # A saved state comes back with the memory and CPUs it was saved with.
+                print(f"[desk] booting cold: the warm state has {saved[0]} MiB and {saved[1]} vCPUs, "
+                      f"this run {spec.memory_mib} MiB and {spec.vcpus}")
+                cold, saved_xml = True, None
     rd.mkdir(parents=True)
     # A restore must also keep the saved domain name; run ids stay independent of it.
     domain = f"desk-{run_id}" if cold else ET.fromstring(saved_xml).findtext("name")
@@ -682,7 +688,8 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
                                  ssh_port=run.ssh_port, console_log=rd / "console.log",
                                  keep_uuid=not cold, vnc_password=run.vnc_password,
                                  agent_ports=(run.agent_port, spec.agent_port) if spec.agent_port else None,
-                                 sound=spec.sound, displays=displays, resolution=resolution)
+                                 sound=spec.sound, displays=displays, resolution=resolution,
+                                 memory_mib=spec.memory_mib, vcpus=spec.vcpus)
         if cold:
             dom = conn().createXML(xml, 0)
         else:

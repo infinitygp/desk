@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import time
@@ -254,7 +255,7 @@ class Up(unittest.TestCase):
         def held(what):
             return lambda *a, **k: self.events.append((what, bool(runs._locked.get(self.home / ".lock"))))
 
-        conn = mock.Mock()
+        conn = self.conn = mock.Mock()
         conn.createXML.side_effect = held("domain started")
         conn.listAllDomains.return_value = []
         for target, value in (
@@ -284,6 +285,28 @@ class Up(unittest.TestCase):
         self.assertTrue(run.ready)
         self.assertTrue(run.in_use())  # held by this process, so gc leaves it to it
         self.assertFalse(runs._locked)
+
+    def test_other_sizes_than_the_warm_states_boot_cold(self):
+        from dataclasses import replace
+
+        from desk.config import load_image
+
+        spec = load_image("fedora-44-gnome")
+        warm = self.home / "warm" / "fedora-44-gnome"
+        warm.mkdir(parents=True)
+        (warm / "memory.save").write_bytes(b"")
+        (warm / "meta.json").write_text(json.dumps({"base": str((self.home / "base" / "fedora-44-gnome").resolve())}))
+        self.conn.saveImageGetXMLDesc.return_value = ("<domain><name>desk-warm-x</name><uuid>u</uuid>"
+                                                      "<memory unit='KiB'>4194304</memory><vcpu>4</vcpu></domain>")
+        prepared = mock.Mock(return_value="<domain/>")
+        with mock.patch("desk.runs.uuid_active", return_value=False), mock.patch("desk.runs.prepare_domain_xml", prepared), \
+                mock.patch("sys.stdout") as out:
+            runs.up(replace(spec, memory_mib=8192), run_id="t")
+        self.assertIn("booting cold: the warm state has 4096 MiB and 4 vCPUs, this run 8192 MiB and 4",
+                      "".join(c.args[0] for c in out.write.call_args_list))
+        self.conn.restoreFlags.assert_not_called()
+        self.assertEqual(self.events[0], ("domain started", True))
+        self.assertEqual((prepared.call_args.kwargs["memory_mib"], prepared.call_args.kwargs["vcpus"]), (8192, 4))
 
     def test_a_start_that_fails_gives_the_lock_back_too(self):
         from desk.config import load_image

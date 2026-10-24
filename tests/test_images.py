@@ -42,6 +42,12 @@ class VersionsUnderSymlink(unittest.TestCase):
 
 
 class Fingerprints(unittest.TestCase):
+    def test_memory_and_cpus_are_a_new_warm_state_not_a_new_install(self):
+        spec = load_image("fedora-44-gnome")
+        bigger = replace(spec, memory_mib=8192, vcpus=8)
+        self.assertEqual(images.install_fingerprint(bigger), images.install_fingerprint(spec))
+        self.assertNotEqual(images.warm_fingerprint(bigger), images.warm_fingerprint(spec))
+
     def test_default_settings_do_not_count(self):
         spec = load_image("fedora-44-gnome")
         # As if secure_boot were a new setting: its default must not change existing images.
