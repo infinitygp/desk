@@ -52,6 +52,9 @@ Part of the desk skill ([SKILL.md](SKILL.md)); the commands and pitfalls there a
   ViVeTool: taskbar position (59213768) and taskbar size (61090762). Everything else is as a
   fresh install of that build has it; if the app's behaviour depends on a feature outside that
   list, say so in the report instead of assuming users see the same.
+- Edge and the WebView2 runtime stay at the version the image was installed with (their updater
+  is off), and the search indexer is off: Start's search finds apps but says "Search indexing was
+  turned off", and file search is unindexed. Say so in the report when the app depends on either.
 - The report reads the event log (service failures, application errors and crashes, MSI
   installs); a "Network List Service terminated" entry comes from restoring the saved state, not
   from the app under test. `desk diff` works on NTFS too.

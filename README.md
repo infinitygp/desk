@@ -82,8 +82,11 @@ agent gets to it: the caller was told it failed. `agent-loop.ps1`, started at lo
 `C:\desk\agent.log`, which the report lists among the failed units; desk asks a listing or lookup
 again once the agent is back, but not an action, which may have been done. Commands are sent as
 `powershell -EncodedCommand`, since Windows' command line mangles quotes.
-Before the warm state is saved, `idle` empties the standby list, the file cache that made up
-almost half of the saved memory (4.7 GB before, 2.7 GB after).
+The install updates Edge and WebView2 once and turns off what works in the background during
+tests and no test needs: their updater (it went on with an update inside every run), SysMain, the
+search indexer, telemetry and Delivery Optimization. Before the warm state is saved, `idle`
+empties the standby list, the file cache that made up almost half of the saved memory (4.7 GB
+before, 2.7 GB after).
 Provisioning opts in to early feature updates and enables the taskbar position and size
 features (59213768, 61090762) with ViVeTool v0.3.4 (GPL-3.0, downloaded and checked against a
 pinned SHA-256), so `desk win taskbar --edge/--size` work on every build; `desk/winsettings.py`

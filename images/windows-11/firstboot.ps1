@@ -72,6 +72,23 @@ Reg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' NoAutoUpdate 1
 Reg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' NoAutoRebootWithLoggedOnUsers 1
 Reg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' ExcludeWUDriversInQualityUpdate 1
 
+# Edge and the WebView2 runtime are updated once and then stay at that version: their updater would
+# go on with an update inside every run (CPU, about 1 GB of disk) and could replace WebView2 under an
+# app being tested. Left to itself at this point, it had updated Edge but not WebView2. Its processes
+# end when it is done (about 2 minutes); WebView2's setup.exe --delete-old-versions may stay behind,
+# waiting for programs on the old version.
+Get-ScheduledTask -TaskName 'MicrosoftEdgeUpdateTaskMachineUA*' | Start-ScheduledTask
+$sw = [Diagnostics.Stopwatch]::StartNew()
+do { Start-Sleep 15 } while ((Get-Process MicrosoftEdgeUpdate -ErrorAction SilentlyContinue) -and $sw.Elapsed.TotalMinutes -lt 15)
+Get-ScheduledTask -TaskName 'MicrosoftEdgeUpdateTask*' | Disable-ScheduledTask | Out-Null
+Get-Process MicrosoftEdgeUpdate -ErrorAction SilentlyContinue | Stop-Process -Force
+# Services that work in the background during tests and no test needs: the Edge updater's, SysMain
+# (prefetching into the file cache, which the warm state would save), Windows Search (indexes every
+# file pushed into the profile) and telemetry.
+foreach ($s in 'edgeupdate', 'edgeupdatem', 'SysMain', 'WSearch', 'DiagTrack') { Set-Service $s -StartupType Disabled }
+# Delivery Optimization refuses Set-Service, but not its registry key.
+Reg 'HKLM:\SYSTEM\CurrentControlSet\Services\DoSvc' Start 4
+
 Get-Service sshd, QEMU-GA -ErrorAction SilentlyContinue | Format-Table -AutoSize
 # What every later step of the harness depends on; without these the image only fails later, as
 # "SSH not reachable", with nothing pointing back at the install.
@@ -79,6 +96,13 @@ if ((Get-Service sshd -ErrorAction SilentlyContinue).Status -ne 'Running') { $pr
 if (-not (Test-Path C:\ProgramData\ssh\administrators_authorized_keys)) { $problems += 'the SSH key is missing' }
 if (-not (Get-Service QEMU-GA -ErrorAction SilentlyContinue)) { $problems += 'qemu-guest-agent is not installed' }
 if (-not (Test-Path C:\desk\agent.ps1)) { $problems += 'the in-session agent is missing' }
+# Not needed by the harness, but an image that quietly kept them would be the heavy one again.
+foreach ($s in 'edgeupdate', 'edgeupdatem', 'SysMain', 'WSearch', 'DiagTrack') {
+    if ((Get-Service $s -ErrorAction SilentlyContinue).StartType -ne 'Disabled') { $problems += "$s is not disabled" }
+}
+if ((Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\DoSvc').Start -ne 4) { $problems += 'DoSvc is not disabled' }
+$edge = @(Get-ScheduledTask -TaskName 'MicrosoftEdgeUpdateTask*' -ErrorAction SilentlyContinue)
+if (-not $edge -or ($edge | Where-Object State -ne 'Disabled')) { $problems += 'the Edge update tasks are not disabled' }
 $report = if ($problems) { 'desk-firstboot: FAILED ' + ($problems -join '; ') } else { 'desk-firstboot: ok' }
 $report
 try {
