@@ -72,14 +72,25 @@ Reg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' NoAutoUpdate 1
 Reg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' NoAutoRebootWithLoggedOnUsers 1
 Reg 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate' ExcludeWUDriversInQualityUpdate 1
 
-# Edge and the WebView2 runtime are updated once and then stay at that version: their updater would
+# WebView2, which apps under test run on, is brought up to date by Microsoft's bootstrapper, which
+# waits for its install (the updater left it at the ISO's version whenever Edge had just checked);
+# Edge is as far as the updater got since logon. Then both stay at that version: their updater would
 # go on with an update inside every run (CPU, about 1 GB of disk) and could replace WebView2 under an
-# app being tested. Left to itself at this point, it had updated Edge but not WebView2. Its processes
-# end when it is done (about 2 minutes); WebView2's setup.exe --delete-old-versions may stay behind,
-# waiting for programs on the old version.
-Get-ScheduledTask -TaskName 'MicrosoftEdgeUpdateTaskMachineUA*' | Start-ScheduledTask
-$sw = [Diagnostics.Stopwatch]::StartNew()
-do { Start-Sleep 15 } while ((Get-Process MicrosoftEdgeUpdate -ErrorAction SilentlyContinue) -and $sw.Elapsed.TotalMinutes -lt 15)
+# app being tested. The bootstrapper is always the latest, so its signature is checked, not a hash.
+$wv2 = "$env:TEMP\MicrosoftEdgeWebview2Setup.exe"
+try {
+    Invoke-WebRequest -UseBasicParsing -OutFile $wv2 'https://go.microsoft.com/fwlink/p/?LinkId=2124703'
+    $sig = Get-AuthenticodeSignature $wv2
+    if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notlike 'CN=Microsoft Corporation,*') {
+        $problems += 'the WebView2 bootstrapper is not signed by Microsoft'
+    } else {
+        $p = Start-Process -PassThru $wv2 -ArgumentList '/silent', '/install'
+        if (-not $p.WaitForExit(600000)) { $problems += 'the WebView2 bootstrapper did not finish within 10 minutes' }
+        elseif ($p.ExitCode) { $problems += "the WebView2 bootstrapper exited $($p.ExitCode)" }
+    }
+} catch {
+    $problems += "downloading the WebView2 bootstrapper failed: $_"
+}
 Get-ScheduledTask -TaskName 'MicrosoftEdgeUpdateTask*' | Disable-ScheduledTask | Out-Null
 Get-Process MicrosoftEdgeUpdate -ErrorAction SilentlyContinue | Stop-Process -Force
 # Services that work in the background during tests and no test needs: the Edge updater's, SysMain

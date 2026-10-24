@@ -82,9 +82,10 @@ agent gets to it: the caller was told it failed. `agent-loop.ps1`, started at lo
 `C:\desk\agent.log`, which the report lists among the failed units; desk asks a listing or lookup
 again once the agent is back, but not an action, which may have been done. Commands are sent as
 `powershell -EncodedCommand`, since Windows' command line mangles quotes.
-The install updates Edge and WebView2 once, compiles .NET's native images, and turns off what
-works in the background during tests and no test needs: their updater (it went on with an update
-inside every run), SysMain, the search indexer, telemetry and Delivery Optimization. Provisioning excludes from Defender, whose
+The install brings WebView2 up to date with Microsoft's bootstrapper (signature checked), compiles
+.NET's native images, and turns off what works in the background during tests and no test needs:
+the updater of Edge and WebView2 (it went on with an update inside every run), SysMain, the search
+indexer, telemetry and Delivery Optimization. Provisioning excludes from Defender, whose
 real-time protection Tamper Protection keeps on, the folders where tests run and write programs
 (`C:\Users`, the program folders, `C:\ProgramData`, Windows' `Temp` and `Installer`); AMSI blocks a
 script that excludes the whole drive. Before the warm state is saved, `idle`
