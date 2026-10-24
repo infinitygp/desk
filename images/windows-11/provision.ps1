@@ -20,6 +20,29 @@ $store = 'HKLM:\SOFTWARE\Policies\Microsoft\WindowsStore'
 if (-not (Test-Path $store)) { New-Item $store -Force | Out-Null }
 New-ItemProperty $store -Name AutoDownload -Value 2 -PropertyType DWord -Force | Out-Null
 
+# Notepad opens a teaching tip ("Notepad automatically saves your progress") over its first window,
+# and UI Automation gets nothing from the window while it is open. Its settings say it was closed,
+# as "Got it" leaves them; they are of a packaged app's own value types, which only reg import writes.
+$hive = "$env:LOCALAPPDATA\Packages\Microsoft.WindowsNotepad_8wekyb3d8bbwe\Settings\settings.dat"
+$tips = "$env:TEMP\desk-notepad.reg"
+@'
+Windows Registry Editor Version 5.00
+
+[HKEY_USERS\desk-notepad\LocalState]
+"TeachingTipCheckCount"=hex(5f5e105):01,00,00,00,06,57,36,cc,d3,63,dd,01
+"TeachingTipExplicitClose"=hex(5f5e10b):01,42,da,4c,dc,d3,63,dd,01
+"TeachingTipVersion"=hex(5f5e105):00,00,00,00,06,57,36,cc,d3,63,dd,01
+'@ | Set-Content -Encoding Unicode $tips
+reg load HKU\desk-notepad $hive | Out-Null
+if ($LASTEXITCODE) { throw "loading Notepad's settings ($hive) failed" }
+# reg import reports its success on stderr, which this script would take for an error.
+cmd /c "reg import `"$tips`" 2>nul"
+$imported = $LASTEXITCODE
+reg unload HKU\desk-notepad | Out-Null
+if ($LASTEXITCODE) { throw "unloading Notepad's settings failed" }
+Remove-Item $tips
+if ($imported) { throw "writing Notepad's settings failed ($imported)" }
+
 # Defender skips where tests run and write programs (profiles, program folders, temporary files and
 # installers), so it takes no time from them. Tamper Protection keeps real-time protection on (only
 # a click in Windows Security turns it off), but a local administrator may still exclude folders;

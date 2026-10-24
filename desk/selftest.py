@@ -179,14 +179,12 @@ def run_selftest(image: str, reboot: bool = False, keep: bool = False, spec: Ima
     def typing():
         text = "Zażółć gęślą jaźń ĄĆĘŁŃÓŚŹŻ 123 !@#"
         if spec.family == "windows":
-            # Notepad opens a first-run teaching tip that blocks its UI Automation; Esc closes it.
             # Started once only: a second start opens another window, which takes the focus
-            # whenever it comes up, in the middle of typing too.
+            # whenever it comes up, in the middle of typing too. Notepad's first-run tip, which
+            # would block its UI Automation, is marked closed by the image.
             from . import winagent
 
             winagent.request(run, cmd="run", file=sc["editor"])
-            time.sleep(3)
-            display.key(run.dom(), "esc")
             _wait_focused(run, sc["editor"], sc["editor_window"])
         else:
             _launch(run, sc["editor"], sc["editor_window"])

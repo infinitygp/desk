@@ -36,7 +36,7 @@ Part of the desk skill ([SKILL.md](SKILL.md)); the commands and pitfalls there a
 - Windows PowerShell 5.1 writes files in the ANSI code page by default: use
   `Set-Content -Encoding UTF8` / `Get-Content -Encoding UTF8` for text with Polish letters.
 - If `desk a11y` says a window's contents are "not available through UI Automation", a popup of
-  that app is in the way (Notepad's first-run tip does this): look at a screenshot, close it.
+  that app is in the way (a first-run tip, say): look at a screenshot, close it.
 - Dialogs owned by elevated processes (UAC, the Windows Firewall "allow access" prompt) are not in
   the tree at all; they are on screen, so click them by pixels from a screenshot. Classic Win32
   installers (NSIS, Inno) are readable: buttons, fields and texts show up as usual.

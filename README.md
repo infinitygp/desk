@@ -182,6 +182,8 @@ What else differs from Firefox:
   (59213768, 61090762) with ViVeTool v0.3.4 (GPL-3.0, downloaded and checked against a pinned
   SHA-256), so `desk win taskbar --edge/--size` work on every build; `desk/winsettings.py` writes
   theme and taskbar settings where the Settings app writes them.
+- Notepad's first-run teaching tip is marked closed in its settings: UI Automation gets nothing
+  from its window while the tip is open.
 - Before the warm state is saved, `idle` empties the standby list, the file cache that would make
   up almost half of the saved memory.
 
