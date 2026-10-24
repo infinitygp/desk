@@ -1,4 +1,4 @@
-# Fedora 45 Workstation, the next release, installed over the network with a kickstart. The
+# Fedora 45, the next release, installed over the network with a kickstart. The
 # installer comes from the beta's tree, the packages from the release's mirrors (ks.cfg), so it
 # follows the release once it is out; then point location at releases/45 (the beta tree goes away
 # eventually).

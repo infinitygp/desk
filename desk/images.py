@@ -102,7 +102,8 @@ def install_fingerprint(spec: ImageSpec) -> str:
     # need a new install when they change.
     refreshed = {spec.path(f).resolve() for f in spec.files or []}
     _hash_files(h, spec, [f for f in (spec.kickstart, spec.user_data, spec.unattend, spec.disk_files) if f]
-                + [f for f in spec.unattend_files or [] if spec.path(f).resolve() not in refreshed])
+                + [f for f in spec.unattend_files or [] if spec.path(f).resolve() not in refreshed]
+                + list(spec.install or []))
     return h.hexdigest()
 
 
@@ -153,6 +154,9 @@ def build(spec: ImageSpec, force: bool = False, promote_it: bool = True) -> str:
         _discard_build(name)
         raise
     _finalize(vspec, name)
+    if spec.install:
+        _install(vspec, deadline)
+    _seal(vspec)
     if promote_it:
         promote(link, vspec.base_dir)
     return vspec.base_version
@@ -503,12 +507,43 @@ def _wait_shutoff(name: str, timeout: float | None = None) -> None:
 
 
 def _finalize(spec: ImageSpec, name: str) -> None:
+    """Keep the install domain's definition and firmware variables with the build, then drop it."""
     dom = lookup(name)
     xml = dom.XMLDesc(libvirt.VIR_DOMAIN_XML_INACTIVE)
     spec.base_xml.write_text(xml)
     nvram = ET.fromstring(xml).find("os/nvram").text
     shutil.copyfile(nvram, spec.base_nvram)
     dom.undefineFlags(libvirt.VIR_DOMAIN_UNDEFINE_NVRAM | libvirt.VIR_DOMAIN_UNDEFINE_TPM)
+
+
+def _install(spec: ImageSpec, deadline: float) -> None:
+    """Boot the installed system and run the install scripts on it as root, then power it off:
+    over SSH, so a script that fails says why at once instead of leaving an install to time out."""
+    port = free_port()
+    name = f"desk-install-{spec.name}-{spec.base_version}"
+    xml = prepare_domain_xml(spec.base_xml.read_text(), name=name, disk=spec.base_disk, nvram=spec.base_nvram,
+                             ssh_port=port, console_log=LOGS / f"{name}.log", memory_mib=spec.memory_mib,
+                             vcpus=spec.vcpus)
+    _log(f"booting {name} for the install scripts")
+    dom = conn().createXML(xml, 0)
+    try:
+        if not _boot_and_wait_ssh(dom, port, spec, spec.base_dir):
+            raise DeskError("the installed system went away while booting; last screen: "
+                            f"{spec.base_dir / 'last-boot.png'}")
+        run_scripts(spec, port, spec.install, {}, timeout=max(60.0, deadline - time.monotonic()))
+        _power_off(dom, spec, port)
+    except BaseException:
+        try:
+            if dom.isActive():
+                (spec.base_dir / "failed.png").write_bytes(display.screenshot(dom))
+                _log(f"screen at failure: {spec.base_dir / 'failed.png'}")
+                dom.destroy()
+        except Exception:  # noqa: BLE001 - the domain may be gone already
+            pass
+        raise
+
+
+def _seal(spec: ImageSpec) -> None:
     spec.base_disk.chmod(0o444)
     meta = {"image": spec.name, "created": time.time(), "fingerprint": install_fingerprint(spec)}
     (spec.base_dir / "meta.json").write_text(json.dumps(meta, indent=2))
@@ -544,6 +579,37 @@ def provision_env(spec: ImageSpec) -> dict[str, str]:
     return env
 
 
+def run_scripts(spec: ImageSpec, port: int, scripts: list[str], env: dict[str, str],
+                timeout: float = PROVISION_TIMEOUT) -> None:
+    """Run each script in the guest as root, with `env`, in order; the first that fails ends it."""
+    for script in scripts:
+        for attempt in (1, 2, 3):
+            if spec.family == "windows":
+                # Not piped to `-Command -`: PowerShell reads that like an interactive prompt and
+                # silently skips a multi-line block at the end of the script.
+                if guest.scp(port, str(spec.path(script)), f"{spec.root_user}@127.0.0.1:C:/desk/provision.ps1") != 0:
+                    r = subprocess.CompletedProcess([], 255, b"", b"copying the script failed")
+                else:
+                    # The SSH session is PowerShell's, whose environment the script inherits.
+                    r = guest.ssh_run(port, spec.root_user, "".join(f"$env:{k} = '{v}'; " for k, v in env.items())
+                                      + "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\\desk\\provision.ps1",
+                                      capture=True, timeout=timeout)
+            else:
+                r = guest.ssh_run(port, spec.root_user, "".join(f"{k}={shlex.quote(v)} " for k, v in env.items())
+                                  + f"{spec.shell} -s", input=spec.path(script).read_bytes(), capture=True,
+                                  timeout=timeout)
+            # 255: the connection itself broke. Windows does that now and then during its first
+            # boot after setup; the scripts are idempotent, so run it again.
+            if r.returncode != 255 or attempt == 3:
+                break
+            _log(f"{_named(spec.path(script))}: connection lost, retrying")
+            time.sleep(10)
+            guest.wait_ssh(port, spec.user, timeout=300)
+        if r.returncode != 0:
+            raise DeskError(f"{_named(spec.path(script))} failed ({r.returncode}): "
+                            f"{r.stderr.decode(errors='replace')}")
+
+
 def provision(spec: ImageSpec, port: int, relogin: bool = True) -> None:
     if not spec.provision_scripts:
         return
@@ -572,31 +638,7 @@ def provision(spec: ImageSpec, port: int, relogin: bool = True) -> None:
                           "tar -C /tmp/desk-provision/files -xf -", input=buf.getvalue(), capture=True)
         if r.returncode != 0:
             raise DeskError(f"copying provision files failed: {r.stderr.decode(errors='replace')}")
-    for script in spec.provision_scripts:
-        for attempt in (1, 2, 3):
-            if spec.family == "windows":
-                # Not piped to `-Command -`: PowerShell reads that like an interactive prompt and
-                # silently skips a multi-line block at the end of the script.
-                if guest.scp(port, str(spec.path(script)), f"{spec.root_user}@127.0.0.1:C:/desk/provision.ps1") != 0:
-                    r = subprocess.CompletedProcess([], 255, b"", b"copying the script failed")
-                else:
-                    # The SSH session is PowerShell's, whose environment the script inherits.
-                    r = guest.ssh_run(port, spec.root_user, "".join(f"$env:{k} = '{v}'; " for k, v in env.items())
-                                      + "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\\desk\\provision.ps1",
-                                      capture=True, timeout=PROVISION_TIMEOUT)
-            else:
-                r = guest.ssh_run(port, spec.root_user, "".join(f"{k}={shlex.quote(v)} " for k, v in env.items())
-                                  + f"{spec.shell} -s", input=spec.path(script).read_bytes(), capture=True,
-                                  timeout=PROVISION_TIMEOUT)
-            # 255: the connection itself broke. Windows does that now and then during its first
-            # boot after setup; provisioning scripts are idempotent, so run it again.
-            if r.returncode != 255 or attempt == 3:
-                break
-            _log(f"{script}: connection lost, retrying")
-            time.sleep(10)
-            guest.wait_ssh(port, spec.user, timeout=300)
-        if r.returncode != 0:
-            raise DeskError(f"{script} failed ({r.returncode}): {r.stderr.decode(errors='replace')}")
+    run_scripts(spec, port, spec.provision_scripts, env)
     if relogin and spec.relogin:
         # GDM now and then does not log in automatically after a restart (seen on Ubuntu 26.04,
         # one warm-up in four), so give it a second restart before failing.

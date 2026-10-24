@@ -66,6 +66,17 @@ class Fingerprints(unittest.TestCase):
         self.assertEqual(images.warm_fingerprint(spec), images.warm_fingerprint(replace(spec, expiry=None)))
         self.assertNotEqual(images.warm_fingerprint(spec), images.warm_fingerprint(replace(spec, sound=None)))
 
+    def test_install_scripts_are_part_of_the_install(self):
+        from unittest import mock
+
+        spec = load_image("arch-gnome")
+        self.assertEqual([Path(s).relative_to(spec.dir.parent.parent).as_posix() for s in spec.install],
+                         ["distros/arch/install.sh", "desktops/gnome/install.sh"])
+        with mock.patch.object(images, "_hash_files") as hashed:
+            images.install_fingerprint(spec)
+        self.assertLessEqual(set(spec.install), set(hashed.call_args.args[2]))
+        self.assertNotEqual(images.install_fingerprint(spec), images.install_fingerprint(replace(spec, install=spec.install[:1])))
+
     def test_install_ignores_files_provisioning_refreshes(self):
         from unittest import mock
 

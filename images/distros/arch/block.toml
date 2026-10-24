@@ -1,4 +1,4 @@
-# Arch Linux (rolling): the official cloud image, set up by cloud-init; user-data installs GNOME.
+# Arch Linux (rolling): the official cloud image; cloud-init makes the users, install.sh the rest.
 installer = "cloudimg"
 os_variant = "archlinux"
 memory_mib = 4096
@@ -9,6 +9,8 @@ cloud_image_url = "https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_
 # Its GRUB is not signed, so the firmware would refuse to start it.
 secure_boot = false
 user_data = "user-data"
+# Over SSH once cloud-init has powered off: the system under any desktop.
+install = ["install.sh"]
 user = "tester"
 # A rolling release drifts quickly; a fresh install keeps tests close to what users have.
 rebuild_days = 14

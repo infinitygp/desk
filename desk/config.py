@@ -154,7 +154,10 @@ class ImageSpec:
     disk_files: str | None = None
     # Off for systems whose boot loader is not signed for UEFI Secure Boot (Arch).
     secure_boot: bool = True
-    # One script or several, run in order as root.
+    # Scripts run as root over SSH on the installed system before it becomes the base image
+    # (`desk image build`), so a change is a new install: what a desktop block installs.
+    install: list[str] | None = None
+    # One script or several, run in order as root before the warm state is saved.
     provision: str | list[str] | None = None
     # Directories (relative to the image) copied to /tmp/desk-provision/files before provisioning.
     files: list[str] | None = None
@@ -295,11 +298,11 @@ class ImageSpec:
 INSTALL_KEYS = ("installer", "location", "kickstart", "iso", "iso_url", "iso_sha256", "kernel", "initrd",
                 "extra_args", "user_data", "cloud_image_url", "secure_boot", "release", "unattend",
                 "unattend_files", "image_index", "virtio_win_iso", "openssh_msi", "os_variant",
-                "disk_gb", "disk_image_url", "disk_files", "install_marker")
+                "disk_gb", "disk_image_url", "disk_files", "install_marker", "install")
 # Settings that name files of their block.
 PATH_KEYS = ("kickstart", "user_data", "unattend", "disk_files", "prepare")
 # Lists of files that the blocks of an image add up to, in the order distro, desktop, addons.
-LIST_KEYS = ("unattend_files", "provision", "files")
+LIST_KEYS = ("unattend_files", "install", "provision", "files")
 # What a block says about the others besides its settings: the desktops a distro was tried with
 # (none: it comes with its own, as Windows does, or has none), the distros an addon works on.
 BLOCK_ONLY = {"distros": "desktops", "desktops": None, "addons": "distros"}

@@ -4,6 +4,8 @@ ready = "systemctl --user is-active --quiet graphical-session.target"
 # Run as root after provisioning so the session picks up the shell extension (Wayland cannot
 # restart the shell in place).
 relogin = "systemctl restart gdm"
+# The packages and the automatic login, on the installed system (desk image build).
+install = ["install.sh"]
 provision = "provision.sh"
 # Copied to /tmp/desk-provision/files for provision.sh.
 files = ["files"]

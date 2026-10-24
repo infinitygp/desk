@@ -201,5 +201,5 @@ class ImageCommands(unittest.TestCase):
     def test_blocks(self):
         code, out, _ = self.desk("image", "blocks")
         self.assertEqual(code, 0)
-        self.assertRegex(out, r"distros\n(  .*\n)*  fedora-44 +Fedora 44 Workstation.*\(desktops: gnome\)")
+        self.assertRegex(out, r"distros\n(  .*\n)*  fedora-44 +Fedora 44\b.*\(desktops: gnome\)")
         self.assertRegex(out, r"addons\n(  .*\n)*  cockpit +Cockpit.*\(distros: fedora-44\)")

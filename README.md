@@ -64,12 +64,12 @@ the same on every host, and `desk up` of an image the host has not defined print
 
 | Block | Kind | Install, or what it adds | Notes |
 |---|---|---|---|
-| `fedora-44` | distro | kickstart over the network, Workstation | desktops: `gnome` |
+| `fedora-44` | distro | kickstart over the network, the system without a desktop | desktops: `gnome` |
 | `fedora-45` | distro | kickstart, the beta's installer tree, the release's packages | next release; follows it once it is out |
-| `arch` | distro | official cloud image, GNOME installed by cloud-init (NoCloud seed) | rolling; no Secure Boot, no Firefox |
+| `arch` | distro | official cloud image: users by cloud-init (NoCloud seed), the rest by `install.sh` | rolling; no Secure Boot, no Firefox |
 | `windows-11` | distro | evaluation ISO + `autounattend.xml` on a second CD | comes with its desktop; 90-day evaluation, reinstalled by `desk maintain` |
 | `openwrt-25.12` | distro | the release's disk image (x86-64 ext4 combined, EFI), grown and preconfigured offline | no desktop: BusyBox ash, procd, apk, LuCI |
-| `gnome` | desktop | shell extension, settings for steady screenshots, accessibility | |
+| `gnome` | desktop | the Workstation's packages (Fedora) or the gnome group (Arch), automatic login; shell extension, settings for steady screenshots, accessibility | |
 | `cockpit` | addon | Cockpit, Firefox logged in with administrative access | Fedora 44 |
 
 The Linux images with a desktop have Chromium, the Fedora ones Firefox as well.
@@ -95,8 +95,8 @@ files it names relative to itself (kickstart or `user-data`, `provision.sh`, `pr
 first sentence of its first comment is what `desk image blocks` says of it. An image layers its
 distro, its desktop and its addons in that order:
 
-- A setting of a later block wins; `provision`, `files` and `unattend_files` add up, and only one
-  block brings a `prepare`.
+- A setting of a later block wins; `install`, `provision`, `files` and `unattend_files` add up,
+  and only one block brings a `prepare`.
 - A distro lists the desktops it was tried with (`desktops`); one without the list comes with its
   desktop (Windows) or has none (OpenWrt). An addon may list the distros it works on (`distros`).
   `desk image add` refuses other combinations.
@@ -122,6 +122,11 @@ The settings that shape a run:
 - `memory_mib`, `vcpus`: the size of the VM. The warm-up and every run set them on the installed
   domain, so a change is a new warm state, not a new install; `desk up --memory/--cpus` gives one
   run other sizes, booting cold when they differ from the warm state's.
+- `install`: scripts run as root over SSH on the installed system before it becomes the base
+  image, the distro's (Arch's system around any desktop) and then the desktop's (its packages and
+  the automatic login); a change is a new install. The installers put down only the system
+  without a desktop (Fedora's kickstart; cloud-init makes the users), so a script that fails says
+  why at once instead of leaving the install to time out.
 - `rebuild_days`, `expiry`, `install_marker`: see Builds and maintenance.
 
 An image whose addons only add to the warm state (provisioning, files, a prepare script) is a

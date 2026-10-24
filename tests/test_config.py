@@ -156,6 +156,14 @@ class HostBlocks(HostFiles):
         self.assertEqual(xx.provision_scripts[-1], str(d / "provision.sh"))
         self.assertEqual(config.describe(d), "Another language.")
 
+    def test_an_addon_that_installs_is_an_install_of_its_own(self):
+        self.addon("xx", 'install = ["install.sh"]\n', **{"install.sh": "true\n"})
+        self.images()
+        self.assertEqual(config.add_image("fedora-44", "gnome", ["xx"], {}), ["fedora-44-gnome-xx"])
+        xx = load_image("fedora-44-gnome-xx")
+        self.assertIsNone(xx.base)
+        self.assertEqual(xx.install[-1], str(CONFIG_DIR / "addons" / "xx" / "install.sh"))
+
     def test_a_name_defined_twice_is_refused(self):
         self.addon("cockpit", "")
         with self.assertRaisesRegex(DeskError, "addon 'cockpit' is defined twice"):
