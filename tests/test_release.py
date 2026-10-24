@@ -40,6 +40,8 @@ class Release(unittest.TestCase):
         environ = {**os.environ, "HOME": str(home), "XDG_CACHE_HOME": str(home / ".cache"),
                    "XDG_CONFIG_HOME": str(home / ".config"), "PATH": f"{home / 'bin'}:{os.environ['PATH']}", **env}
         environ.pop("DESK_LAUNCHER", None)
+        # The HTTPS download fails at once (nothing listens on port 9), so updates come from the fake gh.
+        environ.update(https_proxy="http://127.0.0.1:9", HTTPS_PROXY="http://127.0.0.1:9", no_proxy="", NO_PROXY="")
         return subprocess.run([sys.executable, str(launcher), *args], capture_output=True, text=True, env=environ,
                               timeout=120)
 
@@ -159,6 +161,72 @@ class Release(unittest.TestCase):
         self.assertEqual(r.returncode, 2)
         self.assertIn("git pull", r.stderr)
 
+
+class Download(unittest.TestCase):
+    """desk update fetches over HTTPS and turns to gh only when that fails."""
+
+    def setUp(self):
+        from desk import install
+
+        self.install = install
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.out = Path(tmp.name) / "desk.pyz"
+
+    def response(self, *chunks: bytes):
+        from unittest import mock
+
+        r = mock.MagicMock()
+        r.__enter__.return_value.read.side_effect = [*chunks, b""]
+        return r
+
+    def test_https_first_without_gh(self):
+        from unittest import mock
+
+        with mock.patch("urllib.request.urlopen", return_value=self.response(b"PK", b"zip")) as urlopen, \
+                mock.patch("subprocess.run") as run:
+            self.install._download("owner/desk", self.out)
+        self.assertEqual(urlopen.call_args.args[0], "https://github.com/owner/desk/releases/latest/download/desk.pyz")
+        run.assert_not_called()
+        self.assertEqual(self.out.read_bytes(), b"PKzip")
+
+    def test_gh_when_https_fails(self):
+        import urllib.error
+        from unittest import mock
+
+        missing = urllib.error.HTTPError("u", 404, "Not Found", {}, None)
+        self.addCleanup(missing.close)
+        done = subprocess.CompletedProcess([], 0, "", "")
+        with mock.patch("urllib.request.urlopen", side_effect=missing), \
+                mock.patch("shutil.which", return_value="/usr/bin/gh"), mock.patch("subprocess.run", return_value=done) as run:
+            self.install._download("owner/desk", self.out)
+        self.assertEqual(run.call_args.args[0][:5], ["gh", "release", "download", "--repo", "owner/desk"])
+
+    def test_both_failing_names_both(self):
+        import urllib.error
+        from unittest import mock
+
+        from desk.config import DeskError
+
+        refused = urllib.error.URLError("Connection refused")
+        failed = subprocess.CompletedProcess([], 1, "", "HTTP 401: Bad credentials")
+        with mock.patch("urllib.request.urlopen", side_effect=refused), \
+                mock.patch("shutil.which", return_value="/usr/bin/gh"), mock.patch("subprocess.run", return_value=failed), \
+                self.assertRaises(DeskError) as e:
+            self.install._download("owner/desk", self.out)
+        self.assertIn("Connection refused", str(e.exception))
+        self.assertIn("Bad credentials", str(e.exception))
+        with mock.patch("urllib.request.urlopen", side_effect=refused), mock.patch("shutil.which", return_value=None), \
+                self.assertRaises(DeskError) as e:
+            self.install._download("owner/desk", self.out)
+        self.assertIn("gh auth login", str(e.exception))
+
+    def test_a_download_that_trickles_ends_at_the_deadline(self):
+        from unittest import mock
+
+        with mock.patch("urllib.request.urlopen", return_value=self.response(b"a", b"b", b"c")), \
+                mock.patch("time.monotonic", side_effect=[0, 1, 400, 401]), self.assertRaises(TimeoutError):
+            self.install._fetch("https://example.org/desk.pyz", self.out, limit=300)
 
 
 class Unpack(unittest.TestCase):

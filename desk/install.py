@@ -9,6 +9,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
+import urllib.request
 import zipfile
 from pathlib import Path
 
@@ -18,6 +20,7 @@ BIN = Path.home() / ".local" / "bin" / "desk"
 # Coding agents' skill directories: the shared one holds the skill, the others link to it.
 SKILLS = Path.home() / ".agents" / "skills" / "desk"
 LINKED = [Path.home() / ".claude" / "skills" / "desk"]
+RELEASE_URL = "https://github.com/{repo}/releases/latest/download/desk.pyz"
 
 
 def _same(path: Path, target: Path) -> bool:
@@ -80,6 +83,34 @@ def _build_of(pyz: Path) -> dict:
         raise DeskError(f"{pyz} is not a desk release: {e}") from None
 
 
+def _fetch(url: str, out: Path, limit: float = 300) -> None:
+    # urlopen's timeout is per read: the deadline is what bounds a download that only trickles.
+    deadline = time.monotonic() + limit
+    with urllib.request.urlopen(url, timeout=30) as r, open(out, "wb") as f:
+        while chunk := r.read(1 << 16):
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"not done after {limit:.0f} s")
+            f.write(chunk)
+
+
+def _download(repo: str, out: Path) -> None:
+    """The newest release into `out`: over HTTPS, else with gh, which reaches a private repository
+    too."""
+    try:
+        _fetch(RELEASE_URL.format(repo=repo), out)
+        return
+    except (OSError, ValueError) as e:  # URLError, HTTPError and TimeoutError are OSErrors
+        https = str(e)
+    if not shutil.which("gh"):
+        raise DeskError(f"downloading the newest release of {repo} failed: {https} "
+                        "(for a private repository install gh and run gh auth login)")
+    r = subprocess.run(["gh", "release", "download", "--repo", repo, "--pattern", "desk.pyz",
+                        "--output", str(out), "--clobber"], capture_output=True, text=True, timeout=300)
+    if r.returncode != 0:
+        raise DeskError(f"downloading the newest release of {repo} failed: {https}; "
+                        f"with gh: {r.stderr.strip()[-300:]} (gh auth status)")
+
+
 def update() -> str:
     if not BUILD:
         raise DeskError(f"this desk runs from a checkout of its repository ({PROJECT}): update it with git pull there")
@@ -88,11 +119,7 @@ def update() -> str:
     os.close(fd)
     new = Path(name)
     try:
-        r = subprocess.run(["gh", "release", "download", "--repo", BUILD["repo"], "--pattern", "desk.pyz",
-                            "--output", str(new), "--clobber"], capture_output=True, text=True, timeout=300)
-        if r.returncode != 0:
-            raise DeskError(f"downloading the newest release of {BUILD['repo']} failed: {r.stderr.strip()[-300:]} "
-                            "(gh auth status)")
+        _download(BUILD["repo"], new)
         build = _build_of(new)
         if build["id"] == BUILD["id"]:
             return f"desk {version()} is the newest release"

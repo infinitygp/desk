@@ -21,11 +21,15 @@ A host that only uses desk needs no checkout: a release is one file, `desk.pyz`,
 the system's `python3` with the distribution's libvirt bindings (see Host setup). In fish:
 
 ```fish
-gh release download --repo infinitygp/desk --pattern desk.pyz --output ~/.local/bin/desk
+curl --create-dirs -fLo ~/.local/bin/desk https://github.com/infinitygp/desk/releases/latest/download/desk.pyz
 chmod +x ~/.local/bin/desk
 desk install      # the skill into ~/.agents/skills/desk (and ~/.claude/skills/desk), then desk doctor
 desk update       # later: the newest release, skill included
 ```
+
+`desk update` downloads over HTTPS as well, and only when that fails (a private repository, a fork
+of it) with `gh`, logged in: the first line would then be
+`gh release download --repo OWNER/desk --pattern desk.pyz --output ~/.local/bin/desk`.
 
 On its first start a release unpacks itself into `~/.cache/desk/<build>/` and runs from there,
 so the image definitions and the helpers it starts or copies into guests are ordinary files;
@@ -377,7 +381,7 @@ libvirt bindings to run.
 |---|---|---|
 | To start runs | `libvirt` `libvirt-python` `qemu-system-x86` `qemu-hw-display-virtio-vga` `qemu-img` `edk2-ovmf` `passt` `openssh` | `libvirt-daemon-driver-qemu` `python3-libvirt` `qemu-system-x86-core` `qemu-device-display-virtio-vga` `qemu-img` `edk2-ovmf` `passt` `openssh-clients` |
 | To build images | `virt-install` `openssh`; `arch-gnome`: `curl` `openssl`; `openwrt-*`: `curl` `gzip` `gptfdisk` `parted` `libguestfs`; `windows-11`: `curl` `7zip` `libisoburn` | `virt-install` `openssh`; `arch-gnome`: `curl` `openssl`; `openwrt-*`: `curl` `gzip` `gdisk` `parted` `libguestfs`; `windows-11`: `curl` `7zip` `xorriso` |
-| Single features | `python-pillow` (crops, several monitors), `qemu-hw-display-virtio-gpu-pci` (`--resolution`, `--displays`), `guestfs-tools` (`desk diff`), `gstreamer` `gst-plugins-base` `gst-plugins-good` (`desk record`), `github-cli` (installing and `desk update` of a release) | `python3-pillow`, `qemu-device-display-virtio-gpu-pci`, `guestfs-tools`, `gstreamer1` `gstreamer1-plugins-base` `gstreamer1-plugins-good`, `gh` |
+| Single features | `python-pillow` (crops, several monitors), `qemu-hw-display-virtio-gpu-pci` (`--resolution`, `--displays`), `guestfs-tools` (`desk diff`), `gstreamer` `gst-plugins-base` `gst-plugins-good` (`desk record`), `github-cli` (installing and `desk update` from a private repository) | `python3-pillow`, `qemu-device-display-virtio-gpu-pci`, `guestfs-tools`, `gstreamer1` `gstreamer1-plugins-base` `gstreamer1-plugins-good`, `gh` |
 
 The user needs `/dev/kvm` (the `kvm` group where it is not open to everybody); VMs run under
 `qemu:///session`, so nothing runs as root.
