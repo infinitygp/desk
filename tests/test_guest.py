@@ -104,7 +104,7 @@ class WindowsAgent(unittest.TestCase):
             run = SimpleNamespace(id="t", agent_port=server.getsockname()[1])
             self.assertEqual(winagent.request(run, timeout=5, cmd="ping"), {"ok": True})
             thread.join()
-        self.assertEqual(seen, {"request": b'{"cmd": "ping"}\n', "closed": False})
+        self.assertEqual(seen, {"request": b'{"cmd": "ping", "open": true}\n', "closed": False})
 
     def test_a_query_is_asked_again_once_the_agent_is_back(self):
         gone = winagent.AgentGone("in-session agent not reachable")

@@ -280,7 +280,8 @@ while ($true) {
         $req = $reader.ReadLine() | ConvertFrom-Json
         # Closed already: the caller gave up while an earlier request held the agent and was told
         # this one failed, so it must not happen now (an action asked again would happen twice).
-        if ($client.Client.Poll(0, [Net.Sockets.SelectMode]::SelectRead) -and $client.Client.Available -eq 0) {
+        # Only for callers that keep the connection open while they wait; older desks half-close it.
+        if ($req.open -and $client.Client.Poll(0, [Net.Sockets.SelectMode]::SelectRead) -and $client.Client.Available -eq 0) {
             $client.Close()
             continue
         }
