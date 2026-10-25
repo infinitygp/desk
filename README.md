@@ -73,6 +73,8 @@ the same on every host, and `desk up` of an image the host has not defined print
 | `openwrt-25.12` | distro | the release's disk image (x86-64 ext4 combined, EFI), grown and preconfigured offline | no desktop: BusyBox ash, procd, apk, LuCI |
 | `gnome` | desktop | the Workstation's packages (Fedora), the gnome group (Arch), gnome-core (Debian), ubuntu-desktop-minimal (Ubuntu), automatic login; shell extension, settings for steady screenshots | |
 | `kde` | desktop | Plasma on Wayland, logged in by Plasma Login Manager (Fedora, Arch) or SDDM (Debian, Ubuntu) | |
+| `xfce` | desktop | Xfce on X11, logged in by LightDM | |
+| `cinnamon` | desktop | Cinnamon on X11, logged in by LightDM | |
 | `hyprland` | desktop | Hyprland (Wayland, tiling), started by greetd through uwsm | not on Fedora 44, which has no Hyprland; Debian's from trixie-backports |
 | `cockpit` | addon | Cockpit, Firefox logged in with administrative access | Fedora 44 |
 
@@ -180,12 +182,16 @@ distro was tried with.
 |---|---|---|---|---|---|
 | `gnome` | the shell extension `desk-helper` | the extension | `gdctl` | GDM | GNOME's calculator and text editor |
 | `kde` | a KWin script loaded for each listing, which calls the helper back over D-Bus | Klipper | `kscreen-doctor` | Plasma Login Manager, SDDM | KCalc, KWrite |
+| `xfce`, `cinnamon` | libwnck, with GTK's shadow (`_GTK_FRAME_EXTENTS`, read through libX11) | `xclip` | `xrandr` (no scaling on X11) | LightDM | GNOME's calculator; Mousepad, GNOME's editor |
 | `hyprland` | `hyprctl clients` (the focus history stands for the stacking order) | `wl-copy` | `hyprctl keyword monitor` | greetd, through uwsm | GNOME's calculator and text editor |
 
 - KWin tells an XWayland window from a Wayland one only by its class (`KWin::X11Window`), and
   places windows by their client area, which leaves out the decoration KWin draws.
 - KWrite names its text after the document, which changes with what is typed; `desk set-text`
   reads the focused field at its place back.
+- On X11 AT-SPI's screen coordinates are right for GTK 3 and Qt but not GTK 4, which counts from
+  its window there too; so every toolkit is placed as on Wayland, from the window X knows (GTK's
+  shadow included) and the frame GTK draws inside it.
 - Hyprland 0.56 writes a Lua configuration of its own when it finds none, which `hyprctl keyword`
   and `dispatch` do not take; its block writes `hyprland.conf` before the first start.
 - greetd starts the automatic session once per boot (`/run/greetd.run`, which the relogin removes),

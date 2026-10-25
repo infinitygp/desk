@@ -46,6 +46,8 @@ SCENARIOS = {
 DESKTOP_APPS = {
     "kde": {"calc": "kcalc", "calc_window": "kcalc", "buttons": ["Seven", "Multiply", "Six", "Equals"],
             "editor": "kwrite", "editor_window": "kwrite"},
+    # GTK 3, next to GNOME's calculator in GTK 4.
+    "xfce": {"editor": "mousepad", "editor_window": "Mousepad"},
 }
 
 

@@ -1,0 +1,11 @@
+# Cinnamon on X11, logged in automatically by LightDM; libwnck tells desk where windows are.
+# Run over SSH as `user`: the desktop is up and its display known to systemd --user (desk exec --gui).
+ready = "pgrep -u \"$(id -u)\" -x cinnamon >/dev/null && systemctl --user show-environment | grep -q '^DISPLAY='"
+# Run as root after provisioning: Cinnamon reads its settings when the session starts.
+relogin = "systemctl restart display-manager"
+# The packages and the automatic login, on the installed system (desk image build).
+install = ["install.sh"]
+# What every desktop image gets (browsers set up for desk, time zone, a11y switches, quiet timers),
+# then Cinnamon's own.
+provision = ["../../shared/desktop.sh", "provision.sh"]
+files = ["../../shared/desktop"]

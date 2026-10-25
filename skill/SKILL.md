@@ -186,7 +186,9 @@ administrative access (its Chromium trusts Cockpit's certificate too, logged out
 Arch Linux (rolling, pacman, no SELinux) with the newest GNOME and libraries; `debian-13-gnome` is
 Debian 13 (apt, GNOME 48, Firefox ESR); `ubuntu-26.04-gnome` is Ubuntu 26.04 LTS with Ubuntu's own
 desktop (Firefox from Mozilla's repository, no Chromium); `fedora-44-kde`, `arch-kde`,
-`debian-13-kde` and `ubuntu-26.04-kde` run KDE Plasma (KCalc, KWrite, Qt apps); `arch-hyprland`,
+`debian-13-kde` and `ubuntu-26.04-kde` run KDE Plasma (KCalc, KWrite, Qt apps); the same four
+distros come with Xfce and Cinnamon too, on X11 (`fedora-44-xfce`, `ubuntu-26.04-cinnamon`; no
+`--scale` there); `arch-hyprland`,
 `debian-13-hyprland` and `ubuntu-26.04-hyprland` run Hyprland, tiling, with GNOME's calculator and
 editor (no Fedora: it has no Hyprland); `windows-11` is
 Windows 11 Enterprise (evaluation) for Windows builds and installers; `openwrt-25.12` is OpenWrt

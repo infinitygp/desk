@@ -31,7 +31,7 @@ def apply(run, spec: ImageSpec, resolution: tuple[int, int] | None = None, scale
         _windows(run, spec, resolution, scale)
     else:
         spec.need_desktop("desk display")
-        {"kde": _kde, "hyprland": _hyprland}.get(spec.desktop, _gnome)(
+        {"kde": _kde, "xfce": _xrandr, "cinnamon": _xrandr, "hyprland": _hyprland}.get(spec.desktop, _gnome)(
             run, resolution, scale)
     with run.edit() as r:
         if scale is not None:
@@ -159,6 +159,22 @@ def _kde(run, resolution, scale) -> None:
         args.append(f"output.{name}.mode.{modes[0]['id']}")
     args.append(f"output.{name}.scale.{(scale or run.scale or 100) / 100:g}")
     _user(run, f"{env} kscreen-doctor {' '.join(args)}", "kscreen-doctor")
+    time.sleep(1)
+
+
+def _xrandr(run, resolution, scale) -> None:
+    """Xfce and Cinnamon on X11: the mode through xrandr; X11 has no scaling of its own to set."""
+    if scale not in (None, 100) or (run.scale or 100) != 100:
+        raise DeskError("scaling is set on Wayland desktops and Windows; X11 desktops run at 100 %")
+    resolution = resolution or (tuple(run.resolution) if run.resolution else None)
+    if not resolution:
+        return
+    env = "env DISPLAY=:0 XAUTHORITY=$(systemctl --user show-environment | sed -n 's/^XAUTHORITY=//p')"
+    output = next((line.split()[0] for line in _user(run, f"{env} xrandr", "xrandr").splitlines()
+                   if " connected" in line), None)
+    if output is None:
+        raise DeskError("xrandr reports no monitors")
+    _user(run, f"{env} xrandr --output {output} --mode {resolution[0]}x{resolution[1]}", "xrandr")
     time.sleep(1)
 
 

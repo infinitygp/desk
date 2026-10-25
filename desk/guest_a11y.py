@@ -138,6 +138,65 @@ def session_env(*names: str) -> None:
             os.environ.setdefault(key, value)
 
 
+def gtk_frame_extents(xids: list[int]) -> dict[int, tuple[int, int, int, int]]:
+    """The shadow GTK draws around its own decoration on X11 (_GTK_FRAME_EXTENTS: left, right, top,
+    bottom) of each window that has one, through libX11, which every X11 desktop has."""
+    import ctypes
+
+    x = ctypes.cdll.LoadLibrary("libX11.so.6")
+    x.XOpenDisplay.restype, x.XOpenDisplay.argtypes = ctypes.c_void_p, [ctypes.c_char_p]
+    x.XInternAtom.restype, x.XInternAtom.argtypes = ctypes.c_ulong, [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+    out = ctypes.POINTER(ctypes.c_ulong)
+    x.XGetWindowProperty.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_long, ctypes.c_long,
+                                     ctypes.c_int, ctypes.c_ulong, out, ctypes.POINTER(ctypes.c_int), out, out,
+                                     ctypes.POINTER(ctypes.c_void_p)]
+    x.XFree.argtypes = x.XCloseDisplay.argtypes = [ctypes.c_void_p]
+    display = x.XOpenDisplay(None)
+    if not display:
+        raise LookupError(f"cannot open the X display {os.environ.get('DISPLAY')!r} to read window frames")
+    try:
+        atom = x.XInternAtom(display, b"_GTK_FRAME_EXTENTS", 1)
+        found = {}
+        for xid in xids if atom else []:
+            kind, size, count, after = ctypes.c_ulong(), ctypes.c_int(), ctypes.c_ulong(), ctypes.c_ulong()
+            data = ctypes.c_void_p()
+            # 6: XA_CARDINAL.
+            if x.XGetWindowProperty(display, xid, atom, 0, 4, 0, 6, ctypes.byref(kind), ctypes.byref(size),
+                                    ctypes.byref(count), ctypes.byref(after), ctypes.byref(data)) == 0 and data:
+                if count.value == 4 and size.value == 32:
+                    found[xid] = tuple(ctypes.cast(data, ctypes.POINTER(ctypes.c_long))[:4])
+                x.XFree(data)
+        return found
+    finally:
+        x.XCloseDisplay(display)
+
+
+def x11_windows() -> list[dict]:
+    """Xfce and Cinnamon run on X11, where libwnck knows the windows. AT-SPI's screen coordinates
+    would do for GTK 3 and Qt, but GTK 4 counts from its window there as well, so every toolkit is
+    placed as on Wayland: the window as X has it (GTK's shadow included) is the buffer, the frame is
+    what GTK draws inside its shadow."""
+    session_env("DISPLAY", "XAUTHORITY")
+    gi.require_version("Wnck", "3.0")
+    from gi.repository import Wnck
+
+    screen = Wnck.Screen.get_default()
+    if screen is None:
+        raise LookupError(f"no X display to list windows on (DISPLAY={os.environ.get('DISPLAY')!r})")
+    screen.force_update()
+    active = screen.get_active_window()
+    windows = screen.get_windows_stacked()
+    shadows = gtk_frame_extents([w.get_xid() for w in windows])
+    listed = []
+    for w in windows:
+        x, y, width, height = w.get_client_window_geometry()
+        left, right, top, bottom = shadows.get(w.get_xid(), (0, 0, 0, 0))
+        listed.append({"title": w.get_name(), "wm_class": w.get_class_group_name(), "pid": w.get_pid(), "x11": False,
+                       "minimized": w.is_minimized(), "focus": w == active, "buffer": [x, y, width, height],
+                       "frame": [x + left, y + top, width - left - right, height - top - bottom], "wnck": w})
+    return listed
+
+
 def hyprctl(*args: str):
     """hyprctl's JSON, from the Hyprland instance of the session."""
     import subprocess
@@ -161,6 +220,8 @@ def hyprland_windows() -> list[dict]:
 def shell_windows() -> list[dict]:
     if DESKTOP == "kde":
         return json.loads(kwin(KWIN_WINDOWS))
+    if DESKTOP in ("xfce", "cinnamon"):
+        return [{k: v for k, v in w.items() if k != "wnck"} for w in x11_windows()]
     if DESKTOP == "hyprland":
         return hyprland_windows()
     try:
@@ -189,6 +250,16 @@ def focus(query: str) -> dict:
     if DESKTOP == "kde":
         return {"title": kwin(KWIN_ACTIVATE, QUERY=query)}
     q = query.lower()
+    if DESKTOP in ("xfce", "cinnamon"):
+        hit = next((w for w in reversed(x11_windows()) if q in (w["wm_class"] or "").lower()
+                    or q in (w["title"] or "").lower()), None)
+        if hit:
+            gi.require_version("GdkX11", "3.0")
+            from gi.repository import GdkX11
+
+            hit["wnck"].activate(GdkX11.x11_get_server_time(GdkX11.X11Window.lookup_for_display(
+                GdkX11.X11Display.get_default(), GdkX11.x11_get_default_root_xwindow())))
+        return {"title": hit["title"] if hit else ""}
     if DESKTOP == "hyprland":
         hit = next((w for w in reversed(hyprland_windows()) if q in (w["wm_class"] or "").lower()
                     or q in (w["title"] or "").lower()), None)
@@ -205,13 +276,14 @@ def clipboard(text: str) -> dict:
         bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
         bus.call_sync("org.kde.klipper", "/klipper", "org.kde.klipper.klipper", "setClipboardContents",
                       GLib.Variant("(s)", (text,)), None, Gio.DBusCallFlags.NONE, 2000, None)
-    elif DESKTOP == "hyprland":
+    elif DESKTOP != "gnome":
         import subprocess
 
-        # wl-copy stays in the background to serve the text until something else is copied.
-        session_env("WAYLAND_DISPLAY", "XDG_RUNTIME_DIR")
-        subprocess.run(["wl-copy"], input=text.encode(), check=True, timeout=10, stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL)
+        # xclip and wl-copy stay in the background to serve the text until something else is copied.
+        x11 = DESKTOP in ("xfce", "cinnamon")
+        session_env(*(("DISPLAY", "XAUTHORITY") if x11 else ("WAYLAND_DISPLAY", "XDG_RUNTIME_DIR")))
+        subprocess.run(["xclip", "-selection", "clipboard"] if x11 else ["wl-copy"], input=text.encode(),
+                       check=True, timeout=10, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     else:
         _helper("SetClipboard", GLib.Variant("(s)", (text,)))
     return {"done": True}
