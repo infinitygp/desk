@@ -121,7 +121,7 @@ class GuestSettings(unittest.TestCase):
     def test_linux_scripts_get_them_in_their_environment(self):
         spec = replace(load_image("fedora-44-gnome"), timezone="Asia/Kolkata", layout="pl")
         commands = [c for c in self.provisioned(spec) if c.endswith(" -s")]
-        self.assertEqual(commands, ["DESK_TIMEZONE=Asia/Kolkata DESK_LAYOUT=pl bash -s"])
+        self.assertEqual(commands, ["DESK_TIMEZONE=Asia/Kolkata DESK_LAYOUT=pl bash -s"] * 2)
         # OpenWrt has no zone files: the rule comes along.
         openwrt = replace(load_image("openwrt-25.12"), timezone="Asia/Kolkata", layout="us")
         commands = [c for c in self.provisioned(openwrt) if c.endswith(" -s")]

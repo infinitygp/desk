@@ -83,11 +83,11 @@ def _image_settings(args) -> dict:
     return {k: v for k, v in given.items() if v is not None}
 
 
-def _shown(value) -> str:
+def _shown(value, files: bool = False) -> str:
     """A setting as `desk image show` prints it: files within their root, a script by its first line."""
     if isinstance(value, list):
-        return "[" + ", ".join(_shown(v) for v in value) + "]"
-    if isinstance(value, str) and value.startswith("/"):
+        return "[" + ", ".join(_shown(v, files) for v in value) + "]"
+    if files and isinstance(value, str):
         p = Path(value)
         return str(p.relative_to(config.IMAGES_DIR)) if p.is_relative_to(config.IMAGES_DIR) else value
     if isinstance(value, str) and "\n" in value.strip():
@@ -103,7 +103,7 @@ def _image_show(spec) -> None:
     for f in fields(spec):
         value = getattr(spec, f.name)
         if f.name not in ("name", "dir", "base_version", "warm_version") and value != f.default:
-            print(f"{f.name} = {_shown(value)}")
+            print(f"{f.name} = {_shown(value, f.name in config.PATH_KEYS + config.LIST_KEYS)}")
 
 
 def _image_blocks() -> None:

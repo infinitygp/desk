@@ -33,8 +33,10 @@ class Composition(HostFiles):
     def test_an_image_is_its_blocks(self):
         spec = load_image("fedora-44-gnome")
         self.assertEqual((spec.installer, spec.desktop, spec.dir), ("kickstart", "gnome", IMAGES_DIR / "distros" / "fedora-44"))
-        self.assertEqual(spec.provision_scripts, [str(IMAGES_DIR / "desktops" / "gnome" / "provision.sh")])
-        [files] = spec.files
+        self.assertEqual(spec.provision_scripts, [str(IMAGES_DIR / "shared" / "desktop.sh"),
+                                                  str(IMAGES_DIR / "desktops" / "gnome" / "provision.sh")])
+        shared, files = spec.files
+        self.assertTrue((spec.path(shared) / "desk-firefox.js").is_file())
         self.assertTrue((spec.path(files) / "desk-helper@desk.local" / "extension.js").is_file())
         self.assertTrue(spec.path(spec.kickstart).is_file())
         self.assertEqual(load_image("windows-11").desktop, "windows")

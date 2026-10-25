@@ -49,7 +49,7 @@ scripts/             build.py makes desk.pyz, the release; pyz_main.py is its en
 skill/               agent skill: SKILL.md, and a file per task it points to
 desk/                harness code (guest_a11y.py runs inside the guest)
 tests/               unit tests
-images/              blocks images are made of: distros/, desktops/, addons/ (Images)
+images/              blocks images are made of: distros/, desktops/, addons/; shared/ what desktops share
 <home>/              base/, warm/, runs/, reports/, maintain/, cache/, logs/, keys/, ssh/  (see Host setup)
 ```
 
@@ -156,9 +156,11 @@ Provisioning (`provision`, `files`) runs in the warm-up's first boot, which then
 cleanly. That disk (`provisioned.qcow2` in the warm build) is what the warm state boots before it
 is saved and what cold runs boot, so both start from the same files and cold runs skip
 provisioning and the relogin; with no current warm build they boot the base disk and provision it.
-On the GNOME images (one script for Fedora and Arch, `images/desktops/gnome/provision.sh`) it
-installs the shell extension, the keyboard layout and accessibility settings, and masks GNOME
-Software, whose banners and prompts would cover the app under test.
+Every desktop image first gets `images/shared/desktop.sh`: the browsers set up for desk, the
+time zone and keyboard layout, the accessibility switches of Gecko, Chromium and Qt, quiet
+maintenance timers and the polkit rule `desk reboot` needs. Then its desktop's own script: on
+GNOME (`images/desktops/gnome/provision.sh`) the shell extension, settings for a still screen, and
+GNOME Software masked, whose banners and prompts would cover the app under test.
 Every script has `DESK_TIMEZONE` (an IANA name), `DESK_POSIX_TZ` (its POSIX rule, from the host's
 zone file, for OpenWrt) and `DESK_LAYOUT` in its environment; the installs themselves are UTC and
 US.
@@ -171,7 +173,7 @@ else Firefox.
 Firefox:
 
 - Writes every page's console and uncaught errors to its output, so to the journal
-  (`images/desktops/gnome/files/desk-firefox.js`), where `desk browser console` and the report read
+  (`images/shared/desktop/desk-firefox.js`), where `desk browser console` and the report read
   them.
   Promises keep their rejection stack without the devtools open, and an autoconfig script
   (`desk.cfg`, loaded into every content process) adds the thrown value and stack of each uncaught
@@ -183,9 +185,9 @@ Firefox:
 - The Remote Agent (WebDriver BiDi) is not used, as it marks the browser window;
   `desk browser viewport` types the sizes into the responsive design mode.
 
-Chromium gets its policies and flags from `images/desktops/gnome/files/desk-chromium-*` (Fedora's
-wrapper reads flags from `/etc/chromium/chromium.conf`, Arch's launcher from
-`/etc/chromium-flags.conf`):
+Chromium gets its policies and flags from `images/shared/desktop/desk-chromium-*` (Fedora's
+wrapper reads flags from `/etc/chromium/chromium.conf`, Debian's from `/etc/chromium.d/`, Arch's
+launcher from `/etc/chromium-flags.conf`):
 
 - `--password-store=basic`: GDM logs in without a password and leaves no unlocked keyring, for
   which Chromium would ask a new password;

@@ -1,5 +1,5 @@
 """The browsers of the Linux images, Firefox and Chromium: their web consoles as the images send
-them to the journal (images/desktops/gnome/files/desk-firefox.js, desk-chromium-flags), console.* calls,
+them to the journal (images/shared/desktop/desk-firefox.js, desk-chromium-flags), console.* calls,
 uncaught exceptions and rejected promises of every page; opening pages; pages at a phone's size."""
 
 import json
@@ -36,7 +36,7 @@ UNLEVELLED = "Chromium console: "
 JOURNAL = r"""journalctl --since "@$S" --no-pager -o short-iso-precise </dev/null 2>/dev/null \
     | grep -E ': (console\.[a-z]+|JavaScript (error|warning|error detail)): |:CONSOLE:[0-9]+\] ' | tail -n 2000
 """
-# What images/desktops/gnome/files/desk.cfg adds after an uncaught exception: the thrown value and stack.
+# What images/shared/desktop/desk.cfg adds after an uncaught exception: the thrown value and stack.
 DETAIL = re.compile(r"JavaScript error detail: (\{.*\})\s*$")
 
 

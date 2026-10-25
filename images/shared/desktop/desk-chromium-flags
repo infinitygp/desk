@@ -1,5 +1,6 @@
 # Installed by desk as Chromium's flags for every start, from the dash or `chromium URL` from
-# another program (Arch: /etc/chromium-flags.conf; Fedora: appended to /etc/chromium/chromium.conf).
+# another program (Arch: /etc/chromium-flags.conf; Fedora: appended to /etc/chromium/chromium.conf;
+# Debian: /etc/chromium.d/desk).
 # One per line; a line starting with # is a comment.
 # No first-run dialog ("Additional Terms of Service") or tabs.
 --no-first-run
