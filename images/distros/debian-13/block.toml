@@ -14,4 +14,4 @@ install = ["install.sh"]
 user = "tester"
 # `desk maintain` reinstalls it this often, so tests run against current updates.
 rebuild_days = 14
-desktops = ["gnome"]
+desktops = ["gnome", "kde"]

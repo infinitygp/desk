@@ -3,6 +3,7 @@ guest the way its own display settings would. Several displays sit side by side,
 top-aligned, in the order of the virtio GPUs, which is how desk puts their pictures together
 (display.screenshot)."""
 
+import json
 import time
 
 from . import guest
@@ -30,7 +31,7 @@ def apply(run, spec: ImageSpec, resolution: tuple[int, int] | None = None, scale
         _windows(run, spec, resolution, scale)
     else:
         spec.need_desktop("desk display")
-        _gnome(run, resolution, scale)
+        {"kde": _kde}.get(spec.desktop, _gnome)(run, resolution, scale)
     with run.edit() as r:
         if scale is not None:
             r.scale = scale
@@ -129,3 +130,33 @@ def _gnome(run, resolution, scale) -> None:
     if r.returncode != 0:
         raise DeskError(f"gdctl refused the configuration: {r.stderr.decode(errors='replace').strip()}")
     time.sleep(1)
+
+
+def _user(run, command: str, what: str) -> str:
+    """`command` as the desktop user in the session, its output; what failed in `what`'s words."""
+    r = guest.ssh_run(run.ssh_port, run.user, command, capture=True, timeout=60)
+    if r.returncode != 0:
+        raise DeskError(f"{what} failed: {(r.stderr or r.stdout).decode(errors='replace').strip()[-300:]}")
+    return r.stdout.decode()
+
+
+def _kde(run, resolution, scale) -> None:
+    """Plasma, through kscreen-doctor; KWin, like mutter, reports logical positions."""
+    resolution = resolution or (tuple(run.resolution) if run.resolution else None)
+    env = ("env XDG_RUNTIME_DIR=/run/user/$(id -u) QT_QPA_PLATFORM=wayland "
+           "$(systemctl --user show-environment | grep '^WAYLAND_DISPLAY=')")
+    outputs = [o for o in json.loads(_user(run, f"{env} kscreen-doctor -j", "kscreen-doctor -j"))["outputs"]
+               if o.get("connected")]
+    if not outputs:
+        raise DeskError("Plasma reports no monitors")
+    name = outputs[0]["name"]
+    args = []
+    if resolution:
+        modes = [m for m in outputs[0]["modes"] if (m["size"]["width"], m["size"]["height"]) == tuple(resolution)]
+        if not modes:
+            raise DeskError(f"{name} offers no {resolution[0]}x{resolution[1]} mode (desk up --resolution sets it)")
+        args.append(f"output.{name}.mode.{modes[0]['id']}")
+    args.append(f"output.{name}.scale.{(scale or run.scale or 100) / 100:g}")
+    _user(run, f"{env} kscreen-doctor {' '.join(args)}", "kscreen-doctor")
+    time.sleep(1)
+

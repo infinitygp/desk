@@ -3,11 +3,14 @@
 Usage: snapshot JSON_OPTS | resolve JSON_SPEC | scroll JSON_SPEC [HOW] | action JSON_SPEC [NAME] |
 set-text JSON_SPEC TEXT | edit JSON_SPEC | read JSON_SPEC | focused JSON | page JSON |
 clipboard JSON_TEXT | rdm JSON | focus JSON_QUERY | shell JSON
-Prints one JSON document. Needs DBUS_SESSION_BUS_ADDRESS of the graphical session.
+Prints one JSON document. Needs DBUS_SESSION_BUS_ADDRESS of the graphical session, and
+DESK_DESKTOP, the desktop it runs (where windows are on the screen comes from it).
 """
 
 import json
+import os
 import sys
+import tempfile
 import time
 
 import gi
@@ -42,14 +45,89 @@ SEARCH_SECONDS = 10
 HIT_SECONDS = 3
 # Text of a text element that find and expect search: a log in a <pre> is a single element.
 TEXT_CHARS = 10000
+DESKTOP = os.environ.get("DESK_DESKTOP", "gnome")
+
+
+def _helper(method: str, args=None, reply: str | None = None):
+    """A method of the GNOME Shell extension (org.desk.Helper)."""
+    bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    res = bus.call_sync("org.desk.Helper", "/org/desk/Helper", "org.desk.Helper", method, args,
+                        GLib.VariantType(reply) if reply else None, Gio.DBusCallFlags.NONE, 2000, None)
+    return res.unpack()[0] if reply else None
+
+
+# KWin runs scripts but answers none of their results over D-Bus: a script hands them back by
+# calling the helper, which listens on its own connection meanwhile.
+REPLY_IFACE = Gio.DBusNodeInfo.new_for_xml(
+    '<node><interface name="org.desk.Reply"><method name="Reply"><arg type="s" direction="in"/></method>'
+    '</interface></node>').interfaces[0]
+KWIN_WINDOWS = """
+function box(g) { return [Math.round(g.x), Math.round(g.y), Math.round(g.width), Math.round(g.height)]; }
+const focus = workspace.activeWindow;
+// Stacking order, bottom first. A window's accessible coordinates count from its client area,
+// which is its frame unless KWin draws the decoration; GTK 3 and Chromium count from the buffer.
+// Only the class tells an XWayland window ("KWin::X11Window(0x...)").
+reply(JSON.stringify(workspace.stackingOrder.map(w => ({
+    title: w.caption, wm_class: w.resourceClass, pid: w.pid, x11: String(w).startsWith("KWin::X11Window"),
+    minimized: w.minimized,
+    focus: w === focus, frame: box(w.clientGeometry), buffer: box(w.bufferGeometry)}))));
+"""
+KWIN_ACTIVATE = """
+const q = QUERY.toLowerCase();
+const hit = workspace.stackingOrder.slice().reverse().find(w => w.normalWindow &&
+    ((w.resourceClass || "").toLowerCase().includes(q) || (w.caption || "").toLowerCase().includes(q)));
+if (hit) { hit.minimized = false; workspace.activeWindow = hit; }
+reply(hit ? hit.caption : "");
+"""
+
+
+def kwin(script: str, **values) -> str:
+    """Run a KWin script, `reply(text)` in it handing back the result."""
+    bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+    got = []
+
+    def on_call(_conn, _sender, _path, _iface, _method, params, invocation):
+        got.append(params.unpack()[0])
+        invocation.return_value(None)
+
+    reg = bus.register_object("/org/desk/Reply", REPLY_IFACE, on_call, None, None)
+    head = "".join(f"const {k} = {json.dumps(v)};\n" for k, v in values.items())
+    head += (f"function reply(text) {{ callDBus({json.dumps(bus.get_unique_name())}, '/org/desk/Reply', "
+             "'org.desk.Reply', 'Reply', text); }\n")
+    name = f"desk-{os.getpid()}"
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
+        f.write(head + script)
+    try:
+        sid = bus.call_sync("org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting", "loadScript",
+                            GLib.Variant("(ss)", (f.name, name)), GLib.VariantType("(i)"),
+                            Gio.DBusCallFlags.NONE, 2000, None).unpack()[0]
+        if sid < 0:
+            raise LookupError(f"KWin did not load the script {f.name}")
+        try:
+            bus.call_sync("org.kde.KWin", f"/Scripting/Script{sid}", "org.kde.kwin.Script", "run", None, None,
+                          Gio.DBusCallFlags.NONE, 2000, None)
+            ctx, deadline = GLib.MainContext.default(), time.monotonic() + 3
+            while not got and time.monotonic() < deadline:
+                ctx.iteration(False) or time.sleep(0.01)
+        finally:
+            bus.call_sync("org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting", "unloadScript",
+                          GLib.Variant("(s)", (name,)), None, Gio.DBusCallFlags.NONE, 2000, None)
+    except GLib.Error as e:
+        raise LookupError(f"KWin's scripting does not answer, so windows cannot be placed on the screen: {e.message}. "
+                          "The session may still be starting (desk wait --ready)") from None
+    finally:
+        bus.unregister_object(reg)
+        os.unlink(f.name)
+    if not got:
+        raise LookupError("KWin ran desk's script but it did not answer within 3 s")
+    return got[0]
 
 
 def shell_windows() -> list[dict]:
+    if DESKTOP == "kde":
+        return json.loads(kwin(KWIN_WINDOWS))
     try:
-        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-        res = bus.call_sync("org.desk.Helper", "/org/desk/Helper", "org.desk.Helper", "GetWindows",
-                            None, GLib.VariantType("(s)"), Gio.DBusCallFlags.NONE, 2000, None)
-        return json.loads(res.unpack()[0])
+        return json.loads(_helper("GetWindows", reply="(s)"))
     except GLib.Error as e:
         # Without the window list nothing can be placed on the screen; an empty tree would read
         # as "no windows open".
@@ -59,29 +137,32 @@ def shell_windows() -> list[dict]:
 
 
 def shell(_opts) -> dict:
-    """The overview and the notification banner shown now ({} from an older shell extension)."""
+    """The overview and the notification banner shown now ({} from an older shell extension, and
+    on desktops without them)."""
+    if DESKTOP != "gnome":
+        return {}
     try:
-        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-        res = bus.call_sync("org.desk.Helper", "/org/desk/Helper", "org.desk.Helper", "GetShell",
-                            None, GLib.VariantType("(s)"), Gio.DBusCallFlags.NONE, 2000, None)
-        return json.loads(res.unpack()[0])
+        return json.loads(_helper("GetShell", reply="(s)"))
     except GLib.Error:
         return {}
 
 
 def focus(query: str) -> dict:
-    """Bring a window to the front by application or title (the shell extension does it)."""
-    bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-    res = bus.call_sync("org.desk.Helper", "/org/desk/Helper", "org.desk.Helper", "Activate",
-                        GLib.Variant("(s)", (query,)), GLib.VariantType("(s)"), Gio.DBusCallFlags.NONE, 2000, None)
-    return {"title": res.unpack()[0]}
+    """Bring a window to the front by application or title, as the window manager would."""
+    if DESKTOP == "kde":
+        return {"title": kwin(KWIN_ACTIVATE, QUERY=query)}
+    return {"title": _helper("Activate", GLib.Variant("(s)", (query,)), "(s)")}
 
 
 def clipboard(text: str) -> dict:
-    """Set the clipboard through the shell extension, for pasting."""
-    bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-    bus.call_sync("org.desk.Helper", "/org/desk/Helper", "org.desk.Helper", "SetClipboard",
-                  GLib.Variant("(s)", (text,)), None, Gio.DBusCallFlags.NONE, 2000, None)
+    """Set the clipboard for pasting: only the compositor (or Plasma's clipboard service) can
+    without a focused window of its own."""
+    if DESKTOP == "kde":
+        bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+        bus.call_sync("org.kde.klipper", "/klipper", "org.kde.klipper.klipper", "setClipboardContents",
+                      GLib.Variant("(s)", (text,)), None, Gio.DBusCallFlags.NONE, 2000, None)
+    else:
+        _helper("SetClipboard", GLib.Variant("(s)", (text,)))
     return {"done": True}
 
 
@@ -496,12 +577,10 @@ def snapshot(opts: dict) -> dict:
     return {"windows": windows, "tops": tops, "nodes": nodes, "truncated": truncated}
 
 
-def find_node(spec: dict):
-    """Re-find a node from a snapshot: same path if role and name still match, else the only node
-    of the window with them (of two "Delete" buttons, the first is not necessarily the one meant)."""
-    desktop = Atspi.get_desktop(0)
+def node_at(spec: dict):
+    """The application of a node from a snapshot, and whatever is at the node's path now."""
     app = None
-    for _, a in app_children(desktop):
+    for _, a in app_children(Atspi.get_desktop(0)):
         try:
             if a.get_process_id() == spec["pid"]:
                 app = a
@@ -510,10 +589,17 @@ def find_node(spec: dict):
             continue
     if app is None:
         raise LookupError("application is gone")
-    path = spec["path"]
     acc = app
-    for i in path:
+    for i in spec["path"]:
         acc = acc.get_child_at_index(i) if acc is not None and i < acc.get_child_count() else None
+    return app, acc
+
+
+def find_node(spec: dict):
+    """Re-find a node from a snapshot: same path if role and name still match, else the only node
+    of the window with them (of two "Delete" buttons, the first is not necessarily the one meant)."""
+    app, acc = node_at(spec)
+    path = spec["path"]
     if acc is not None and acc.get_role_name() == spec["role"] and (acc.get_name() or "").strip() == spec["name"]:
         return app, path, acc
 
@@ -673,7 +759,14 @@ def edit(spec: dict) -> dict:
 
 
 def read(spec: dict) -> dict:
-    _, _, acc = find_node(spec)
+    """The text of a field desk has just typed into."""
+    try:
+        _, _, acc = find_node(spec)
+    except LookupError:
+        # A field named after what it holds (KWrite's document): the focused one at its place.
+        _, acc = node_at(spec)
+        if acc is None or acc.get_role_name() != spec["role"] or "focused" not in states(acc):
+            raise
     return {"text": text_of(acc) if "Text" in acc.get_interfaces() else ""}
 
 

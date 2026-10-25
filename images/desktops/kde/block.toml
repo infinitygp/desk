@@ -1,0 +1,11 @@
+# KDE Plasma on Wayland, logged in automatically; a KWin script tells desk where windows are.
+# Run over SSH as `user`; the desktop counts as ready once this succeeds and the screen settles.
+ready = "systemctl --user is-active --quiet graphical-session.target"
+# Run as root after provisioning: Plasma reads its settings when the session starts.
+relogin = "systemctl restart display-manager"
+# The packages and the automatic login, on the installed system (desk image build).
+install = ["install.sh"]
+# What every desktop image gets (browsers set up for desk, time zone, a11y switches, quiet timers),
+# then Plasma's own.
+provision = ["../../shared/desktop.sh", "provision.sh"]
+files = ["../../shared/desktop"]

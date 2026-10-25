@@ -17,6 +17,7 @@ from .config import DeskError, ImageSpec
 class Target:
     """The parts of a run that steps need, also available for the warm-up domain."""
     id: str
+    image: str
     dir: Path
     ssh_port: int
     user: str

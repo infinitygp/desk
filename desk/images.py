@@ -752,8 +752,9 @@ def warm(spec: ImageSpec, force: bool = False, promote_it: bool = True) -> str:
         boot(disk)
         if spec.prepare:
             _log(f"preparing the session ({_named(spec.path(spec.prepare))})")
-            steps.run_prepare(spec, steps.Target(id=name, dir=wd, ssh_port=port, user=spec.user,
-                                                 agent_port=agent_ports[0] if agent_ports else 0, domain=dom))
+            target = steps.Target(id=name, image=spec.name, dir=wd, ssh_port=port, user=spec.user,
+                                  agent_port=agent_ports[0] if agent_ports else 0, domain=dom)
+            steps.run_prepare(spec, target)
         if spec.idle:
             _log("waiting for the guest to settle")
             guest.ssh_run(port, spec.root_user, spec.cmd(spec.idle), capture=True, timeout=420)

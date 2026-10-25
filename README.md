@@ -7,8 +7,8 @@ mouse/keyboard input, for testing desktop apps and system packages end to end.
 - Out of band: screenshots through libvirt, pointer and keyboard through QMP, so it works
   regardless of what runs in the guest (login screen, Wayland, polkit, crashes).
 - In band: SSH as the desktop user, qemu-guest-agent as root.
-- Accessibility tree (AT-SPI) with refs that map to screen pixels; a GNOME Shell extension in
-  the image supplies window positions, which AT-SPI on Wayland does not know.
+- Accessibility tree (AT-SPI) with refs that map to screen pixels; the desktop supplies window
+  positions, which AT-SPI on Wayland does not know (Desktops).
 - Golden image -> provisioned disk -> warm state (saved RAM of a logged-in desktop) -> per-run
   qcow2 overlay.
   `desk up` restores in seconds, `desk down` discards everything.
@@ -64,7 +64,7 @@ the same on every host, and `desk up` of an image the host has not defined print
 
 | Block | Kind | Install, or what it adds | Notes |
 |---|---|---|---|
-| `fedora-44` | distro | kickstart over the network, the system without a desktop | desktops: `gnome` |
+| `fedora-44` | distro | kickstart over the network, the system without a desktop | |
 | `fedora-45` | distro | kickstart, the beta's installer tree, the release's packages | next release; follows it once it is out |
 | `arch` | distro | official cloud image: users by cloud-init (NoCloud seed), the rest by `install.sh` | rolling; no Secure Boot, no Firefox |
 | `debian-13` | distro | official cloud image (generic: the genericcloud one's kernel drives no display), likewise | Firefox ESR |
@@ -72,6 +72,7 @@ the same on every host, and `desk up` of an image the host has not defined print
 | `windows-11` | distro | evaluation ISO + `autounattend.xml` on a second CD | comes with its desktop; 90-day evaluation, reinstalled by `desk maintain` |
 | `openwrt-25.12` | distro | the release's disk image (x86-64 ext4 combined, EFI), grown and preconfigured offline | no desktop: BusyBox ash, procd, apk, LuCI |
 | `gnome` | desktop | the Workstation's packages (Fedora), the gnome group (Arch), gnome-core (Debian), ubuntu-desktop-minimal (Ubuntu), automatic login; shell extension, settings for steady screenshots | |
+| `kde` | desktop | Plasma on Wayland, logged in by Plasma Login Manager (Fedora, Arch) or SDDM (Debian, Ubuntu) | |
 | `cockpit` | addon | Cockpit, Firefox logged in with administrative access | Fedora 44 |
 
 The Linux images with a desktop have Chromium (not Ubuntu's) and Firefox (not Arch's).
@@ -166,6 +167,23 @@ GNOME Software masked, whose banners and prompts would cover the app under test.
 Every script has `DESK_TIMEZONE` (an IANA name), `DESK_POSIX_TZ` (its POSIX rule, from the host's
 zone file, for OpenWrt) and `DESK_LAYOUT` in its environment; the installs themselves are UTC and
 US.
+
+### Desktops
+
+Window positions, the clipboard and the screen's mode come from the desktop, each in its own way,
+in `desk/guest_a11y.py` (`shell_windows`, `focus`, `clipboard`) and `desk/monitors.py`; which one
+an image runs is `desktop` (the desktop block's name). `desk image blocks` lists the desktops each
+distro was tried with.
+
+| Desktop | Windows on the screen | Clipboard (`desk set-text`) | Screen (`desk display`) | Logs in | selftest drives |
+|---|---|---|---|---|---|
+| `gnome` | the shell extension `desk-helper` | the extension | `gdctl` | GDM | GNOME's calculator and text editor |
+| `kde` | a KWin script loaded for each listing, which calls the helper back over D-Bus | Klipper | `kscreen-doctor` | Plasma Login Manager, SDDM | KCalc, KWrite |
+
+- KWin tells an XWayland window from a Wayland one only by its class (`KWin::X11Window`), and
+  places windows by their client area, which leaves out the decoration KWin draws.
+- KWrite names its text after the document, which changes with what is typed; `desk set-text`
+  reads the focused field at its place back.
 
 ### Browsers on Linux
 

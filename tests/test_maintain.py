@@ -212,7 +212,7 @@ class SelftestStart(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "memory.save").write_bytes(b"")
-            spec = SimpleNamespace(family="linux", base_xml=Path(tmp) / "memory.save", warm_dir=Path(tmp),
+            spec = SimpleNamespace(family="linux", desktop="gnome", base_xml=Path(tmp) / "memory.save", warm_dir=Path(tmp),
                                    warm_version=None)
             held = "warm state of x is in use by another run"
             with mock.patch("desk.selftest.runs.cold_reason", return_value=held), \
@@ -230,7 +230,7 @@ class SelftestStart(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             (Path(tmp) / "memory.save").write_bytes(b"")
-            spec = SimpleNamespace(name="x", family="linux", base_xml=Path(tmp) / "memory.save", warm_dir=Path(tmp),
+            spec = SimpleNamespace(name="x", family="linux", desktop="gnome", base_xml=Path(tmp) / "memory.save", warm_dir=Path(tmp),
                                    warm_version=None)
             cold = mock.Mock(id="ab12cd", domain="desk-ab12cd")
             with mock.patch("desk.selftest.runs.cold_reason", return_value=None), \

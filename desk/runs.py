@@ -656,7 +656,8 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
         # Measured on GNOME 50: the second GPU's monitor shows its first frame and is never
         # updated again (mutter's copy to a GPU without 3D), so screenshots would lie.
         raise DeskError("several monitors are supported on Windows guests only; GNOME does not update a second "
-                        "virtio GPU's monitor here (resolution and --scale work)")
+                        "virtio GPU's monitor here, and the other Linux desktops were not tried with one "
+                        "(resolution and --scale work)")
     if not cold and (displays != 1 or resolution):
         # The warm state was saved with the image's single monitor; other hardware boots fresh.
         print(f"[desk] {displays} display(s){f' at {resolution[0]}x{resolution[1]}' if resolution else ''}: "

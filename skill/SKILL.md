@@ -185,7 +185,8 @@ out); `fedora-44-gnome-cockpit` has Cockpit open in Firefox, logged in as tester
 administrative access (its Chromium trusts Cockpit's certificate too, logged out); `arch-gnome` is
 Arch Linux (rolling, pacman, no SELinux) with the newest GNOME and libraries; `debian-13-gnome` is
 Debian 13 (apt, GNOME 48, Firefox ESR); `ubuntu-26.04-gnome` is Ubuntu 26.04 LTS with Ubuntu's own
-desktop (Firefox from Mozilla's repository, no Chromium); `windows-11` is
+desktop (Firefox from Mozilla's repository, no Chromium); `fedora-44-kde`, `arch-kde`,
+`debian-13-kde` and `ubuntu-26.04-kde` run KDE Plasma (KCalc, KWrite, Qt apps); `windows-11` is
 Windows 11 Enterprise (evaluation) for Windows builds and installers; `openwrt-25.12` is OpenWrt
 25.12 without a desktop, for OpenWrt packages and LuCI apps. Images are as old as their last build
 (`desk image list` shows the date) unless the host renews them with `desk maintain`, by hand or

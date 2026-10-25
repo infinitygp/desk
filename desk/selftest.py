@@ -41,6 +41,14 @@ SCENARIOS = {
 }
 
 
+# A desktop's own calculator and editor where it has them (desktops without them get GNOME's, which
+# their block installs).
+DESKTOP_APPS = {
+    "kde": {"calc": "kcalc", "calc_window": "kcalc", "buttons": ["Seven", "Multiply", "Six", "Equals"],
+            "editor": "kwrite", "editor_window": "kwrite"},
+}
+
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
         return None
@@ -109,7 +117,7 @@ def run_selftest(image: str, reboot: bool = False, keep: bool = False, spec: Ima
     """`spec` picks specific builds (desk maintain tests new ones); `shots_dir` gets a screenshot
     of every failed step."""
     spec = spec or load_image(image)
-    sc = SCENARIOS[spec.family]
+    sc = {**SCENARIOS[spec.family], **DESKTOP_APPS.get(spec.desktop, {})}
     run = None
     results: list[tuple[str, bool, str]] = []
 
