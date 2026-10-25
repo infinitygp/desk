@@ -290,7 +290,7 @@ the logged-in session (`images/distros/windows-11/agent/agent.ps1`, its port for
 ## Builds and maintenance
 
 Every install and every warm state is a build of its own, `base/<image>.<version>/` and
-`warm/<image>.<version>/`, with `base/<image>` and `warm/<image>` symlinks to the current ones.
+`warm/<image>.<version>/` (the version is the UTC time it began), with `base/<image>` and `warm/<image>` symlinks to the current ones.
 Runs pin the builds they start from, so a new build never disturbs a running or kept run;
 `desk gc` deletes builds nothing uses any more. Builds of an image whose definition is gone stay
 until they are deleted by hand.

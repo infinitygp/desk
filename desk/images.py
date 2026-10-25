@@ -37,7 +37,8 @@ BUILD_TIMEOUT = 3 * 3600
 
 
 def new_version() -> str:
-    return time.strftime("%Y%m%d-%H%M%S")
+    # UTC: the hour that repeats when summer time ends would reorder local names, or repeat one.
+    return time.strftime("%Y%m%d-%H%M%S", time.gmtime())
 
 
 def versions(root: Path, name: str) -> list[Path]:

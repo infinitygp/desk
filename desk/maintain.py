@@ -218,7 +218,7 @@ def maintain(only: str | None = None, dry_run: bool = False) -> bool:
     # systemd stops the unit with SIGTERM; as SystemExit it unwinds through the cleanups that
     # destroy a half-made build or warm-up domain.
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
-    stamp = time.strftime("%Y%m%d-%H%M%S")
+    stamp = images.new_version()
     out = MAINTAIN / stamp
     if not dry_run:
         out.mkdir(parents=True, exist_ok=True)

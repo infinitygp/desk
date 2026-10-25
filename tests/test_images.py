@@ -2,6 +2,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -27,6 +28,12 @@ class Versions(unittest.TestCase):
             self.assertEqual(images.current(link), (root / found[1]).resolve())
             self.assertEqual(os.readlink(link), found[1])
             self.assertEqual(images.versions(root, "fedora-44-gnome")[-1].name, found[1])
+
+    def test_new_versions_count_in_utc(self):
+        # 02:30 CEST and, an hour later, 02:10 CET: names in local time would go backwards.
+        for when, name in ((1792888200, "20261025-003000"), (1792890600, "20261025-011000")):
+            with self.subTest(name=name), mock.patch("desk.images.time.gmtime", return_value=time.gmtime(when)):
+                self.assertEqual(images.new_version(), name)
 
 
 class VersionsUnderSymlink(unittest.TestCase):
