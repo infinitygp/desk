@@ -123,9 +123,46 @@ def kwin(script: str, **values) -> str:
     return got[0]
 
 
+def session_env(*names: str) -> None:
+    """Variables of the graphical session the helper needs and SSH does not bring (DISPLAY, the
+    compositor's socket), from the systemd user manager the session hands them to."""
+    if all(n in os.environ for n in names):
+        return
+    import subprocess
+
+    out = subprocess.run(["systemctl", "--user", "show-environment"], capture_output=True, text=True,
+                         timeout=10).stdout
+    for line in out.splitlines():
+        key, _, value = line.partition("=")
+        if key in names:
+            os.environ.setdefault(key, value)
+
+
+def hyprctl(*args: str):
+    """hyprctl's JSON, from the Hyprland instance of the session."""
+    import subprocess
+
+    session_env("HYPRLAND_INSTANCE_SIGNATURE", "XDG_RUNTIME_DIR", "WAYLAND_DISPLAY")
+    r = subprocess.run(["hyprctl", "-j", *args], capture_output=True, text=True, timeout=10)
+    # A dispatch answers "ok", or what it did not do (with exit code 0).
+    if r.returncode != 0 or (args[0] == "dispatch" and r.stdout.strip() != "ok"):
+        raise LookupError(f"hyprctl {' '.join(args)} failed: {(r.stderr or r.stdout).strip()}")
+    return json.loads(r.stdout) if args[0] != "dispatch" else None
+
+
+def hyprland_windows() -> list[dict]:
+    # No stacking order to be had: the focus history, most recent last, stands in for it.
+    clients = sorted(hyprctl("clients"), key=lambda c: -c["focusHistoryID"] if c["focusHistoryID"] >= 0 else -10**6)
+    return [{"title": c["title"], "wm_class": c["class"], "pid": c["pid"], "x11": c["xwayland"],
+             "minimized": not c["mapped"] or c["hidden"], "focus": c["focusHistoryID"] == 0,
+             "frame": [*c["at"], *c["size"]], "buffer": [*c["at"], *c["size"]]} for c in clients]
+
+
 def shell_windows() -> list[dict]:
     if DESKTOP == "kde":
         return json.loads(kwin(KWIN_WINDOWS))
+    if DESKTOP == "hyprland":
+        return hyprland_windows()
     try:
         return json.loads(_helper("GetWindows", reply="(s)"))
     except GLib.Error as e:
@@ -151,6 +188,13 @@ def focus(query: str) -> dict:
     """Bring a window to the front by application or title, as the window manager would."""
     if DESKTOP == "kde":
         return {"title": kwin(KWIN_ACTIVATE, QUERY=query)}
+    q = query.lower()
+    if DESKTOP == "hyprland":
+        hit = next((w for w in reversed(hyprland_windows()) if q in (w["wm_class"] or "").lower()
+                    or q in (w["title"] or "").lower()), None)
+        if hit:
+            hyprctl("dispatch", "focuswindow", f"pid:{hit['pid']}")
+        return {"title": hit["title"] if hit else ""}
     return {"title": _helper("Activate", GLib.Variant("(s)", (query,)), "(s)")}
 
 
@@ -161,6 +205,13 @@ def clipboard(text: str) -> dict:
         bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
         bus.call_sync("org.kde.klipper", "/klipper", "org.kde.klipper.klipper", "setClipboardContents",
                       GLib.Variant("(s)", (text,)), None, Gio.DBusCallFlags.NONE, 2000, None)
+    elif DESKTOP == "hyprland":
+        import subprocess
+
+        # wl-copy stays in the background to serve the text until something else is copied.
+        session_env("WAYLAND_DISPLAY", "XDG_RUNTIME_DIR")
+        subprocess.run(["wl-copy"], input=text.encode(), check=True, timeout=10, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL)
     else:
         _helper("SetClipboard", GLib.Variant("(s)", (text,)))
     return {"done": True}

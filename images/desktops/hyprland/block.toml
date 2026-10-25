@@ -1,0 +1,13 @@
+# Hyprland (Wayland, tiling), started for tester by greetd through uwsm; hyprctl tells desk where
+# windows are.
+# Run over SSH as `user`; uwsm brings graphical-session.target up with the compositor.
+ready = "systemctl --user is-active --quiet graphical-session.target"
+# Run as root after provisioning: greetd starts the session again when it starts, but once per
+# boot only, which /run/greetd.run marks.
+relogin = "rm -f /run/greetd.run && systemctl restart display-manager"
+# The packages and the automatic login, on the installed system (desk image build).
+install = ["install.sh"]
+# What every desktop image gets (browsers set up for desk, time zone, a11y switches, quiet timers),
+# then Hyprland's own.
+provision = ["../../shared/desktop.sh", "provision.sh"]
+files = ["../../shared/desktop"]

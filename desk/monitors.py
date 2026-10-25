@@ -31,7 +31,8 @@ def apply(run, spec: ImageSpec, resolution: tuple[int, int] | None = None, scale
         _windows(run, spec, resolution, scale)
     else:
         spec.need_desktop("desk display")
-        {"kde": _kde}.get(spec.desktop, _gnome)(run, resolution, scale)
+        {"kde": _kde, "hyprland": _hyprland}.get(spec.desktop, _gnome)(
+            run, resolution, scale)
     with run.edit() as r:
         if scale is not None:
             r.scale = scale
@@ -160,3 +161,17 @@ def _kde(run, resolution, scale) -> None:
     _user(run, f"{env} kscreen-doctor {' '.join(args)}", "kscreen-doctor")
     time.sleep(1)
 
+
+def _hyprland(run, resolution, scale) -> None:
+    """Hyprland, through hyprctl: its monitor rule with the mode and the scale."""
+    resolution = resolution or (tuple(run.resolution) if run.resolution else None)
+    env = ("env XDG_RUNTIME_DIR=/run/user/$(id -u) HYPRLAND_INSTANCE_SIGNATURE="
+           "$(systemctl --user show-environment | sed -n 's/^HYPRLAND_INSTANCE_SIGNATURE=//p')")
+    monitors = json.loads(_user(run, f"{env} hyprctl -j monitors", "hyprctl monitors"))
+    if not monitors:
+        raise DeskError("Hyprland reports no monitors")
+    m = monitors[0]
+    mode = f"{resolution[0]}x{resolution[1]}" if resolution else f"{m['width']}x{m['height']}"
+    _user(run, f"{env} hyprctl keyword monitor {m['name']},{mode},0x0,{(scale or run.scale or 100) / 100:g}",
+          "hyprctl keyword monitor")
+    time.sleep(1)

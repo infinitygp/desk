@@ -73,6 +73,7 @@ the same on every host, and `desk up` of an image the host has not defined print
 | `openwrt-25.12` | distro | the release's disk image (x86-64 ext4 combined, EFI), grown and preconfigured offline | no desktop: BusyBox ash, procd, apk, LuCI |
 | `gnome` | desktop | the Workstation's packages (Fedora), the gnome group (Arch), gnome-core (Debian), ubuntu-desktop-minimal (Ubuntu), automatic login; shell extension, settings for steady screenshots | |
 | `kde` | desktop | Plasma on Wayland, logged in by Plasma Login Manager (Fedora, Arch) or SDDM (Debian, Ubuntu) | |
+| `hyprland` | desktop | Hyprland (Wayland, tiling), started by greetd through uwsm | not on Fedora 44, which has no Hyprland; Debian's from trixie-backports |
 | `cockpit` | addon | Cockpit, Firefox logged in with administrative access | Fedora 44 |
 
 The Linux images with a desktop have Chromium (not Ubuntu's) and Firefox (not Arch's).
@@ -179,11 +180,17 @@ distro was tried with.
 |---|---|---|---|---|---|
 | `gnome` | the shell extension `desk-helper` | the extension | `gdctl` | GDM | GNOME's calculator and text editor |
 | `kde` | a KWin script loaded for each listing, which calls the helper back over D-Bus | Klipper | `kscreen-doctor` | Plasma Login Manager, SDDM | KCalc, KWrite |
+| `hyprland` | `hyprctl clients` (the focus history stands for the stacking order) | `wl-copy` | `hyprctl keyword monitor` | greetd, through uwsm | GNOME's calculator and text editor |
 
 - KWin tells an XWayland window from a Wayland one only by its class (`KWin::X11Window`), and
   places windows by their client area, which leaves out the decoration KWin draws.
 - KWrite names its text after the document, which changes with what is typed; `desk set-text`
   reads the focused field at its place back.
+- Hyprland 0.56 writes a Lua configuration of its own when it finds none, which `hyprctl keyword`
+  and `dispatch` do not take; its block writes `hyprland.conf` before the first start.
+- greetd starts the automatic session once per boot (`/run/greetd.run`, which the relogin removes),
+  on the terminal its unit keeps getty off: Debian's and Ubuntu's tty7. On tty1 there, getty hung
+  the session up within a second.
 
 ### Browsers on Linux
 
@@ -290,10 +297,10 @@ the logged-in session (`images/distros/windows-11/agent/agent.ps1`, its port for
 ## Builds and maintenance
 
 Every install and every warm state is a build of its own, `base/<image>.<version>/` and
-`warm/<image>.<version>/` (the version is the UTC time it began), with `base/<image>` and `warm/<image>` symlinks to the current ones.
-Runs pin the builds they start from, so a new build never disturbs a running or kept run;
-`desk gc` deletes builds nothing uses any more. Builds of an image whose definition is gone stay
-until they are deleted by hand.
+`warm/<image>.<version>/` (the version is the UTC time it began), with `base/<image>` and
+`warm/<image>` symlinks to the current ones. Runs pin the builds they start from, so a new build
+never disturbs a running or kept run; `desk gc` deletes builds nothing uses any more. Builds of an
+image whose definition is gone stay until they are deleted by hand.
 
 `desk maintain` reinstalls an image family (a base image and its variants) when
 

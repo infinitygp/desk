@@ -60,7 +60,8 @@ def remote_command(argv: list[str], gui: bool = False, wait: bool = False,
         # Starts the program inside the logged-in graphical session and returns at once. The
         # language comes from the shell's own environment: the systemd user manager can outlive
         # a relogin and still carry the locale it started with.
-        cmd = ("shell=$(pgrep -u \"$(id -u)\" -x 'gnome-shell|plasmashell' | head -n1); "
+        cmd = ("shell=$(pgrep -u \"$(id -u)\" -x 'gnome-shell|plasmashell|Hyprland' "
+               "| head -n1); "
                "lang=$( [ -n \"$shell\" ] && tr '\\0' '\\n' < /proc/$shell/environ "
                "| grep -E '^(LANG|LANGUAGE|LC_[A-Z]+)=' | sed 's/^/-E /'); "
                f"systemd-run --user --collect --quiet{' --wait --pipe' if wait else ''} $lang{setenv} "

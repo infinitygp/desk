@@ -14,4 +14,4 @@ install = ["install.sh"]
 user = "tester"
 # A rolling release drifts quickly; a fresh install keeps tests close to what users have.
 rebuild_days = 14
-desktops = ["gnome", "kde"]
+desktops = ["gnome", "kde", "hyprland"]

@@ -285,3 +285,22 @@ class ChromiumPages(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipIf(guest_a11y is None, "AT-SPI GObject introspection not installed")
+class HyprlandWindows(unittest.TestCase):
+    def test_the_focus_history_stands_in_for_the_stacking_order(self):
+        clients = [
+            {"title": "a", "class": "kitty", "pid": 1, "xwayland": False, "mapped": True, "hidden": False,
+             "focusHistoryID": 0, "at": [10, 20], "size": [300, 200]},
+            {"title": "b", "class": "firefox", "pid": 2, "xwayland": True, "mapped": True, "hidden": False,
+             "focusHistoryID": 1, "at": [320, 20], "size": [300, 200]},
+            {"title": "c", "class": "x", "pid": 3, "xwayland": False, "mapped": False, "hidden": False,
+             "focusHistoryID": -1, "at": [0, 0], "size": [1, 1]},
+        ]
+        with mock.patch.object(guest_a11y, "hyprctl", return_value=clients):
+            windows = guest_a11y.hyprland_windows()
+        self.assertEqual([w["title"] for w in windows], ["c", "b", "a"])
+        self.assertEqual([(w["focus"], w["minimized"], w["x11"]) for w in windows],
+                         [(False, True, False), (False, False, True), (True, False, False)])
+        self.assertEqual(windows[-1]["frame"], [10, 20, 300, 200])
