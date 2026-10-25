@@ -7,19 +7,19 @@ gdm=/etc/gdm/custom.conf
 case $ID in
     fedora)
         # The Workstation's own set of packages, without its first-run tour.
-        dnf install -y -q @workstation-product-environment --exclude=gnome-initial-setup,gnome-tour >/dev/null
+        dnf install -y -q @workstation-product-environment --exclude=gnome-initial-setup,gnome-tour
         systemctl set-default graphical.target
         ;;
     arch)
         # The gnome group has no gnome-initial-setup, so the session starts on the desktop.
-        pacman -S --noconfirm --needed gnome >/dev/null
+        pacman -S --noconfirm --needed gnome
         systemctl enable gdm
-        pacman -Scc --noconfirm >/dev/null
+        pacman -Scc --noconfirm
         ;;
     debian)
         export DEBIAN_FRONTEND=noninteractive
         # GNOME's core as Debian's GNOME task puts it down, and its Firefox, without the office suite.
-        apt-get install -y -q gnome-core firefox-esr >/dev/null
+        apt-get install -y -q gnome-core firefox-esr
         systemctl set-default graphical.target
         gdm=/etc/gdm3/daemon.conf
         ;;
@@ -33,9 +33,9 @@ case $ID in
         echo "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main" \
             > /etc/apt/sources.list.d/mozilla.list
         printf 'Package: *\nPin: origin packages.mozilla.org\nPin-Priority: 1000\n' > /etc/apt/preferences.d/mozilla
-        apt-get update -q >/dev/null
+        apt-get update -q
         # Ubuntu's own desktop, as its installer puts the minimal one down.
-        apt-get install -y -q ubuntu-desktop-minimal firefox >/dev/null
+        apt-get install -y -q ubuntu-desktop-minimal firefox
         systemctl set-default graphical.target
         gdm=/etc/gdm3/custom.conf
         ;;

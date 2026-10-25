@@ -8,23 +8,22 @@ set -euo pipefail
 case $ID in
     fedora)
         # The Xfce edition's own set of packages.
-        dnf install -y -q @xfce-desktop-environment libwnck3 xclip xrandr xset mousepad gnome-calculator \
-            >/dev/null
+        dnf install -y -q @xfce-desktop-environment libwnck3 xclip xrandr xset mousepad gnome-calculator
         systemctl set-default graphical.target
         ;;
     arch)
         pacman -S --noconfirm --needed xfce4 xfce4-goodies lightdm lightdm-gtk-greeter libwnck3 xclip \
-            xorg-xrandr xorg-xset mousepad gnome-calculator >/dev/null
+            xorg-xrandr xorg-xset mousepad gnome-calculator
         # Arch's LightDM logs in without a password only members of this group.
         groupadd -rf autologin
         gpasswd -a tester autologin >/dev/null
         systemctl enable lightdm
-        pacman -Scc --noconfirm >/dev/null
+        pacman -Scc --noconfirm
         ;;
     debian | ubuntu)
         export DEBIAN_FRONTEND=noninteractive
         apt-get install -y -q xfce4 xfce4-goodies lightdm gir1.2-wnck-3.0 xclip x11-xserver-utils mousepad \
-            gnome-calculator >/dev/null
+            gnome-calculator
         systemctl set-default graphical.target
         ;;
     *)

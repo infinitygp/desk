@@ -12,19 +12,19 @@ case $ID in
     fedora)
         # The KDE edition's own set of packages without its first-run setup; kcalc and kwrite for
         # desk selftest.
-        dnf install -y -q @kde-desktop-environment kcalc kwrite --exclude=plasma-setup >/dev/null
+        dnf install -y -q @kde-desktop-environment kcalc kwrite --exclude=plasma-setup
         systemctl set-default graphical.target
         autologin /etc/plasmalogin.conf.d/50-desk-autologin.conf
         ;;
     arch)
-        pacman -S --noconfirm --needed plasma-meta konsole dolphin kcalc kwrite >/dev/null
+        pacman -S --noconfirm --needed plasma-meta konsole dolphin kcalc kwrite
         autologin /etc/plasmalogin.conf.d/50-desk-autologin.conf
         systemctl enable plasmalogin
-        pacman -Scc --noconfirm >/dev/null
+        pacman -Scc --noconfirm
         ;;
     debian | ubuntu)
         export DEBIAN_FRONTEND=noninteractive
-        apt-get install -y -q kde-plasma-desktop sddm kcalc kwrite >/dev/null
+        apt-get install -y -q kde-plasma-desktop sddm kcalc kwrite
         autologin /etc/sddm.conf.d/50-desk-autologin.conf
         systemctl set-default graphical.target
         ;;

@@ -7,8 +7,8 @@ set -euo pipefail
 case $ID in
     arch)
         pacman -S --noconfirm --needed hyprland uwsm greetd xdg-desktop-portal-hyprland kitty wl-clipboard \
-            gnome-calculator gnome-text-editor >/dev/null
-        pacman -Scc --noconfirm >/dev/null
+            gnome-calculator gnome-text-editor
+        pacman -Scc --noconfirm
         ;;
     debian | ubuntu)
         export DEBIAN_FRONTEND=noninteractive
@@ -16,14 +16,13 @@ case $ID in
             # Hyprland, uwsm and greetd come with trixie-backports only.
             echo "deb http://deb.debian.org/debian ${VERSION_CODENAME}-backports main" \
                 > /etc/apt/sources.list.d/backports.list
-            apt-get update -q >/dev/null
+            apt-get update -q
             from=(-t "${VERSION_CODENAME}-backports")
         else
             from=()
         fi
-        apt-get install -y -q "${from[@]}" hyprland uwsm greetd >/dev/null
-        apt-get install -y -q xdg-desktop-portal-hyprland kitty wl-clipboard gnome-calculator gnome-text-editor \
-            >/dev/null
+        apt-get install -y -q "${from[@]}" hyprland uwsm greetd
+        apt-get install -y -q xdg-desktop-portal-hyprland kitty wl-clipboard gnome-calculator gnome-text-editor
         ;;
     *)
         echo "the hyprland block does not know how to install Hyprland on $ID" >&2

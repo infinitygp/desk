@@ -8,23 +8,22 @@ set -euo pipefail
 case $ID in
     fedora)
         # The Cinnamon edition's own set of packages.
-        dnf install -y -q @cinnamon-desktop-environment libwnck3 xclip xrandr gnome-calculator gnome-text-editor \
-            >/dev/null
+        dnf install -y -q @cinnamon-desktop-environment libwnck3 xclip xrandr gnome-calculator gnome-text-editor
         systemctl set-default graphical.target
         ;;
     arch)
         pacman -S --noconfirm --needed cinnamon lightdm lightdm-gtk-greeter libwnck3 xclip xorg-xrandr \
-            gnome-calculator gnome-text-editor >/dev/null
+            gnome-calculator gnome-text-editor
         # Arch's LightDM logs in without a password only members of this group.
         groupadd -rf autologin
         gpasswd -a tester autologin >/dev/null
         systemctl enable lightdm
-        pacman -Scc --noconfirm >/dev/null
+        pacman -Scc --noconfirm
         ;;
     debian | ubuntu)
         export DEBIAN_FRONTEND=noninteractive
         apt-get install -y -q cinnamon-desktop-environment lightdm gir1.2-wnck-3.0 xclip x11-xserver-utils \
-            gnome-calculator gnome-text-editor >/dev/null
+            gnome-calculator gnome-text-editor
         systemctl set-default graphical.target
         ;;
     *)
