@@ -82,6 +82,10 @@ reboot = true
             'image = "a"\n[[step]]\nopen = "/x"\nbrowser = "edge"',
             'image = "a"\n[[step]]\nopen = "/x"\nbrowser = ["chromium"]',
             'image = "a"\n[[step]]\nclick = "x"\nbrowser = "chromium"',
+            'image = "a"\n[[step]]\nclick = "x"\nbutton = "double"',
+            'image = "a"\n[[step]]\nclick = "x"\nwindow = ""',
+            'image = "a"\n[[step]]\nexpect = "x"\nwindow = "Taskbar"',
+            'image = "a"\n[[step]]\ntype = "x"\nbutton = "right"',
         ):
             with self.subTest(text=text), self.assertRaises(DeskError):
                 scenario.load(write(text))
@@ -111,6 +115,10 @@ exact = false
 timeout = 5
 name = "save it"
 soft = true
+[[step]]
+click = "Example"
+button = "right"
+window = "System tray overflow window."
 [[step]]
 gui = ["app", "--flag"]
 env = {LANG = "pl_PL.UTF-8", DEPTH = 2}
@@ -156,7 +164,7 @@ browser = "chromium"
 viewport = "390x700"
 browser = "firefox"
 '''))
-        self.assertEqual(len(data["step"]), 17)
+        self.assertEqual(len(data["step"]), 18)
 
     def test_a_missing_file_is_a_mistake_too(self):
         with self.assertRaisesRegex(DeskError, "No such file"):
@@ -302,6 +310,42 @@ class LostConnection(unittest.TestCase):
             run.live_domain = lambda: object()
             with mock.patch("desk.runs.all_runs", return_value=[run]):
                 self.assertTrue(runs.host_state(run).startswith("the VM is running but does not answer; host: "))
+
+
+class OtherWindows(unittest.TestCase):
+    """`window` reaches elements outside the focused window: the taskbar, a tray's flyout."""
+
+    SNAP = {"tops": [{"app": "example-app", "pid": 1, "title": "Example", "focus": True, "start": 0},
+                     {"app": "explorer", "pid": 2, "title": "System tray overflow window.", "focus": False,
+                      "start": 1}],
+            "nodes": [{"pid": 1, "path": [0], "role": "window", "name": "Example", "depth": 0, "states": [],
+                       "bbox": [0, 0, 800, 600]},
+                      {"pid": 2, "path": [0, 0], "role": "button", "name": "Example", "depth": 1, "states": [],
+                       "bbox": [1030, 700, 32, 32]}],
+            "truncated": False}
+
+    def steps(self):
+        from desk import steps
+
+        target = SimpleNamespace(agent_port=1, dom=lambda: "dom")
+        return steps.Steps(SimpleNamespace(family="windows", need_desktop=lambda what: None), target), target
+
+    def test_a_click_in_another_window_with_the_button_asked_for(self):
+        s, target = self.steps()
+        with mock.patch("desk.a11y.snapshot", return_value=self.SNAP) as snapshot, \
+                mock.patch("desk.a11y._visible_point", return_value=(1046, 715)) as point, \
+                mock.patch("desk.steps.display") as display:
+            s.click("Example", button="right", window="overflow")
+        self.assertTrue(snapshot.call_args.kwargs["all_windows"])
+        self.assertEqual(point.call_args.args[1]["pid"], 2)  # the icon, not the window of the same name
+        display.click.assert_called_once_with("dom", 1046, 715, button="right", run=target)
+
+    def test_no_such_window_says_which_there_are(self):
+        s, _ = self.steps()
+        with mock.patch("desk.a11y.snapshot", return_value=self.SNAP), mock.patch("desk.steps.time.sleep"), \
+                self.assertRaisesRegex(DeskError, "no window with 'Taskbar' in its title or application name.*"
+                                                  r"'System tray overflow window\.' \(explorer\)"):
+            s.wait_for("Show Hidden Icons", window="Taskbar", timeout=0.01)
 
 
 class SplitWindows(unittest.TestCase):

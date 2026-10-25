@@ -54,13 +54,16 @@ class Steps:
                 raise DeskError(f"starting {argv[0]} failed: {r.stderr.decode(errors='replace').strip()}")
         display.wait_change(dom, timeout=30, base=before)
 
-    def wait_for(self, name: str, role: str | None = None, exact: bool = True, timeout: float = 60) -> dict:
-        """Until an element with this name (or value or text) is in the focused window."""
+    def wait_for(self, name: str, role: str | None = None, exact: bool = True, timeout: float = 60,
+                 window: str | None = None) -> dict:
+        """Until an element with this name (or value or text) is in the focused window, or in the
+        windows whose title or application contains `window` (the taskbar, a tray's flyout)."""
         deadline = time.monotonic() + timeout
-        snap = None
+        snap = full = None
         while True:
             try:
-                snap = a11y.snapshot(self.target, limit=2000, save=False)
+                full = a11y.snapshot(self.target, all_windows=bool(window), limit=2000, save=False)
+                snap = a11y.in_windows(full, window) if window else full
                 hits = a11y._matches(snap, name, role, exact)
             except guest.NoConnection:
                 raise  # a guest that does not answer is not a window still coming up
@@ -70,8 +73,13 @@ class Steps:
                 self.snap = snap
                 return hits[0]
             if time.monotonic() > deadline:
-                raise DeskError(f"{role or 'element'} {name!r} did not appear within {timeout:.0f}s"
-                                + a11y.explain_missing(self.target, snap, name))
+                if window and snap is not None and not snap["tops"]:
+                    there = ", ".join(f"{t['title']!r} ({t['app']})" for t in full["tops"])
+                    raise DeskError(f"no window with {window!r} in its title or application name within "
+                                    f"{timeout:.0f}s; there are: {there or 'none'}")
+                raise DeskError(f"{role or 'element'} {name!r} did not appear"
+                                + (f" in a window of {window!r}" if window else "") + f" within {timeout:.0f}s"
+                                + a11y.explain_missing(self.target, full, name))
             time.sleep(1)
 
     def first(self, *candidates: tuple[str, str | None], timeout: float = 60, exact: bool = True) -> int:
@@ -97,11 +105,12 @@ class Steps:
                           capture=True, timeout=30)
         return r.returncode == 0
 
-    def click(self, name: str, role: str | None = None, exact: bool = True, timeout: float = 60) -> None:
-        self.wait_for(name, role, exact, timeout)
+    def click(self, name: str, role: str | None = None, exact: bool = True, timeout: float = 60,
+              button: str = "left", window: str | None = None) -> None:
+        self.wait_for(name, role, exact, timeout, window)
         # The listing that found it; _visible_point looks the position up again anyway.
         x, y = a11y.locate_name(self.target, name, role, exact, snap=self.snap)
-        display.click(self.target.dom(), x, y, run=self.target)
+        display.click(self.target.dom(), x, y, button=button, run=self.target)
 
     def focus(self, query: str) -> str:
         """Bring a window to the front by application or title, as clicking it would."""

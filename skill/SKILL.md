@@ -230,7 +230,7 @@ focus = "Firefox"            # say which window keys go to; never rely on what h
 [[step]]
 key = "f5"                   # one combo or a list
 [[step]]
-click = "Foo"                # by accessible name; role, exact (default true)
+click = "Foo"                # by accessible name in the focused window; role, exact (default true), button
 role = "link"
 [[step]]
 expect = "Nothing here yet"  # waits until shown (name, value or text); role, exact, timeout
@@ -246,7 +246,12 @@ need quotes, or give a list), `expect_absent` (after a reload, first
 (repeat it every 2 s until it gives the expected `rc`/`output`, `timeout` 120 s by default: a
 service coming up; an `exec`/`root` step that runs out of its `timeout`, 600 s without `until`, is
 stopped in the guest and fails as "still running"), `timeout` on a `click` (how long to wait for
-the element, 60 s by default), `clock = "+1d"` (or `"reset"`),
+the element, 60 s by default), `button = "right"` (or `"middle"`) on a `click`, `window = "TEXT"` on
+a `click` (look for the element in the windows whose title or application contains TEXT instead of
+the focused one: the taskbar, `window = "explorer"` on Windows, where it has no title, or a tray's
+flyout, `"System tray overflow window."`; the click is the machine's mouse, so what it opens comes
+to the front as it does for a user, and a menu it opens is the focused window of the next step),
+`clock = "+1d"` (or `"reset"`),
 `open = "/example#/tasks"` (`desk browser open`: a path on the site shown or a whole address; fails
 when the page did not load; `timeout`, 30 s), `viewport = "390x700"` (or `"reset"`; `desk browser
 viewport`; both take `browser = "chromium"` or `"firefox"`, else the browser in the focused window),

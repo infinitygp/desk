@@ -208,6 +208,19 @@ def _matches(snap: dict, query: str, role: str | None, exact: bool) -> list[dict
     return [n for n in snap["nodes"] if match(n)]
 
 
+def in_windows(snap: dict, query: str) -> dict:
+    """The part of a listing of every window that lies in the windows whose title or application
+    contains `query`."""
+    q = query.casefold()
+    tops = snap["tops"] + [{"start": len(snap["nodes"])}]
+    kept, nodes = [], []
+    for top, nxt in zip(tops, tops[1:], strict=False):
+        if q in (top["title"] or "").casefold() or q in (top["app"] or "").casefold():
+            kept.append({**top, "start": len(nodes)})
+            nodes += snap["nodes"][top["start"]:nxt["start"]]
+    return {**snap, "tops": kept, "nodes": nodes}
+
+
 def explain_missing(run, snap: dict | None, query: str) -> str:
     """For a failure message: the focused window, names close to the one looked for, and what of
     the desktop lies over the windows (the overview, a notification), one line each."""

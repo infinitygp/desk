@@ -18,11 +18,12 @@ from .steps import Steps
 # Exactly one per step; the value is the action's argument.
 ACTIONS = {"root", "exec", "gui", "focus", "click", "type", "key", "expect", "expect_absent", "shot",
            "reboot", "wait", "clock", "disk_add", "disk_rm", "console_errors", "prepare", "open", "viewport"}
-OPTIONS = {"role", "exact", "timeout", "output", "rc", "name", "soft", "env", "step", "until", "anywhere", "browser"}
+OPTIONS = {"role", "exact", "timeout", "output", "rc", "name", "soft", "env", "step", "until", "anywhere", "browser",
+           "button", "window"}
 # The options each action reads, besides name and soft; any other would be ignored without a word.
 READS = {
     "root": {"timeout", "output", "rc", "until"}, "exec": {"timeout", "output", "rc", "until"},
-    "gui": {"env"}, "click": {"role", "exact", "timeout"}, "type": {"anywhere"},
+    "gui": {"env"}, "click": {"role", "exact", "timeout", "button", "window"}, "type": {"anywhere"},
     "expect": {"role", "exact", "timeout"}, "expect_absent": {"role", "exact", "timeout"},
     "reboot": {"timeout"}, "wait": {"timeout"}, "clock": {"step", "timeout"}, "disk_rm": {"timeout"},
     "open": {"timeout", "browser"}, "viewport": {"browser"},
@@ -55,6 +56,7 @@ VALUES = {
     "viewport": (lambda v: isinstance(v, str) and (v == "reset" or re.fullmatch(r"[1-9]\d*x[1-9]\d*", v)),
                  "WIDTHxHEIGHT (390x700) or reset"),
     "role": (_text, "a text"), "output": (_text, "a text"), "name": (_text, "a text"), "step": (_text, "a text"),
+    "window": (_text, "a text"), "button": (lambda v: v in ("left", "right", "middle"), "left, right or middle"),
     "browser": (lambda v: isinstance(v, str) and v in browser.NAMES, " or ".join(sorted(browser.NAMES))),
     "timeout": (lambda v: _number(v) and v > 0, "seconds"),
     "rc": (lambda v: isinstance(v, int) and not isinstance(v, bool), "an exit code"),
@@ -279,7 +281,7 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
     elif action == "focus":
         return steps.focus(value)
     elif action == "click":
-        steps.click(value, role, step.get("exact", True), timeout or 60)
+        steps.click(value, role, step.get("exact", True), timeout or 60, step.get("button", "left"), step.get("window"))
     elif action == "type":
         steps.type(value, anywhere=step.get("anywhere", False))
     elif action == "key":
