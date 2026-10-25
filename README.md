@@ -194,6 +194,9 @@ distro was tried with.
   shadow included) and the frame GTK draws inside it.
 - Hyprland 0.56 writes a Lua configuration of its own when it finds none, which `hyprctl keyword`
   and `dispatch` do not take; its block writes `hyprland.conf` before the first start.
+- `desk display` on Plasma and Hyprland reads the mode and scale back: one the desktop did not take
+  (Hyprland takes a scale that does not divide the mode as one near it) is refused and the one
+  before put back. Hyprland applies a monitor rule only with its next frame, which desk has it draw.
 - greetd starts the automatic session once per boot (`/run/greetd.run`, which the relogin removes),
   on the terminal its unit keeps getty off: Debian's and Ubuntu's tty7. On tty1 there, getty hung
   the session up within a second.

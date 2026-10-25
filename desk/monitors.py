@@ -157,9 +157,26 @@ def _kde(run, resolution, scale) -> None:
         if not modes:
             raise DeskError(f"{name} offers no {resolution[0]}x{resolution[1]} mode (desk up --resolution sets it)")
         args.append(f"output.{name}.mode.{modes[0]['id']}")
-    args.append(f"output.{name}.scale.{(scale or run.scale or 100) / 100:g}")
+    want = (scale or run.scale or 100) / 100
+    args.append(f"output.{name}.scale.{want:g}")
     _user(run, f"{env} kscreen-doctor {' '.join(args)}", "kscreen-doctor")
-    time.sleep(1)
+
+    def state():
+        now = next(o for o in json.loads(_user(run, f"{env} kscreen-doctor -j", "kscreen-doctor -j"))["outputs"]
+                   if o["name"] == name)
+        size = next((m["size"] for m in now["modes"] if m["id"] == now.get("currentModeId")), None)
+        return ((size["width"], size["height"]) if size else None), now.get("scale")
+
+    # kscreen-doctor says nothing of a mode or scale it did not take; the run would then turn
+    # every position into pixels with the wrong scale.
+    size, scale_now = _settled(state, resolution, want)
+    try:
+        _check_taken(name, size, scale_now, resolution, want)
+    except DeskError:
+        # Back to what the run counts with.
+        _user(run, f"{env} kscreen-doctor output.{name}.mode.{outputs[0]['currentModeId']} "
+              f"output.{name}.scale.{outputs[0]['scale']:g}", "kscreen-doctor")
+        raise
 
 
 def _xrandr(run, resolution, scale) -> None:
@@ -188,6 +205,45 @@ def _hyprland(run, resolution, scale) -> None:
         raise DeskError("Hyprland reports no monitors")
     m = monitors[0]
     mode = f"{resolution[0]}x{resolution[1]}" if resolution else f"{m['width']}x{m['height']}"
-    _user(run, f"{env} hyprctl keyword monitor {m['name']},{mode},0x0,{(scale or run.scale or 100) / 100:g}",
-          "hyprctl keyword monitor")
-    time.sleep(1)
+    want = (scale or run.scale or 100) / 100
+    # A new rule waits for the next frame, which a still screen does not draw; the reload draws one.
+    rule = f"{env} hyprctl keyword monitor {m['name']},{{}} && {env} hyprctl dispatch forcerendererreload"
+    said = _user(run, rule.format(f"{mode},0x0,{want:g}"), "hyprctl keyword monitor")
+    if said.split() != ["ok", "ok"]:
+        raise DeskError(f"Hyprland refused the monitor rule: {said.strip()[-300:]}")
+
+    def state():
+        now = next(n for n in json.loads(_user(run, f"{env} hyprctl -j monitors", "hyprctl monitors"))
+                   if n["name"] == m["name"])
+        return (now["width"], now["height"]), now["scale"]
+
+    # Hyprland takes a scale that does not divide the mode as one near it that does.
+    size, scale_now = _settled(state, resolution, want)
+    try:
+        _check_taken(m["name"], size, scale_now, resolution, want)
+    except DeskError:
+        # Back to what the run counts with.
+        _user(run, rule.format(f"{m['width']}x{m['height']},0x0,{m['scale']:g}"), "hyprctl keyword monitor")
+        raise
+
+
+def _settled(state, resolution, want: float, seconds: float = 3):
+    """The mode and scale once they are what was asked, or what they are after `seconds`: the
+    compositor applies them a moment after it answered."""
+    deadline = time.monotonic() + seconds
+    while True:
+        size, scale = state()
+        if ((not resolution or tuple(size or ()) == tuple(resolution)) and scale is not None
+                and abs(scale - want) <= 0.005) or time.monotonic() > deadline:
+            return size, scale
+        time.sleep(0.5)
+
+
+def _check_taken(output: str, size, scale, resolution, want: float) -> None:
+    """Refuse a mode or scale the desktop did not take, which desk would otherwise count with."""
+    if resolution and tuple(size or ()) != tuple(resolution):
+        shown = f"{size[0]}x{size[1]}" if size else "no mode it reports"
+        raise DeskError(f"{output} runs at {shown} instead of {resolution[0]}x{resolution[1]}")
+    if scale is None or abs(scale - want) > 0.005:
+        raise DeskError(f"{output} runs at scale {scale} instead of {want:g}: pick a scale the mode divides "
+                        "evenly (desk display --scale)")
