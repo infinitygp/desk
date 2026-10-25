@@ -126,7 +126,12 @@ def _image_list() -> None:
     w = max([22, *(len(n) + 2 for n in [*list_images(), *orphans])])
     print(f"{'IMAGE':<{w}}{'STATE':<8}{'BUILT':<12}{'SELFTEST':<20}NOTES")
     for name in list_images():
-        spec = load_image(name)
+        try:
+            spec = load_image(name)
+        except DeskError as e:
+            # One definition its blocks no longer make (a block gone with an update) hides no other.
+            print(f"{name:<{w}}{'-':<8}{'-':<12}{'-':<20}broken definition: {e}")
+            continue
         notes = [f"variant of {spec.base}"] if spec.base else []
         if (spec.warm_dir / "memory.save").exists():
             state = "warm"
