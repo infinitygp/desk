@@ -292,11 +292,11 @@ class HyprlandWindows(unittest.TestCase):
     def test_the_focus_history_stands_in_for_the_stacking_order(self):
         clients = [
             {"title": "a", "class": "kitty", "pid": 1, "xwayland": False, "mapped": True, "hidden": False,
-             "focusHistoryID": 0, "at": [10, 20], "size": [300, 200]},
+             "focusHistoryID": 0, "at": [10, 20], "size": [300, 200], "address": "0xa"},
             {"title": "b", "class": "firefox", "pid": 2, "xwayland": True, "mapped": True, "hidden": False,
-             "focusHistoryID": 1, "at": [320, 20], "size": [300, 200]},
+             "focusHistoryID": 1, "at": [320, 20], "size": [300, 200], "address": "0xb"},
             {"title": "c", "class": "x", "pid": 3, "xwayland": False, "mapped": False, "hidden": False,
-             "focusHistoryID": -1, "at": [0, 0], "size": [1, 1]},
+             "focusHistoryID": -1, "at": [0, 0], "size": [1, 1], "address": "0xc"},
         ]
         with mock.patch.object(guest_a11y, "hyprctl", return_value=clients):
             windows = guest_a11y.hyprland_windows()
@@ -304,3 +304,12 @@ class HyprlandWindows(unittest.TestCase):
         self.assertEqual([(w["focus"], w["minimized"], w["x11"]) for w in windows],
                          [(False, True, False), (False, False, True), (True, False, False)])
         self.assertEqual(windows[-1]["frame"], [10, 20, 300, 200])
+
+    def test_focus_raises_the_window_found_not_its_process(self):
+        windows = [{"title": "A — Firefox", "wm_class": "firefox", "pid": 7, "address": "0xa"},
+                   {"title": "B — Firefox", "wm_class": "firefox", "pid": 7, "address": "0xb"}]
+        with mock.patch.object(guest_a11y, "DESKTOP", "hyprland"), \
+                mock.patch.object(guest_a11y, "hyprland_windows", return_value=windows), \
+                mock.patch.object(guest_a11y, "hyprctl") as hyprctl:
+            self.assertEqual(guest_a11y.focus("A —"), {"title": "A — Firefox"})
+        hyprctl.assert_called_once_with("dispatch", "focuswindow", "address:0xa")

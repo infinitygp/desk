@@ -94,7 +94,8 @@ def kwin(script: str, **values) -> str:
     head = "".join(f"const {k} = {json.dumps(v)};\n" for k, v in values.items())
     head += (f"function reply(text) {{ callDBus({json.dumps(bus.get_unique_name())}, '/org/desk/Reply', "
              "'org.desk.Reply', 'Reply', text); }\n")
-    name = f"desk-{os.getpid()}"
+    # Its own name: a script left loaded by a helper that was killed keeps its name taken.
+    name = f"desk-{os.getpid()}-{os.urandom(4).hex()}"
     with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
         f.write(head + script)
     try:
@@ -214,7 +215,8 @@ def hyprland_windows() -> list[dict]:
     clients = sorted(hyprctl("clients"), key=lambda c: -c["focusHistoryID"] if c["focusHistoryID"] >= 0 else -10**6)
     return [{"title": c["title"], "wm_class": c["class"], "pid": c["pid"], "x11": c["xwayland"],
              "minimized": not c["mapped"] or c["hidden"], "focus": c["focusHistoryID"] == 0,
-             "frame": [*c["at"], *c["size"]], "buffer": [*c["at"], *c["size"]]} for c in clients]
+             "frame": [*c["at"], *c["size"]], "buffer": [*c["at"], *c["size"]], "address": c["address"]}
+            for c in clients]
 
 
 def shell_windows() -> list[dict]:
@@ -264,7 +266,8 @@ def focus(query: str) -> dict:
         hit = next((w for w in reversed(hyprland_windows()) if q in (w["wm_class"] or "").lower()
                     or q in (w["title"] or "").lower()), None)
         if hit:
-            hyprctl("dispatch", "focuswindow", f"pid:{hit['pid']}")
+            # The window itself: one process (a browser) has several.
+            hyprctl("dispatch", "focuswindow", f"address:{hit['address']}")
         return {"title": hit["title"] if hit else ""}
     return {"title": _helper("Activate", GLib.Variant("(s)", (query,)), "(s)")}
 
