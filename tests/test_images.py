@@ -125,6 +125,15 @@ class GuestSettings(unittest.TestCase):
             images.provision(spec, 1, relogin=False)
         return [c.args[2] for c in ssh.call_args_list]
 
+    def test_a_failed_script_shows_the_end_of_its_output(self):
+        spec = load_image("fedora-44-gnome")
+        out = "".join(f"line {i}\n" for i in range(40)).encode()
+        failed = subprocess.CompletedProcess([], 100, out, b"E: Sub-process /usr/bin/dpkg returned an error code (1)\n")
+        with mock.patch("desk.images.guest.ssh_run", return_value=failed), \
+                self.assertRaisesRegex(images.DeskError, r"shared/desktop.sh failed \(100\): E: Sub-process.*\n"
+                                       r"its output ended with:\nline 25\n(.*\n)*line 39$"):
+            images.run_scripts(spec, 1, spec.provision_scripts, {})
+
     def test_linux_scripts_get_them_in_their_environment(self):
         spec = replace(load_image("fedora-44-gnome"), timezone="Asia/Kolkata", layout="pl")
         commands = [c for c in self.provisioned(spec) if c.endswith(" -s")]

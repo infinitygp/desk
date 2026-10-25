@@ -612,8 +612,11 @@ def run_scripts(spec: ImageSpec, port: int, scripts: list[str], env: dict[str, s
             time.sleep(10)
             guest.wait_ssh(port, spec.user, timeout=300)
         if r.returncode != 0:
-            raise DeskError(f"{_named(spec.path(script))} failed ({r.returncode}): "
-                            f"{r.stderr.decode(errors='replace')}")
+            # A package manager says why on its output, and its last line of errors only sums it up.
+            tail = "\n".join(r.stdout.decode(errors="replace").strip().splitlines()[-15:])
+            err = r.stderr.decode(errors="replace").strip()
+            raise DeskError(f"{_named(spec.path(script))} failed ({r.returncode}): {err}"
+                            + (f"\nits output ended with:\n{tail}" if tail else ""))
 
 
 def provision(spec: ImageSpec, port: int, relogin: bool = True) -> None:
