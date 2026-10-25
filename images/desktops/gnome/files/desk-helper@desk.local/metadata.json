@@ -3,6 +3,8 @@
   "name": "desk helper",
   "description": "Window geometry for the desk test harness. AT-SPI on Wayland only knows window-relative coordinates; this adds where each window is on screen.",
   "shell-version": [
+    "48",
+    "49",
     "50",
     "51"
   ]

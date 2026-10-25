@@ -1,0 +1,17 @@
+# Ubuntu 26.04 LTS: the official cloud image; cloud-init makes the users, install.sh the rest.
+installer = "cloudimg"
+# libosinfo knows no ubuntu26.04 on every host yet; 25.10 gives the same device defaults.
+os_variant = "ubuntu25.10"
+memory_mib = 4096
+vcpus = 4
+disk_gb = 40
+# A qcow2 despite its name; rebuilt with updates, `desk image build` takes the latest.
+cloud_image_url = "https://cloud-images.ubuntu.com/releases/26.04/release/ubuntu-26.04-server-cloudimg-amd64.img"
+cloud_image_sums = "SHA256SUMS"
+user_data = "user-data"
+# Over SSH once cloud-init has powered off: the system under any desktop.
+install = ["install.sh"]
+user = "tester"
+# `desk maintain` reinstalls it this often, so tests run against current updates.
+rebuild_days = 14
+desktops = ["gnome"]

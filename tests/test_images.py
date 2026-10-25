@@ -174,6 +174,24 @@ class Fetch(unittest.TestCase):
         self.assertEqual(images.install_fingerprint(spec), images.install_fingerprint(bare))
         self.assertEqual(images.warm_fingerprint(spec), images.warm_fingerprint(bare))
 
+    def test_a_cloud_image_is_checked_against_the_sums_published_with_it(self):
+        import hashlib
+
+        data = b"image"
+        for sums_file, algorithm, line in (("SHA512SUMS", "sha512", "{}  debian.qcow2"),
+                                           ("SHA256SUMS", "sha256", "{} *debian.qcow2"), (None, "sha256", "{}")):
+            spec = replace(load_image("arch-gnome"), cloud_image_url="https://example.org/d/debian.qcow2",
+                           cloud_image_sums=sums_file)
+            sums = line.format(hashlib.new(algorithm, data).hexdigest()) + "\n"
+            with self.subTest(sums=sums_file), tempfile.TemporaryDirectory() as tmp, \
+                    mock.patch.object(images, "CACHE", Path(tmp)), mock.patch.object(images, "_download") as download, \
+                    mock.patch("desk.images.subprocess.run", return_value=subprocess.CompletedProcess([], 0, sums, "")) as run:
+                (Path(tmp) / "debian.qcow2").write_bytes(data)
+                self.assertEqual(images._fetch_cloud_image(spec), Path(tmp) / "debian.qcow2")
+                download.assert_not_called()
+                self.assertEqual(run.call_args.args[0][-1], f"https://example.org/d/{sums_file}" if sums_file
+                                 else "https://example.org/d/debian.qcow2.SHA256")
+
 
 class Key(unittest.TestCase):
     def test_a_new_home_gets_its_key_pair(self):

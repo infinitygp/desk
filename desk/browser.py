@@ -244,18 +244,17 @@ def open_url(run, target: str, timeout: float = 30, browser: str | None = None) 
 
 
 def _start(run, name: str, url: str) -> None:
-    # Fedora calls Chromium chromium-browser, Arch chromium.
-    argv = ["firefox", url] if name == FIREFOX else \
-        ["bash", "-c", 'exec "$(command -v chromium-browser || command -v chromium)" "$1"', "chromium", url]
-    have = ("command -v firefox" if name == FIREFOX else "{ command -v chromium-browser || command -v chromium; }") + \
-        " >/dev/null || exit 127; "
-    r = guest.ssh_run(run.ssh_port, run.user, have + guest.remote_command(argv, gui=True), capture=True, timeout=60)
-    if r.returncode == 127 and name == CHROMIUM:
-        raise DeskError(f"{run.image} has no Chromium: it was built before its images came with one "
-                        f"(desk maintain --only {run.image})")
+    # Fedora calls Chromium chromium-browser, Arch and Debian chromium; Debian's Firefox is firefox-esr.
+    which = "command -v firefox || command -v firefox-esr" if name == FIREFOX else \
+        "command -v chromium-browser || command -v chromium"
+    argv = ["bash", "-c", f'exec "$({which})" "$1"', name.lower(), url]
+    r = guest.ssh_run(run.ssh_port, run.user, f"{{ {which}; }} >/dev/null || exit 127; "
+                      + guest.remote_command(argv, gui=True), capture=True, timeout=60)
     if r.returncode == 127:
-        # arch-gnome: GNOME without Firefox; otherwise it would only say that no Firefox window came.
-        raise DeskError(f"{run.image} has no Firefox: --browser chromium, or install it in the run first")
+        # arch-gnome has no Firefox, ubuntu-26.04-* no Chromium; otherwise it would only say that
+        # no window came.
+        other = "chromium" if name == FIREFOX else "firefox"
+        raise DeskError(f"{run.image} has no {name}: --browser {other}, or install it in the run first")
     if r.returncode != 0:
         raise DeskError(f"starting {name.lower()} failed: {r.stderr.decode(errors='replace').strip()[-300:]}")
 

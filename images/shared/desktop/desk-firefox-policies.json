@@ -3,6 +3,7 @@
     "OverrideFirstRunPage": "",
     "OverridePostUpdatePage": "",
     "DontCheckDefaultBrowser": true,
+    "SkipTermsOfUse": true,
     "DisableTelemetry": true,
     "DisableFirefoxStudies": true,
     "OfferToSaveLogins": false,

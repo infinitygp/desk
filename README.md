@@ -67,12 +67,14 @@ the same on every host, and `desk up` of an image the host has not defined print
 | `fedora-44` | distro | kickstart over the network, the system without a desktop | desktops: `gnome` |
 | `fedora-45` | distro | kickstart, the beta's installer tree, the release's packages | next release; follows it once it is out |
 | `arch` | distro | official cloud image: users by cloud-init (NoCloud seed), the rest by `install.sh` | rolling; no Secure Boot, no Firefox |
+| `debian-13` | distro | official cloud image (generic: the genericcloud one's kernel drives no display), likewise | Firefox ESR |
+| `ubuntu-26.04` | distro | official cloud image, likewise | Firefox from Mozilla's repository; no Chromium (Ubuntu has only its snap) |
 | `windows-11` | distro | evaluation ISO + `autounattend.xml` on a second CD | comes with its desktop; 90-day evaluation, reinstalled by `desk maintain` |
 | `openwrt-25.12` | distro | the release's disk image (x86-64 ext4 combined, EFI), grown and preconfigured offline | no desktop: BusyBox ash, procd, apk, LuCI |
-| `gnome` | desktop | the Workstation's packages (Fedora) or the gnome group (Arch), automatic login; shell extension, settings for steady screenshots, accessibility | |
+| `gnome` | desktop | the Workstation's packages (Fedora), the gnome group (Arch), gnome-core (Debian), ubuntu-desktop-minimal (Ubuntu), automatic login; shell extension, settings for steady screenshots | |
 | `cockpit` | addon | Cockpit, Firefox logged in with administrative access | Fedora 44 |
 
-The Linux images with a desktop have Chromium, the Fedora ones Firefox as well.
+The Linux images with a desktop have Chromium (not Ubuntu's) and Firefox (not Arch's).
 
 ```bash
 bin/desk image blocks                              # the distros, desktops and addons there are
@@ -182,6 +184,8 @@ Firefox:
   that differs from the page shown only after `#` would leave an empty tab that never loads, so
   `desk browser open` goes through `about:blank` for it, quickly: Cockpit ends its session when
   none of its pages is open for a few seconds.
+- Its policies (`desk-firefox-policies.json`) leave out first-run pages, prompts and Mozilla's
+  Terms of Use dialog, which Mozilla's own builds (Ubuntu's Firefox) show over the first page.
 - The Remote Agent (WebDriver BiDi) is not used, as it marks the browser window;
   `desk browser viewport` types the sizes into the responsive design mode.
 
@@ -427,7 +431,7 @@ libvirt bindings to run.
 | | Arch | Fedora |
 |---|---|---|
 | To start runs | `libvirt` `libvirt-python` `qemu-system-x86` `qemu-hw-display-virtio-vga` `qemu-img` `edk2-ovmf` `passt` `openssh` | `libvirt-daemon-driver-qemu` `python3-libvirt` `qemu-system-x86-core` `qemu-device-display-virtio-vga` `qemu-img` `edk2-ovmf` `passt` `openssh-clients` |
-| To build images | `virt-install` `openssh`; `arch-gnome`: `curl` `openssl`; `openwrt-*`: `curl` `gzip` `gptfdisk` `parted` `libguestfs`; `windows-11`: `curl` `7zip` `libisoburn` | `virt-install` `openssh`; `arch-gnome`: `curl` `openssl`; `openwrt-*`: `curl` `gzip` `gdisk` `parted` `libguestfs`; `windows-11`: `curl` `7zip` `xorriso` |
+| To build images | `virt-install` `openssh`; cloud images (`arch`, `debian-13`, `ubuntu-26.04`): `curl` `openssl`; `openwrt-*`: `curl` `gzip` `gptfdisk` `parted` `libguestfs`; `windows-11`: `curl` `7zip` `libisoburn` | `virt-install` `openssh`; cloud images (`arch`, `debian-13`, `ubuntu-26.04`): `curl` `openssl`; `openwrt-*`: `curl` `gzip` `gdisk` `parted` `libguestfs`; `windows-11`: `curl` `7zip` `xorriso` |
 | Single features | `python-pillow` (crops, several monitors), `qemu-hw-display-virtio-gpu-pci` (`--resolution`, `--displays`), `guestfs-tools` (`desk diff`), `gstreamer` `gst-plugins-base` `gst-plugins-good` (`desk record`), `github-cli` (installing and `desk update` from a private repository) | `python3-pillow`, `qemu-device-display-virtio-gpu-pci`, `guestfs-tools`, `gstreamer1` `gstreamer1-plugins-base` `gstreamer1-plugins-good`, `gh` |
 
 The user needs `/dev/kvm` (the `kvm` group where it is not open to everybody); VMs run under

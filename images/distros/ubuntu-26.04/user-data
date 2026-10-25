@@ -1,0 +1,24 @@
+#cloud-config
+# First boot of the Ubuntu cloud image: makes the users, then powers off for `desk image build`.
+# @SSH_PUBKEY@ and @PASSWORD_HASH@ are replaced by `desk image build`.
+hostname: desk-ubuntu
+# UTC until provisioning sets the zone desk was given (DESK_TIMEZONE).
+timezone: Etc/UTC
+disable_root: false
+ssh_pwauth: false
+users:
+  # The harness does root work over its own key; tester keeps a normal password sudo.
+  - name: root
+    ssh_authorized_keys: ["@SSH_PUBKEY@"]
+  - name: tester
+    gecos: Tester
+    groups: [sudo]
+    shell: /bin/bash
+    lock_passwd: false
+    hashed_passwd: "@PASSWORD_HASH@"
+    ssh_authorized_keys: ["@SSH_PUBKEY@"]
+# Only the users: the system and the desktop come from the install scripts, over SSH, which say
+# what failed (desk image build).
+power_state:
+  mode: poweroff
+  condition: "id tester"

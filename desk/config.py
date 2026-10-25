@@ -145,8 +145,10 @@ class ImageSpec:
     initrd: str | None = None
     extra_args: str = ""
     user_data: str | None = None
-    # Always the latest build; checked against the .SHA256 file published next to it.
+    # Always the latest build; checked against the .SHA256 file published next to it, or against
+    # the checksum file of this name in its directory (Debian's SHA512SUMS, Ubuntu's SHA256SUMS).
     cloud_image_url: str | None = None
+    cloud_image_sums: str | None = None
     # A gzipped raw disk image, checked against the sha256sums file published next to it.
     disk_image_url: str | None = None
     # Directory (relative to the image) whose tree is written onto the disk image's root file

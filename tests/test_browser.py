@@ -184,8 +184,8 @@ class Open(unittest.TestCase):
         with self.assertRaisesRegex(DeskError, "no page in a focused Chromium window"):
             self.open([{"url": "https://app.test/", "app": "Firefox"}], "/system", browser="chromium")
 
-    def test_an_image_without_chromium_says_so(self):
-        with self.assertRaisesRegex(DeskError, "fedora-44-gnome has no Chromium.*desk maintain --only fedora-44-gnome"):
+    def test_an_image_without_the_browser_says_so(self):
+        with self.assertRaisesRegex(DeskError, "fedora-44-gnome has no Chromium: --browser firefox"):
             self.open([{"url": None}], browser="chromium", rc=127)
         with self.assertRaisesRegex(DeskError, "fedora-44-gnome has no Firefox: --browser chromium"):
             self.open([{"url": None}], browser="firefox", rc=127)

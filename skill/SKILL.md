@@ -183,7 +183,9 @@ run still starts, cold, in ~20 s. `desk image blocks` lists what images can be m
 `fedora-44-gnome` is the default; `fedora-45-gnome` is the next Fedora release (beta until it is
 out); `fedora-44-gnome-cockpit` has Cockpit open in Firefox, logged in as tester with
 administrative access (its Chromium trusts Cockpit's certificate too, logged out); `arch-gnome` is
-Arch Linux (rolling, pacman, no SELinux) with the newest GNOME and libraries; `windows-11` is
+Arch Linux (rolling, pacman, no SELinux) with the newest GNOME and libraries; `debian-13-gnome` is
+Debian 13 (apt, GNOME 48, Firefox ESR); `ubuntu-26.04-gnome` is Ubuntu 26.04 LTS with Ubuntu's own
+desktop (Firefox from Mozilla's repository, no Chromium); `windows-11` is
 Windows 11 Enterprise (evaluation) for Windows builds and installers; `openwrt-25.12` is OpenWrt
 25.12 without a desktop, for OpenWrt packages and LuCI apps. Images are as old as their last build
 (`desk image list` shows the date) unless the host renews them with `desk maintain`, by hand or

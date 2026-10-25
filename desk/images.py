@@ -64,7 +64,7 @@ def current(link: Path) -> Path | None:
 
 # Image settings that do not change what ends up in the guest (the files the URLs lead to are
 # named, version included, by virtio_win_iso and openssh_msi).
-NOT_IN_GUEST = ("name", "dir", "base_version", "warm_version", "rebuild_days", "expiry",
+NOT_IN_GUEST = ("name", "dir", "base_version", "warm_version", "rebuild_days", "expiry", "cloud_image_sums",
                 "virtio_win_url", "virtio_win_sha256", "openssh_msi_url", "openssh_msi_sha256")
 
 
@@ -191,8 +191,8 @@ def _discard_build(name: str) -> None:
         _log(f"warning: could not remove {name}: {e}")
 
 
-def _sha256(path: Path) -> str:
-    h = hashlib.sha256()
+def _checksum(path: Path, algorithm: str = "sha256") -> str:
+    h = hashlib.new(algorithm)
     with path.open("rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
@@ -221,7 +221,7 @@ def _fetch(spec: ImageSpec, file: str, source: str) -> Path:
             raise DeskError(f"{target} missing and no {source}_url to fetch it from")
         CACHE.mkdir(parents=True, exist_ok=True)
         _download(url, target)
-    if sha256 and _sha256(target) != sha256:
+    if sha256 and _checksum(target) != sha256:
         raise DeskError(f"{target} does not match {source}_sha256; delete it to download again")
     return target
 
@@ -232,10 +232,12 @@ def _fetch_published(url: str, sums_url: str, pick) -> Path:
     sums = subprocess.run(["curl", *HTTPS_ONLY, "-fsSL", "--retry", "3", "--max-time", "60", sums_url],
                           capture_output=True, text=True, check=True).stdout
     want = pick(sums)
+    # Debian publishes SHA-512 sums only.
+    algorithm = "sha512" if len(want) == 128 else "sha256"
     target = CACHE / url.rsplit("/", 1)[-1]
-    if not target.exists() or _sha256(target) != want:
+    if not target.exists() or _checksum(target, algorithm) != want:
         _download(url, target)
-        if _sha256(target) != want:
+        if _checksum(target, algorithm) != want:
             raise DeskError(f"{target} does not match {sums_url}")
     return target
 
@@ -243,16 +245,19 @@ def _fetch_published(url: str, sums_url: str, pick) -> Path:
 def _fetch_cloud_image(spec: ImageSpec) -> Path:
     """The latest cloud image."""
     url = spec.cloud_image_url
+    if spec.cloud_image_sums:
+        folder, name = url.rsplit("/", 1)
+        return _fetch_published(url, f"{folder}/{spec.cloud_image_sums}", lambda sums: checksum_for(sums, name))
     return _fetch_published(url, f"{url}.SHA256", lambda sums: sums.split()[0])
 
 
 def checksum_for(sums: str, name: str) -> str:
-    """The SHA-256 of `name` in a sha256sums file (`<hex> *<name>` or `<hex>  <name>` lines)."""
+    """The checksum of `name` in a sums file (`<hex> *<name>` or `<hex>  <name>` lines)."""
     for line in sums.splitlines():
         parts = line.split()
         if len(parts) == 2 and parts[1].lstrip("*") == name:
             return parts[0].lower()
-    raise DeskError(f"{name} is not listed in the published sha256sums")
+    raise DeskError(f"{name} is not listed in the published checksums")
 
 
 def _fetch_disk_image(spec: ImageSpec) -> Path:

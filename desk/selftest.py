@@ -60,6 +60,7 @@ def _ssh(run, command: str) -> str:
 def _ensure(run, binary: str, package: str) -> None:
     """Some installs may lack the apps the selftest drives."""
     install = (f"if command -v dnf; then dnf install -y -q {package}; "
+               f"elif command -v apt-get; then DEBIAN_FRONTEND=noninteractive apt-get install -y -q {package}; "
                f"else pacman -S --noconfirm --needed {package}; fi")
     cmd = f"command -v {binary} >/dev/null || ({install}) >/dev/null 2>&1; command -v {binary}"
     r = guest.ssh_run(run.ssh_port, runs.spec_for(run).root_user, cmd, capture=True, timeout=600)
