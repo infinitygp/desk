@@ -68,8 +68,13 @@ def cmd_image(args) -> None:
               "(desk maintain makes the builds it needs)")
         return
     if args.image_cmd == "rm":
+        try:
+            variant = load_image(args.name).base is not None
+        except DeskError:
+            variant = False  # a broken definition is removed all the same
         config.remove_image(args.name)
-        print(f"removed {args.name}; its builds stay until deleted by hand ({BASE / args.name}*, {WARM / args.name}*)")
+        builds = f"{WARM / args.name}*" if variant else f"{BASE / args.name}*, {WARM / args.name}*"
+        print(f"removed {args.name}; its builds stay until deleted by hand ({builds})")
         return
     spec = load_image(args.name)
     if args.image_cmd == "show":
