@@ -527,22 +527,24 @@ def _install(spec: ImageSpec, deadline: float) -> None:
     over SSH, so a script that fails says why at once instead of leaving an install to time out."""
     port = free_port()
     name = f"desk-install-{spec.name}-{spec.base_version}"
+    # Screens and console in logs/, which outlast a build that failed and is deleted.
+    logs = LOGS / name
+    logs.mkdir(parents=True, exist_ok=True)
     xml = prepare_domain_xml(spec.base_xml.read_text(), name=name, disk=spec.base_disk, nvram=spec.base_nvram,
-                             ssh_port=port, console_log=LOGS / f"{name}.log", memory_mib=spec.memory_mib,
+                             ssh_port=port, console_log=logs / "console.log", memory_mib=spec.memory_mib,
                              vcpus=spec.vcpus)
     _log(f"booting {name} for the install scripts")
     dom = conn().createXML(xml, 0)
     try:
-        if not _boot_and_wait_ssh(dom, port, spec, spec.base_dir):
-            raise DeskError("the installed system went away while booting; last screen: "
-                            f"{spec.base_dir / 'last-boot.png'}")
+        if not _boot_and_wait_ssh(dom, port, spec, logs):
+            raise DeskError(f"the installed system went away while booting; last screen: {logs / 'last-boot.png'}")
         run_scripts(spec, port, spec.install, {}, timeout=max(60.0, deadline - time.monotonic()))
         _power_off(dom, spec, port)
     except BaseException:
         try:
             if dom.isActive():
-                (spec.base_dir / "failed.png").write_bytes(display.screenshot(dom))
-                _log(f"screen at failure: {spec.base_dir / 'failed.png'}")
+                (logs / "failed.png").write_bytes(display.screenshot(dom))
+                _log(f"screen at failure: {logs / 'failed.png'}")
                 dom.destroy()
         except Exception:  # noqa: BLE001 - the domain may be gone already
             pass

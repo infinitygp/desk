@@ -34,6 +34,14 @@ def cmd_image(args) -> None:
 
         dom = lookup(images.build_domain_name(spec))
         if dom is None or not dom.isActive():
+            # Once the installer is done, the install scripts run in a domain of their own.
+            import libvirt
+
+            from .virt import conn
+
+            dom = next((d for d in conn().listAllDomains(libvirt.VIR_CONNECT_LIST_DOMAINS_ACTIVE)
+                        if d.name().startswith(f"desk-install-{spec.name}-")), None)
+        if dom is None or not dom.isActive():
             raise DeskError(f"no install of {spec.name} is running")
         out = Path(images.LOGS) / f"{images.build_domain_name(spec)}-{int(time.time())}.png"
         out.write_bytes(display.screenshot(dom))
