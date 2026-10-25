@@ -411,16 +411,17 @@ def cold_reason(spec: ImageSpec, warm_dir: Path | None = None) -> str | None:
 
 
 def abandoned_warmup(name: str, xml: str) -> str | None:
-    """The image whose warm-up this domain is, when it is one: a `desk image warm` that was killed
-    leaves its guest running. Runs restored from a warm state carry the same domain name, but
-    their disk is a run's."""
-    from .config import WARM
+    """The image whose warm-up or install scripts this domain runs, when it is one: a `desk image
+    warm` or `build` that was killed leaves its guest running. Runs restored from a warm state
+    carry the same domain name, but their disk is a run's."""
+    from .config import BASE, WARM
 
-    if not name.startswith("desk-warm-") or str(RUNS) in xml:
+    builds = WARM if name.startswith("desk-warm-") else BASE if name.startswith("desk-install-") else None
+    if builds is None or str(RUNS) in xml:
         return None
     for src in ET.fromstring(xml).iter("source"):
         disk = Path(src.get("file") or "")
-        if disk.parent.parent == WARM:
+        if disk.parent.parent == builds:
             return disk.parent.name.rsplit(".", 1)[0]
     return None
 
@@ -475,7 +476,7 @@ def gc_idle(verbose: bool = True) -> list[str]:
 
 def gc(verbose: bool = True) -> list[str]:
     """Kill desk domains nobody owns: those whose run directory is gone, and the guests of
-    warm-ups that were killed. With the state lock held."""
+    warm-ups and install scripts that were killed. With the state lock held."""
     removed = []
     # Only a domain whose run directory is gone is orphaned; one whose run.json this desk cannot
     # read (another version wrote it) still belongs to someone.
@@ -492,11 +493,12 @@ def gc(verbose: bool = True) -> list[str]:
                 continue
             image = abandoned_warmup(name, xml)
             if image:
-                # Whoever warms an image holds its lock for as long as the guest is theirs.
+                # Whoever builds or warms an image holds its lock for as long as the guest is theirs.
                 with image_lock_if_free(image) as free:
                     if free:
                         dom.destroy()
-                        removed.append(f"abandoned warm-up domain {name}")
+                        removed.append(f"abandoned {'warm-up' if name.startswith('desk-warm-') else 'install'} "
+                                       f"domain {name}")
         except libvirt.libvirtError:
             continue  # gone between listing and looking at it
     if verbose:

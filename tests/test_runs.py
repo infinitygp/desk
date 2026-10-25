@@ -480,6 +480,14 @@ class AbandonedWarmup(unittest.TestCase):
         self.assertIsNone(runs.abandoned_warmup(name, self.xml(RUNS / "ab12cd" / "disk.qcow2")))
         self.assertIsNone(runs.abandoned_warmup("desk-ab12cd", warming))
 
+    def test_so_is_the_guest_of_install_scripts(self):
+        from desk.config import BASE, WARM
+
+        name = "desk-install-arch-kde-20261025-020452"
+        self.assertEqual(runs.abandoned_warmup(name, self.xml(BASE / "arch-kde.20261025-020452" / "disk.qcow2")),
+                         "arch-kde")
+        self.assertIsNone(runs.abandoned_warmup(name, self.xml(WARM / "arch-kde.20261025-020452" / "disk.qcow2")))
+
 
 if __name__ == "__main__":
     unittest.main()
