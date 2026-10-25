@@ -69,6 +69,8 @@ class Composition(HostFiles):
         self.assertEqual(config.parse_name("fedora-44-gnome-cockpit"), ("fedora-44", "gnome", ["cockpit"]))
         self.assertEqual(config.parse_name("openwrt-25.12"), ("openwrt-25.12", None, []))
         self.assertIsNone(config.parse_name("plan9-rio"))
+        # Windows comes with its desktop: what follows its name is an addon.
+        self.assertEqual(config.parse_name("windows-11-office"), ("windows-11", None, ["office"]))
 
     def test_an_image_not_defined_here_says_how_to_define_it(self):
         self.images()

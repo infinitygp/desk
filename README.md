@@ -154,7 +154,8 @@ block moved from one to the other keeps its builds: fingerprints name files with
 as they do for a checkout and a release of the same commit. A desk before
 blocks kept a directory per image in `~/.config/desk/images/`; desk refuses those until their
 files are in an addon and the image is added again, and `desk image list` shows builds left without
-a definition.
+a definition. Their builds are installed again once by `desk maintain`, as fingerprints name files
+by the block they are in now.
 
 ### Provisioning
 

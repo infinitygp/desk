@@ -369,12 +369,16 @@ def image_name(distro: str, desktop: str | None, addons: list[str]) -> str:
 
 def parse_name(name: str) -> tuple[str, str | None, list[str]] | None:
     """The blocks an image name stands for, None when it names no distro."""
-    for distro in sorted(blocks("distros"), key=len, reverse=True):
+    distros = blocks("distros")
+    for distro in sorted(distros, key=len, reverse=True):
         if name == distro:
             return distro, None, []
         if name.startswith(f"{distro}-"):
-            desktop, *addons = name[len(distro) + 1:].split("-")
-            return distro, desktop, addons
+            rest = name[len(distro) + 1:].split("-")
+            # A distro that comes with its desktop or has none is followed by addons only.
+            if "desktops" not in _toml(distros[distro] / "block.toml"):
+                return distro, None, rest
+            return distro, rest[0], rest[1:]
     return None
 
 
