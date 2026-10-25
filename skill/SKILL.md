@@ -249,7 +249,8 @@ stopped in the guest and fails as "still running"), `timeout` on a `click` (how 
 the element, 60 s by default), `button = "right"` (or `"middle"`) on a `click`, `window = "TEXT"` on
 a `click` (look for the element in the windows whose title or application contains TEXT instead of
 the focused one: the taskbar, `window = "explorer"` on Windows, where it has no title, or a tray's
-flyout, `"System tray overflow window."`; the click is the machine's mouse, so what it opens comes
+flyout, `"System tray overflow window."`, which stays open after a choice in a tray menu and whose
+arrow reads `Show Hidden Icons Hide` while it is open; the click is the machine's mouse, so what it opens comes
 to the front as it does for a user, and a menu it opens is the focused window of the next step),
 `clock = "+1d"` (or `"reset"`),
 `open = "/example#/tasks"` (`desk browser open`: a path on the site shown or a whole address; fails
