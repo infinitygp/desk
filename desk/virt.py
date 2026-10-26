@@ -205,6 +205,27 @@ def prepare_domain_xml(
     return ET.tostring(root, encoding="unicode")
 
 
+def drop_usb_keyboard(dom: libvirt.virDomain) -> None:
+    """Leave the keys to the PS/2 keyboard where a domain has a USB one besides (Windows, whose
+    install needs that: this OVMF build ignores PS/2 at the CD prompt).
+
+    QEMU's USB keyboard queues 16 scancodes, which the guest takes one per poll: Windows busy for a
+    moment (after a restore, Defender scanning) lost keys typed 40 ms apart, an uppercase Polish
+    letter being 8 scancodes. The PS/2 one, read by an interrupt each, kept up at 2 ms. Unplugged
+    live, so a warm state saved with it still restores.
+    """
+    keyboards = [i for i in ET.fromstring(dom.XMLDesc(0)).iter("input") if i.get("type") == "keyboard"]
+    if not any(k.get("bus") == "ps2" for k in keyboards):
+        return
+    for k in keyboards:
+        if k.get("bus") == "usb":
+            try:
+                dom.detachDeviceFlags(ET.tostring(k, encoding="unicode"), libvirt.VIR_DOMAIN_AFFECT_LIVE)
+            except libvirt.libvirtError as e:
+                print(f"[desk] warning: keys go through the USB keyboard, which loses some while the guest "
+                      f"is busy: unplugging it failed: {e}")
+
+
 def domain_uuid(xml: str) -> str:
     return ET.fromstring(xml).findtext("uuid")
 

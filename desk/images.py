@@ -21,7 +21,7 @@ import libvirt
 from . import display, guest, steps
 from .config import (BASE, BLOCK_ROOTS, CACHE, INSTALL_KEYS, LIST_KEYS, LOGS, PATH_KEYS, SSH_KEY, WARM, DeskError,
                      ImageSpec)
-from .virt import conn, free_port, lookup, prepare_domain_xml, qemu_img_overlay, reflink_copy
+from .virt import conn, drop_usb_keyboard, free_port, lookup, prepare_domain_xml, qemu_img_overlay, reflink_copy
 
 
 def _log(msg: str) -> None:
@@ -535,6 +535,7 @@ def _install(spec: ImageSpec, deadline: float) -> None:
                              vcpus=spec.vcpus)
     _log(f"booting {name} for the install scripts")
     dom = conn().createXML(xml, 0)
+    drop_usb_keyboard(dom)
     try:
         if not _boot_and_wait_ssh(dom, port, spec, logs):
             raise DeskError(f"the installed system went away while booting; last screen: {logs / 'last-boot.png'}")
@@ -737,11 +738,13 @@ def warm(spec: ImageSpec, force: bool = False, promote_it: bool = True) -> str:
         )
         _log(f"booting {name} from {on.name}")
         dom = conn().createXML(xml, 0)
+        drop_usb_keyboard(dom)
         if not _boot_and_wait_ssh(dom, port, spec, wd):
             # QEMU itself may die under the guest (it segfaulted in its AHCI emulation while
             # Windows was on a SATA disk); one more attempt is cheap.
             _log("the guest went away while booting, starting it once more")
             dom = conn().createXML(xml, 0)
+            drop_usb_keyboard(dom)
             if not _boot_and_wait_ssh(dom, port, spec, wd):
                 raise DeskError(f"the guest went away while booting twice; last screen: {wd / 'last-boot.png'}")
         guest.wait_ready(port, spec.user, spec.cmd(spec.ready))

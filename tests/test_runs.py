@@ -272,6 +272,7 @@ class Up(unittest.TestCase):
                 ("desk.runs.qemu_img_overlay", lambda backing, overlay: overlay.write_bytes(b"")),
                 ("desk.runs.reflink_copy", lambda src, dst: dst.write_bytes(b"")),
                 ("desk.runs.prepare_domain_xml", lambda *a, **k: "<domain/>"), ("desk.runs.free_port", lambda: 1),
+                ("desk.runs.drop_usb_keyboard", lambda dom: None),
                 ("desk.runs.guest.wait_ssh", held("waiting for the guest")),
                 ("desk.runs.guest.wait_ready", held("waiting for the session")),
                 ("desk.runs.images.provision", held("provisioning")), ("desk.steps.run_prepare", held("preparing"))):

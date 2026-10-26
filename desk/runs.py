@@ -18,8 +18,8 @@ import libvirt
 
 from . import guest, images
 from .config import HOME, RUNS, Busy, DeskError, ImageSpec, load_image
-from .virt import (conn, domain_size, domain_uuid, free_port, lookup, prepare_domain_xml, qemu_img_overlay,
-                   reflink_copy, uuid_active)
+from .virt import (conn, domain_size, domain_uuid, drop_usb_keyboard, free_port, lookup, prepare_domain_xml,
+                   qemu_img_overlay, reflink_copy, uuid_active)
 
 # Head room left for the host when deciding whether another VM fits.
 HOST_RESERVE_MIB = 1024
@@ -725,6 +725,7 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
                 guest.agent_set_time(dom)
             except DeskError as e:
                 print(f"[desk] warning: clock not synced: {e}")
+        drop_usb_keyboard(dom)
         started()
         guest.wait_ssh(run.ssh_port, run.user, timeout=300 if cold else 60)
         if cold:

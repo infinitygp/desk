@@ -264,6 +264,11 @@ What else differs from Firefox:
   AHCI emulation crashes under Windows); an e1000e NIC (inbox driver); OpenSSH from the MSI with
   PowerShell as the shell; virtio-win guest tools for the display driver and qemu-guest-agent.
 - Commands are sent as `powershell -EncodedCommand`, since Windows' command line mangles quotes.
+- Keys go through the PS/2 keyboard. The install has a USB one as well, as this OVMF build ignores
+  PS/2 at the CD prompt; QEMU queues 16 scancodes for it, which Windows takes one per poll, and a
+  Windows busy for a moment (after a restore, Defender scanning) lost keys typed 40 ms apart,
+  while PS/2, read by an interrupt each, kept up at 2 ms. Every start and restore unplugs the USB
+  one (`virt.drop_usb_keyboard`), so warm states saved with it restore as they are.
 - The install brings WebView2 up to date with Microsoft's bootstrapper (signature checked),
   compiles .NET's native images, and turns off what works in the background during tests and no
   test needs: the updater of Edge and WebView2, SysMain, the search indexer, telemetry and Delivery
