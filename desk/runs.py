@@ -725,8 +725,9 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
                 guest.agent_set_time(dom)
             except DeskError as e:
                 print(f"[desk] warning: clock not synced: {e}")
-        drop_usb_keyboard(dom)
         started()
+        # Outside the state lock: libvirt waits up to 5 s for the unplug to finish.
+        drop_usb_keyboard(dom)
         guest.wait_ssh(run.ssh_port, run.user, timeout=300 if cold else 60)
         if cold:
             guest.wait_ready(run.ssh_port, run.user, spec.cmd(spec.ready))
