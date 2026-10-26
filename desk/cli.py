@@ -924,9 +924,12 @@ def _copy(args, push: bool) -> None:
               "0: no limit)", file=sys.stderr)
         sys.exit(rc)
     if rc != 0:
-        # scp's own 1 would read as a failed check: copying is desk's work.
-        raise DeskError(f"copying failed (scp exit {rc})"
-                        + ("" if args.root else f"; {args.remote} may be outside what {run.user} can access: --root"))
+        # scp's own 1 would read as a failed check: copying is desk's work. What scp says above
+        # names the cause; the folder missing is the usual one, and --root does nothing on Windows.
+        where = "its folder may not exist"
+        if not args.root and runs.spec_for(run).family != "windows":
+            where += f", or {args.remote} be outside what {run.user} can access: --root"
+        raise DeskError(f"copying failed (scp exit {rc}); {where}")
 
 
 def cmd_push(args) -> None:
