@@ -267,8 +267,10 @@ What else differs from Firefox:
 - Keys go through the PS/2 keyboard. The install has a USB one as well, as this OVMF build ignores
   PS/2 at the CD prompt; QEMU queues 16 scancodes for it, which Windows takes one per poll, and a
   Windows busy for a moment (after a restore, Defender scanning) lost keys typed 40 ms apart,
-  while PS/2, read by an interrupt each, kept up at 2 ms. Every start and restore unplugs the USB
-  one (`virt.drop_usb_keyboard`), so warm states saved with it restore as they are.
+  while PS/2, read by an interrupt each, kept up at 2 ms. Warm-ups and cold boots leave the USB one
+  out of the domain (`virt.spare_usb_keyboards`). Unplugging it from a running guest instead lost
+  keys too: Windows took the unplug seconds later, in the middle of typing. A warm state saved with
+  it restores as it is, and `desk maintain` makes it again.
 - The install brings WebView2 up to date with Microsoft's bootstrapper (signature checked),
   compiles .NET's native images, and turns off what works in the background during tests and no
   test needs: the updater of Edge and WebView2, SysMain, the search indexer, telemetry and Delivery

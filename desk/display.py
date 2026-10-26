@@ -276,7 +276,7 @@ def chord(dom, codes: list[str], hold_ms: int = 40, gap_ms: int = 40) -> None:
     Not faster: QEMU's keyboards queue 16 scancodes, and a guest busy for a moment that fell behind
     lost the rest of a word, a key release among it, which left AltGr held for the letters after
     it. Windows' USB keyboard did, taking one scancode per poll; runs type through PS/2
-    (virt.drop_usb_keyboard).
+    (virt.spare_usb_keyboards).
 
     input-send-event is applied before the command returns, unlike send-key, which only
     queues timed events; so once this returns the guest has every key and the next action

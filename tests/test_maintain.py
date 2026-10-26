@@ -109,6 +109,15 @@ class Due(unittest.TestCase):
         self.assertEqual(maintain.warm_reasons(self.spec), ["no provisioned disk for cold runs"])
         (warm / images.PROVISIONED).write_bytes(b"")
         self.assertEqual(maintain.warm_reasons(self.spec), [])
+        # Saved by a warm-up that had the install's USB keyboard (Windows).
+        keyboards = "<domain><devices><input type='keyboard' bus='usb'/><input type='keyboard' bus='ps2'/></devices></domain>"
+        (base / "domain.xml").write_text(keyboards)
+        saved = mock.Mock(**{"saveImageGetXMLDesc.return_value": keyboards})
+        with mock.patch("desk.maintain.conn", return_value=saved):
+            self.assertEqual(maintain.warm_reasons(self.spec), ["saved with the install's USB keyboard, which loses keys"])
+            saved.saveImageGetXMLDesc.return_value = keyboards.replace("<input type='keyboard' bus='usb'/>", "")
+            self.assertEqual(maintain.warm_reasons(self.spec), [])
+        (base / "domain.xml").unlink()
         # config.toml or the host's zone changed since.
         meta = json.loads((warm / "meta.json").read_text())
         (warm / "meta.json").write_text(json.dumps({**meta, "timezone": "Asia/Kolkata"}))

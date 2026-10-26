@@ -1,11 +1,8 @@
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from unittest import mock
 
-import libvirt
-
-from desk.virt import domain_size, drop_usb_keyboard, prepare_domain_xml
+from desk.virt import domain_size, prepare_domain_xml
 
 TEMPLATE = """
 <domain type='kvm'>
@@ -109,30 +106,20 @@ class PrepareDomainXml(unittest.TestCase):
 
 
 class UsbKeyboard(unittest.TestCase):
-    USB = "<input type='keyboard' bus='usb'><alias name='input0'/><address type='usb' bus='0' port='1'/></input>"
-
-    def dom(self, *inputs: str) -> mock.Mock:
-        return mock.Mock(**{"XMLDesc.return_value": f"<domain><devices>{''.join(inputs)}</devices></domain>"})
+    def keyboards(self, *buses: str, **kw) -> list[str]:
+        inputs = "".join(f"<input type='keyboard' bus='{b}'/>" for b in buses)
+        root = ET.fromstring(prepare_domain_xml(TEMPLATE.replace("<input type='mouse' bus='ps2'/>", inputs),
+                                                **{**ARGS, **kw}))
+        return [i.get("bus") for i in root.findall("devices/input") if i.get("type") == "keyboard"]
 
     def test_keys_go_through_ps2_where_there_is_one(self):
-        dom = self.dom(self.USB, "<input type='mouse' bus='ps2'/>", "<input type='keyboard' bus='ps2'/>")
-        drop_usb_keyboard(dom)
-        xml, flags = dom.detachDeviceFlags.call_args.args
-        self.assertEqual(ET.fromstring(xml).find("alias").get("name"), "input0")
-        self.assertEqual(flags, libvirt.VIR_DOMAIN_AFFECT_LIVE)
+        self.assertEqual(self.keyboards("usb", "ps2"), ["ps2"])
 
     def test_a_usb_keyboard_alone_stays(self):
-        for inputs in ((self.USB,), ("<input type='keyboard' bus='ps2'/>",)):
-            dom = self.dom(*inputs)
-            drop_usb_keyboard(dom)
-            dom.detachDeviceFlags.assert_not_called()
+        self.assertEqual(self.keyboards("usb"), ["usb"])
 
-    def test_a_failed_unplug_is_said_and_the_run_goes_on(self):
-        dom = self.dom(self.USB, "<input type='keyboard' bus='ps2'/>")
-        dom.detachDeviceFlags.side_effect = libvirt.libvirtError("no")
-        with mock.patch("builtins.print") as said:
-            drop_usb_keyboard(dom)
-        self.assertIn("keys go through the USB keyboard", said.call_args.args[0])
+    def test_a_save_image_keeps_its_devices(self):
+        self.assertEqual(self.keyboards("usb", "ps2", keep_uuid=True), ["usb", "ps2"])
 
 
 if __name__ == "__main__":

@@ -17,12 +17,14 @@ import subprocess
 import sys
 import time
 import traceback
+import xml.etree.ElementTree as ET
 from contextlib import ExitStack
 from dataclasses import replace
 from pathlib import Path
 
 from . import images, runs
 from .config import BASE, HOME, LAUNCHER, URI, WARM, Busy, DeskError, ImageSpec, list_images, load_image
+from .virt import conn, spare_usb_keyboards
 
 MAINTAIN = HOME / "maintain"
 STATUS = MAINTAIN / "status.json"
@@ -115,6 +117,11 @@ def warm_reasons(spec: ImageSpec) -> list[str]:
         reasons.append("image definition changed")
     if not (cur / images.PROVISIONED).exists():
         reasons.append("no provisioned disk for cold runs")
+    # Warm-ups leave the install's USB keyboard out now; runs restored from a state saved with it
+    # type through that.
+    if spec.base_xml.exists() and spare_usb_keyboards(ET.fromstring(spec.base_xml.read_text())) and \
+            spare_usb_keyboards(ET.fromstring(conn().saveImageGetXMLDesc(str(cur / "memory.save"), 0))):
+        reasons.append("saved with the install's USB keyboard, which loses keys")
     return reasons
 
 

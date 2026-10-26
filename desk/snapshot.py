@@ -15,7 +15,7 @@ import libvirt
 
 from . import clock, disks, guest
 from .config import DeskError
-from .virt import conn, drop_usb_keyboard, reflink_copy
+from .virt import conn, reflink_copy
 
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
@@ -33,7 +33,6 @@ def _resume(run, memory: Path) -> None:
     # The saved domain is this run's own, so its XML (name, UUID, disk, ports) is used as is.
     xml = conn().saveImageGetXMLDesc(str(memory), libvirt.VIR_DOMAIN_SAVE_IMAGE_XML_SECURE)
     conn().restoreFlags(str(memory), xml, libvirt.VIR_DOMAIN_SAVE_RUNNING)
-    drop_usb_keyboard(run.dom())
     unset = None
     try:
         clock.apply(run)
