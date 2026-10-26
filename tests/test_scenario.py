@@ -272,6 +272,12 @@ class LostConnection(unittest.TestCase):
     def test_a_step_that_expects_255_gets_it(self):
         self.assertEqual(self.shell({"exec": "reboot", "rc": 255}, 255), "")
 
+    def test_an_output_of_several_lines_is_found_in_windows_lines(self):
+        answer = subprocess.CompletedProcess([], 0, b"3\r\nTrue\r\n", b"")
+        with mock.patch("desk.scenario.guest.ssh_run", return_value=answer):
+            self.assertEqual(scenario._shell(self.RUN, self.SPEC, {"exec": "x", "output": "3\nTrue"}, as_root=False),
+                             "True")
+
     def test_steps_on_the_accessibility_tree_do_not_wait_it_out(self):
         from desk import steps
 

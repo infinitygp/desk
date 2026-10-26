@@ -242,7 +242,8 @@ def _shell(run, spec, step: dict, as_root: bool) -> str:
                               timeout=attempt + 30)
         except subprocess.TimeoutExpired as e:
             r = subprocess.CompletedProcess([], 124, e.stdout or b"", e.stderr or b"")
-        out, err = r.stdout.decode(errors="replace"), r.stderr.decode(errors="replace")
+        # Windows ends its lines with \r\n, and an expected output of several lines has \n.
+        out, err = (b.decode(errors="replace").replace("\r\n", "\n") for b in (r.stdout, r.stderr))
         problem = None
         if r.returncode != step.get("rc", 0) and time.monotonic() - start >= attempt:
             problem = f"still running after {attempt:.0f}s, stopped"
