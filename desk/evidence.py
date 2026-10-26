@@ -32,7 +32,7 @@ NOISE = (
     "/var/lib/flatpak/", "/var/lib/colord/", "/var/lib/lastlog/", "/var/lib/plymouth/", "/var/lib/abrt/",
     "/var/lib/rasdaemon/", "/var/lib/sddm/", "/usr/lib/sysimage/libdnf5/", "/boot/grub2/grubenv",
     "/boot/grub/grubenv", "/etc/cups/subscriptions.conf", "/etc/systemd/system.control/",
-    # OpenWrt: desk's own log and package list (images/openwrt-*), apk's database
+    # OpenWrt: desk's own log and package list (images/distros/openwrt-*), apk's database
     "/desk/", "/lib/apk/db/",
     # Windows
     "/Windows/Prefetch/", "/Windows/System32/winevt/Logs/", "/Windows/Logs/", "/Windows/SoftwareDistribution/",
