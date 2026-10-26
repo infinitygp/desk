@@ -58,6 +58,28 @@ class WaitUntilExec(unittest.TestCase):
             self.assertEqual(e.exception.code, 1)
 
 
+class Exec(unittest.TestCase):
+    def exec(self, code: int, probe: int = 0) -> int:
+        run = mock.Mock(ssh_port=1, user="tester")
+        answers = [subprocess.CompletedProcess([], c, b"", b"Connection refused" if c == 255 else b"")
+                   for c in (code, probe)]
+        args = SimpleNamespace(run=None, timeout=None, command=["--", "true"], agent=False, root=False, gui=False,
+                               wait=False, env=None)
+        with mock.patch("desk.cli.runs.resolve", return_value=run), mock.patch("desk.cli.runs.spec_for"), \
+                mock.patch("desk.cli.guest.command", return_value="x"), \
+                mock.patch("desk.cli.guest.ssh_run", side_effect=answers), self.assertRaises(SystemExit) as e:
+            cli.cmd_exec(args)
+        return e.exception.code
+
+    def test_a_guest_that_does_not_answer_is_desks_failure(self):
+        with self.assertRaisesRegex(guest.NoConnection, "exec 'true': no SSH connection.*Connection refused"):
+            self.exec(255, probe=255)
+
+    def test_the_commands_own_code_goes_through(self):
+        self.assertEqual(self.exec(255), 255)
+        self.assertEqual(self.exec(3), 3)
+
+
 class ScenarioFrom(unittest.TestCase):
     def test_from_0_is_refused_not_a_fresh_run(self):
         args = SimpleNamespace(file="a.toml", action="run", from_step=0, run=None, image=None, keep=False)

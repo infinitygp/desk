@@ -604,6 +604,7 @@ def cmd_exec(args) -> None:
                 _exec_stopped(run, limit)
             if limit and r.returncode != 0 and time.monotonic() - start >= limit:
                 _exec_stopped(run, limit)
+            guest.lost(r, run.ssh_port, run.user, f"exec {argv[0][:60]!r}")
             code = r.returncode
         run.log_event(rc=code)
         sys.exit(code)
@@ -620,6 +621,7 @@ def cmd_exec(args) -> None:
         else:
             r = guest.ssh_run(run.ssh_port, run.user, guest.remote_command(argv, gui=True, env=env),
                               timeout=args.timeout)
+            guest.lost(r, run.ssh_port, run.user, f"exec {argv[0][:60]!r}")
             if r.returncode != 0:
                 run.log_event(rc=r.returncode)
                 sys.exit(r.returncode)
@@ -639,6 +641,8 @@ def cmd_exec(args) -> None:
         _exec_stopped(run, limit)
     if limit and r.returncode != 0 and time.monotonic() - start >= limit:
         _exec_stopped(run, limit)
+    # ssh's own 255 is no answer from the guest, not the command's code.
+    guest.lost(r, run.ssh_port, spec.root_user if args.root else run.user, f"exec {argv[0][:60]!r}")
     run.log_event(rc=r.returncode)
     sys.exit(r.returncode)
 
