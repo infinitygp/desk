@@ -165,6 +165,14 @@ class Copy(unittest.TestCase):
         with self.assertRaisesRegex(cli.DeskError, r"copying failed \(scp exit 1\); its folder may not exist, or.*--root"):
             self.copy(1)
 
+    def test_the_timeline_has_the_exit_code_of_desk(self):
+        run = mock.Mock(ssh_port=1, user="tester")
+        args = SimpleNamespace(run=None, root=False, local="a.rpm", remote="/tmp/", timeout=600)
+        with mock.patch("desk.cli.runs.resolve", return_value=run), mock.patch("desk.cli.runs.spec_for"), \
+                mock.patch("desk.cli.guest.scp", return_value=1), self.assertRaises(cli.DeskError):
+            cli._copy(args, push=True)
+        run.log_event.assert_called_once_with(rc=2)
+
     def test_windows_is_not_told_of_root(self):
         # tester is an administrator there, and --root changes nothing.
         with self.assertRaises(cli.DeskError) as e:

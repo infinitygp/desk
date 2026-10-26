@@ -918,7 +918,7 @@ def _copy(args, push: bool) -> None:
     remote = f"{user}@127.0.0.1:{args.remote}"
     src, dst = (args.local, remote) if push else (remote, args.local)
     rc = guest.scp(run.ssh_port, src, dst, timeout=args.timeout or None)
-    run.log_event(rc=rc)
+    run.log_event(rc=rc if rc in (0, 124) else 2)  # what desk exits with, for the report's timeline
     if rc == 124:
         print(f"desk: still copying after {args.timeout:.0f}s; stopped it (--timeout SECONDS to allow longer, "
               "0: no limit)", file=sys.stderr)
