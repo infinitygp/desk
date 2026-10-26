@@ -314,22 +314,34 @@ BLOCK_ONLY = {"distros": "desktops", "desktops": None, "addons": "distros"}
 NOT_OVERRIDES = {"name", "dir", "base", "base_version", "warm_version", *PATH_KEYS, *LIST_KEYS}
 
 
-def blocks(kind: str) -> dict[str, Path]:
-    """The blocks of a kind by name, shipped and the host's own."""
+def scan_blocks(kind: str) -> tuple[dict[str, Path], dict[str, str]]:
+    """The blocks of a kind by name, shipped and the host's own, and why the other names cannot be
+    used: those fail only the images that use them."""
     found: dict[str, Path] = {}
+    refused: dict[str, str] = {}
     for root in BLOCK_ROOTS:
         d = root / kind
         for p in sorted(d.iterdir()) if d.is_dir() else []:
-            if not (p / "block.toml").is_file():
+            if not (p / "block.toml").is_file() or p.name in refused:
                 continue
             if p.name in found:
-                raise DeskError(f"{kind[:-1]} {p.name!r} is defined twice, in {found[p.name]} and in {p}: "
-                                "rename the host's own")
-            if kind != "distros" and "-" in p.name:
-                raise DeskError(f"{p}: the name of a {kind[:-1]} has no '-', which separates the blocks in "
-                                "image names")
-            found[p.name] = p
-    return found
+                refused[p.name] = (f"{kind[:-1]} {p.name!r} is defined twice, in {found.pop(p.name)} and in {p}: "
+                                   "rename the host's own")
+            elif kind != "distros" and "-" in p.name:
+                refused[p.name] = (f"{p}: the name of a desktop or an addon has no '-', which separates the "
+                                   "blocks in image names")
+            elif kind == "distros" and (other := next(
+                    (n for n in found if n.startswith(f"{p.name}-") or p.name.startswith(f"{n}-")), None)):
+                refused[p.name] = (f"{p}: the names of the images of {p.name} and of {other} can be the same "
+                                   "(one name and '-' begins the other): rename the host's own")
+            else:
+                found[p.name] = p
+    return found, refused
+
+
+def blocks(kind: str) -> dict[str, Path]:
+    """The blocks of a kind by name, shipped and the host's own."""
+    return scan_blocks(kind)[0]
 
 
 def describe(block: Path) -> str:
@@ -345,9 +357,10 @@ def describe(block: Path) -> str:
 
 def _block(kind: str, name: str) -> tuple[Path, dict]:
     """A block's settings, its files as absolute paths."""
-    d = blocks(kind).get(name)
+    found, refused = scan_blocks(kind)
+    d = found.get(name)
     if d is None:
-        raise DeskError(f"no {kind[:-1]} {name!r} (there are: {', '.join(blocks(kind)) or 'none'})")
+        raise DeskError(refused.get(name) or f"no {kind[:-1]} {name!r} (there are: {', '.join(found) or 'none'})")
     data = _toml(d / "block.toml")
 
     def resolve(rel: str) -> str:

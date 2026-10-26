@@ -123,11 +123,18 @@ def _image_show(spec) -> None:
 def _image_blocks() -> None:
     for kind in config.KINDS:
         print(kind)
-        for name, d in config.blocks(kind).items():
-            data = config._toml(d / "block.toml")
+        found, refused = config.scan_blocks(kind)
+        for name, d in found.items():
+            try:
+                data = config._toml(d / "block.toml")
+            except DeskError as e:
+                print(f"  {name:<16}broken: {e}")
+                continue
             also = config.BLOCK_ONLY[kind]
             note = f" ({also}: {', '.join(data[also])})" if also and also in data else ""
             print(f"  {name:<16}{config.describe(d)}{note}")
+        for name, why in refused.items():
+            print(f"  {name:<16}refused: {why}")
 
 
 def _image_list() -> None:

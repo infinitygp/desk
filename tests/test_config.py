@@ -21,7 +21,10 @@ class HostFiles(unittest.TestCase):
         return tmp
 
     def addon(self, name: str, toml: str, **files: str) -> Path:
-        d = CONFIG_DIR / "addons" / name
+        return self.block("addons", name, toml, **files)
+
+    def block(self, kind: str, name: str, toml: str, **files: str) -> Path:
+        d = CONFIG_DIR / kind / name
         d.mkdir(parents=True)
         self.addCleanup(shutil.rmtree, d)
         for f, text in {"block.toml": toml, **files}.items():
@@ -210,6 +213,25 @@ class HostBlocks(HostFiles):
         self.addon("cockpit", "")
         with self.assertRaisesRegex(DeskError, "addon 'cockpit' is defined twice"):
             load_image("fedora-44-gnome-cockpit")
+        self.block("desktops", "gnome", "")
+        with self.assertRaisesRegex(DeskError, "desktop 'gnome' is defined twice"):
+            load_image("fedora-44-gnome")
+        self.assertEqual(load_image("windows-11").name, "windows-11")
+
+    def test_a_name_that_cannot_be_read_back_fails_only_its_images(self):
+        self.addon("my-lang", "")
+        self.block("distros", "fedora", 'desktops = ["44"]\n')
+        self.assertEqual(load_image("fedora-44-gnome-cockpit").name, "fedora-44-gnome-cockpit")
+        self.assertEqual(config.parse_name("fedora-44"), ("fedora-44", None, []))
+        self.images()
+        with self.assertRaisesRegex(DeskError, "my-lang: the name of a desktop or an addon has no '-'"):
+            config.add_image("fedora-44", "gnome", ["my-lang"], {})
+        with self.assertRaisesRegex(DeskError, "fedora: the names of the images of fedora and of fedora-44 can be"):
+            config.add_image("fedora", "44", [], {})
+
+    def test_the_shipped_blocks_are_all_usable(self):
+        for kind in config.KINDS:
+            self.assertEqual(config.scan_blocks(kind)[1], {}, kind)
 
     def test_a_file_that_is_not_there_is_refused(self):
         self.addon("xx", 'provision = "missing.sh"\n')

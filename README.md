@@ -150,7 +150,9 @@ moves the clock forward.
 
 Blocks only one host needs (its language, its hardware) are kept on that host, in
 `~/.config/desk/distros/`, `desktops/` and `addons/` (`$XDG_CONFIG_HOME`), laid out like
-`images/`. desk offers them with the shipped ones. A name is in one of the two places only, and a
+`images/`. desk offers them with the shipped ones. A name is in one of the two places only; a
+name desk cannot use (in both places, a desktop's or an addon's with a '-', a distro's that with a
+'-' begins another's) fails only the images that use it, and `desk image blocks` says why. A
 block moved from one to the other keeps its builds: fingerprints name files within their root,
 as they do for a checkout and a release of the same commit. A desk before
 blocks kept a directory per image in `~/.config/desk/images/`; desk refuses those until their

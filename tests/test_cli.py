@@ -220,3 +220,12 @@ class ImageCommands(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertRegex(out, r"distros\n(  .*\n)*  fedora-44 +Fedora 44\b.*\(desktops: gnome, kde\b")
         self.assertRegex(out, r"addons\n(  .*\n)*  cockpit +Cockpit.*\(distros: fedora-44\)")
+        own = config.CONFIG_DIR / "addons" / "my-lang"
+        own.mkdir(parents=True)
+        self.addCleanup(own.rmdir)
+        (own / "block.toml").touch()
+        self.addCleanup((own / "block.toml").unlink)
+        code, out, _ = self.desk("image", "blocks")
+        self.assertEqual(code, 0)
+        self.assertRegex(out, r"  cockpit +Cockpit")
+        self.assertRegex(out, r"  my-lang +refused: .*my-lang: the name of a desktop or an addon has no '-'")
