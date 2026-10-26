@@ -70,10 +70,7 @@ def cmd_image(args) -> None:
               "(desk maintain makes the builds it needs)")
         return
     if args.image_cmd == "rm":
-        try:
-            variant = load_image(args.name).base is not None
-        except DeskError:
-            variant = False  # a broken definition is removed all the same
+        variant = config.base_of(args.name) is not None
         config.remove_image(args.name)
         # NAME and NAME.VERSION: NAME* is also the builds of the images whose names begin with it.
         builds = ", ".join(f"{d / args.name}, {d / args.name}.*" for d in ((WARM,) if variant else (BASE, WARM)))

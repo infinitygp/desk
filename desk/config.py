@@ -611,23 +611,30 @@ def set_image(name: str, settings: dict) -> None:
         raise
 
 
+def base_of(name: str) -> str | None:
+    """The image whose install an image runs on; of one whose file does not load, what its name says."""
+    try:
+        return load_image(name).base
+    except DeskError:
+        pass
+    try:
+        parts = parse_name(name)
+    except DeskError:
+        return None
+    if not parts or not parts[2]:
+        return None
+    try:
+        return variant_of(*parts)
+    except DeskError:
+        # Its addon is gone: a variant it may have been still has its builds on that install.
+        return image_name(parts[0], parts[1], [])
+
+
 def remove_image(name: str) -> None:
     """Remove an image's file, a broken one too, unless another image runs on its install."""
     if not _image_file(name).is_file():
         raise DeskError(_unknown(name))
-    users = []
-    for other in list_images():
-        try:
-            if load_image(other).base == name:
-                users.append(other)
-        except DeskError:
-            # One whose blocks are gone (an addon deleted) still names its base by its blocks.
-            try:
-                data = read_image(other)
-            except DeskError:
-                continue
-            if data["addons"] and image_name(data["distro"], data["desktop"], []) == name:
-                users.append(other)
+    users = [other for other in list_images() if other != name and base_of(other) == name]
     if users:
         raise DeskError(f"{', '.join(users)} runs on the install of {name}; "
                         f"remove {'it' if len(users) == 1 else 'them'} first")

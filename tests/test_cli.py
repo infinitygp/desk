@@ -196,6 +196,12 @@ class ImageCommands(unittest.TestCase):
         code, out, _ = self.desk("image", "rm", "fedora-44-gnome")
         base, warm = config.BASE / "fedora-44-gnome", config.WARM / "fedora-44-gnome"
         self.assertIn(f"({base}, {base}.*, {warm}, {warm}.*)\n", out)
+        # A variant whose file is broken has warm builds only all the same.
+        self.assertEqual(self.desk("image", "add", "fedora-44", "gnome", "--addon", "cockpit")[0], 0)
+        (self.images / "fedora-44-gnome-cockpit.toml").write_text("distro = \n")
+        code, out, _ = self.desk("image", "rm", "fedora-44-gnome-cockpit")
+        warm = config.WARM / "fedora-44-gnome-cockpit"
+        self.assertIn(f"({warm}, {warm}.*)\n", out)
 
     def test_a_broken_definition_hides_no_other(self):
         self.assertEqual(self.desk("image", "add", "arch", "gnome")[0], 0)
@@ -250,3 +256,10 @@ class ImageCommands(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertRegex(out, r"  cockpit +Cockpit")
         self.assertRegex(out, r"  my-lang +refused: .*my-lang: the name of a desktop or an addon has no '-'")
+        (own.parent / "xx").mkdir()
+        self.addCleanup((own.parent / "xx").rmdir)
+        (own.parent / "xx" / "block.toml").write_text("distros = \n")
+        self.addCleanup((own.parent / "xx" / "block.toml").unlink)
+        code, out, _ = self.desk("image", "blocks")
+        self.assertEqual(code, 0)
+        self.assertRegex(out, r"  xx +broken: .*block.toml: not valid TOML")

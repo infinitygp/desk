@@ -133,9 +133,22 @@ class Definitions(HostFiles):
         with self.assertRaisesRegex(DeskError, "fedora-44-gnome-gone runs on the install of fedora-44-gnome"):
             config.remove_image("fedora-44-gnome")
         config.remove_image("fedora-44-gnome-gone")
+        # A variant with a value of another type, and one whose file is not TOML, likewise.
+        config.add_image("fedora-44", "gnome", ["cockpit"], {})
+        for text in ('distro = "fedora-44"\ndesktop = "gnome"\naddons = ["cockpit"]\nmemory_mib = "8G"\n', "distro = \n"):
+            (images / "fedora-44-gnome-cockpit.toml").write_text(text)
+            with self.assertRaisesRegex(DeskError, "fedora-44-gnome-cockpit runs on the install of fedora-44-gnome"):
+                config.remove_image("fedora-44-gnome")
+        config.remove_image("fedora-44-gnome-cockpit")
+        # One that is an install of its own does not, broken or not.
+        self.addon("yy", 'install = ["i.sh"]\n', **{"i.sh": "true\n"})
+        config.add_image("fedora-44", "gnome", ["yy"], {})
+        (images / "fedora-44-gnome-yy.toml").write_text('distro = "fedora-44"\ndesktop = "gnome"\naddons = ["yy"]\n'
+                                                       'timezone = "Nowhere/Else"\n')
         (images / "x.toml").write_text("distro = \n")
         config.remove_image("x")
         config.remove_image("fedora-44-gnome")
+        config.remove_image("fedora-44-gnome-yy")
         self.assertEqual(list_images(), [])
 
     def test_an_images_file_names_blocks_and_sets_sizes(self):
