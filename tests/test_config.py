@@ -119,6 +119,21 @@ class Definitions(HostFiles):
         config.remove_image("fedora-44-gnome-cockpit")
         config.remove_image("fedora-44-gnome")
         self.assertEqual(list_images(), [])
+        with self.assertRaisesRegex(DeskError, "unknown image|not defined on this host"):
+            config.remove_image("fedora-44-gnome")
+
+    def test_rm_of_a_broken_definition(self):
+        images = self.images()
+        config.add_image("fedora-44", "gnome", [], {})
+        # A variant whose addon was deleted still runs on its base's install.
+        (images / "fedora-44-gnome-gone.toml").write_text('distro = "fedora-44"\ndesktop = "gnome"\naddons = ["gone"]\n')
+        with self.assertRaisesRegex(DeskError, "fedora-44-gnome-gone runs on the install of fedora-44-gnome"):
+            config.remove_image("fedora-44-gnome")
+        config.remove_image("fedora-44-gnome-gone")
+        (images / "x.toml").write_text("distro = \n")
+        config.remove_image("x")
+        config.remove_image("fedora-44-gnome")
+        self.assertEqual(list_images(), [])
 
     def test_an_images_file_names_blocks_and_sets_sizes(self):
         images = self.images()
