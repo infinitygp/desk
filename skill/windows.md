@@ -6,7 +6,8 @@ Part of the desk skill ([SKILL.md](SKILL.md)); the commands and pitfalls there a
 
 - `desk exec -- CMD` runs PowerShell as `tester`, who is an administrator with a full token, so
   `--root` changes nothing; `desk exec --agent -- CMD` runs as SYSTEM (session 0, no desktop).
-  Quoting is safe: commands reach PowerShell encoded.
+  Quoting is safe: commands reach PowerShell encoded. An exit code outside 0-255 (-196608 from
+  `powershell -File` with a missing script, 0xC0000135) is printed in full and desk exits 1.
 - Open Win32 menus (context menus, a window's system menu) show up as a focused window "menu"
   whose `menu item`s, disabled ones marked, `desk click --name ... --role "menu item"` clicks;
   they come from MSAA, as UI Automation does not see them.

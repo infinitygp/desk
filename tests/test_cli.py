@@ -79,6 +79,14 @@ class Exec(unittest.TestCase):
         self.assertEqual(self.exec(255), 255)
         self.assertEqual(self.exec(3), 3)
 
+    def test_a_code_that_does_not_fit_an_exit_status_is_said_and_fails(self):
+        # Windows' codes: PowerShell's for a missing -File would otherwise end as 0, a success.
+        for code, said in ((-196608, "0xFFFD0000"), (3221225781, "0xC0000135")):
+            with self.subTest(code=code), mock.patch("sys.stderr") as err:
+                self.assertEqual(cli._exit_status(code), 1)
+            self.assertIn(f"exit code {code} ({said}) does not fit", "".join(c.args[0] for c in err.write.call_args_list))
+        self.assertEqual(cli._exit_status(255), 255)
+
 
 class ScenarioFrom(unittest.TestCase):
     def test_from_0_is_refused_not_a_fresh_run(self):

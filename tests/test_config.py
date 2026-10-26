@@ -341,6 +341,15 @@ class WindowsCommands(unittest.TestCase):
         encoded = command.split("-EncodedCommand ")[1].split(";")[0]
         self.assertIn('Write-Output "Zażółć"', base64.b64decode(encoded).decode("utf-16-le"))
 
+    def test_windows_codes_that_do_not_fit_an_exit_status_fail(self):
+        import base64
+
+        # ssh would keep the last byte of -196608: 0, a success.
+        command = load_image("windows-11").cmd("& powershell.exe -File missing.ps1")
+        self.assertIn("if ($LASTEXITCODE -lt 0 -or $LASTEXITCODE -gt 255) { exit 1 }; exit $LASTEXITCODE", command)
+        script = base64.b64decode(command.split("-EncodedCommand ")[1].split(";")[0]).decode("utf-16-le")
+        self.assertIn("'desk: exit code {0} (0x{0:X8}) does not fit an exit status: exit 1' -f $LASTEXITCODE", script)
+
     def test_a_time_limit_is_kept_in_the_guest(self):
         import base64
 

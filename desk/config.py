@@ -256,6 +256,8 @@ class ImageSpec:
         # login shell (PowerShell, whose -c would exit 1 for any failure) passes the code on.
         # An SSH subsystem would not save the outer PowerShell: Windows OpenSSH starts
         # subsystems through the default shell too, and loses their exit codes and output.
+        # A code outside 0-255 (PowerShell's -196608 for a missing -File, 0xC0000135) would
+        # reach the host as its last byte, often 0: it is said and becomes 1.
         script = (
             "$ProgressPreference = 'SilentlyContinue'; [Console]::OutputEncoding = [Text.Encoding]::UTF8\n"
             "$global:LASTEXITCODE = 0; $script:deskFailed = $false\n"
@@ -264,11 +266,16 @@ class ImageSpec:
             "    [Console]::Error.WriteLine($_.ToString()); $script:deskFailed = $true\n"
             "  } else { $_ }\n"
             "} | Out-String -Stream\n"
+            "if ($LASTEXITCODE -lt 0 -or $LASTEXITCODE -gt 255) {\n"
+            "  [Console]::Error.WriteLine(('desk: exit code {0} (0x{0:X8}) does not fit an exit status: exit 1'"
+            " -f $LASTEXITCODE)); exit 1\n"
+            "}\n"
             "if ($LASTEXITCODE) { exit $LASTEXITCODE }; if ($script:deskFailed) { exit 1 }\n"
         )
         encoded = base64.b64encode(script.encode("utf-16-le")).decode()
+        # The snippet's own `exit N` ends the inner PowerShell with N unchecked.
         return (f"powershell.exe -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand {encoded}; "
-                "exit $LASTEXITCODE")
+                "if ($LASTEXITCODE -lt 0 -or $LASTEXITCODE -gt 255) { exit 1 }; exit $LASTEXITCODE")
 
     @property
     def shell(self) -> str:

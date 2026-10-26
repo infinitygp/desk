@@ -452,7 +452,8 @@ logs are, memory, swap, other runs), since a full disk that ends QEMU shows in t
   `wait`, `browser open`, `doctor`). 2: desk could not do what was asked; one line says why, also
   when a host tool, libvirt or the disk failed (`DESK_DEBUG=1` adds the traceback). 130:
   interrupted. `desk exec` passes on the guest command's code, 124 when it ran out of time
-  (`push`/`pull` too).
+  (`push`/`pull` too), and 1 for a code an exit status cannot hold (Windows' -196608 or
+  0xC0000135), which it prints in full: as its last byte -196608 would read as success.
 - The state lock (`<home>/.lock`) is held while a domain is started or destroyed, not while a
   guest boots or a report is written, so a cold boot does not hold up other runs. A command that
   waits for a lock says who holds it and gives up after 15 minutes (an image's lock: 6 hours; the

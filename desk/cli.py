@@ -551,6 +551,15 @@ def _exec_stopped(run, limit: float) -> None:
     sys.exit(124)
 
 
+def _exit_status(code: int) -> int:
+    """A guest's exit code as an exit status, which holds 0-255: Windows' -196608 would end as its
+    last byte, 0, and read as success. The guest's own wrapper does the same over SSH."""
+    if 0 <= code <= 255:
+        return code
+    print(f"desk: exit code {code} (0x{code & 0xFFFFFFFF:08X}) does not fit an exit status: exit 1", file=sys.stderr)
+    return 1
+
+
 def cmd_exec(args) -> None:
     run = runs.resolve(args.run)
     limit = EXEC_TIMEOUT if args.timeout is None else (args.timeout or None)
@@ -567,7 +576,7 @@ def cmd_exec(args) -> None:
         sys.stdout.buffer.write(out)
         sys.stderr.buffer.write(err)
         run.log_event(rc=code)
-        sys.exit(code)
+        sys.exit(_exit_status(code))
     if args.root and args.gui:
         raise DeskError("--gui starts programs in the desktop user's session; drop --root")
     if args.gui:
@@ -607,7 +616,7 @@ def cmd_exec(args) -> None:
             guest.lost(r, run.ssh_port, run.user, f"exec {argv[0][:60]!r}")
             code = r.returncode
         run.log_event(rc=code)
-        sys.exit(code)
+        sys.exit(_exit_status(code))
     if args.gui:
         # Returns once the program has drawn something (or after the timeout), on every guest:
         # the screen is compared with how it looked before the start, not after.
