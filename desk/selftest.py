@@ -203,9 +203,16 @@ def run_selftest(image: str, reboot: bool = False, keep: bool = False, spec: Ima
             _launch(run, sc["editor"], sc["editor_window"])
         display.type_text(run.dom(), text, layout=layout)
         display.wait_stable(run.dom())
-        value = _node(run, sc["editor_role"])["value"]
-        _check(value == text, f"editor holds {value!r}")
-        return f"{len(text)} characters"
+        # An editor busy for a moment (Windows right after a restore) can answer UI Automation before
+        # it takes the keys waiting for it: what it holds within 10 s counts, and the step says so.
+        settled = time.monotonic()
+        first = value = _node(run, sc["editor_role"])["value"]
+        while value != text and time.monotonic() < settled + 10:
+            time.sleep(1)
+            value = _node(run, sc["editor_role"])["value"]
+        late = time.monotonic() - settled
+        _check(value == text, f"editor holds {value!r}" + (f", {first!r} {late:.0f} s before" if first != value else ""))
+        return f"{len(text)} characters" + (f", the last {late:.0f} s after the screen settled" if first != text else "")
 
     def do_reboot():
         took, inhibitors = guest.reboot(run.ssh_port, spec)
