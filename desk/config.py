@@ -4,6 +4,8 @@ import os
 import subprocess
 import sys
 import tomllib
+import types
+import typing
 from dataclasses import dataclass
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -451,6 +453,8 @@ def read_image(name: str) -> dict:
         raise DeskError(f"{f}: no distro")
     data.setdefault("desktop", None)
     data.setdefault("addons", [])
+    if not _fits(data["desktop"], str | None) or not _fits(data["addons"], list[str]):
+        raise DeskError(f"{f}: desktop is the name of a block, addons a list of names")
     want = image_name(data["distro"], data["desktop"], data["addons"])
     if want != name:
         raise DeskError(f"{f}: its blocks make the image {want}, so the file is {_image_file(want).name}")
@@ -458,7 +462,26 @@ def read_image(name: str) -> dict:
     if wrong:
         raise DeskError(f"{f}: an image's file names its blocks and sets sizes and the like, not {', '.join(wrong)}"
                         " (a block of the host's own holds files)")
+    # The file may be edited by hand: a value of another type would fail only once a build or run uses it.
+    hints = typing.get_type_hints(ImageSpec)
+    for key, value in data.items():
+        if key not in ("distro", "desktop", "addons") and key in hints and not _fits(value, hints[key]):
+            shown = json.dumps(value, ensure_ascii=False, default=str)
+            raise DeskError(f"{f}: {key} = {shown} is not {_type_name(hints[key])}")
     return data
+
+
+def _fits(value, hint) -> bool:
+    """Whether a value read from TOML is of a setting's type; true is no number here."""
+    if isinstance(hint, types.UnionType):
+        return any(_fits(value, h) for h in typing.get_args(hint))
+    if typing.get_origin(hint) is list:
+        return isinstance(value, list) and all(_fits(v, typing.get_args(hint)[0]) for v in value)
+    return type(value) is hint
+
+
+def _type_name(hint) -> str:
+    return hint.__name__ if isinstance(hint, type) else str(hint)
 
 
 def load_image(name: str) -> ImageSpec:

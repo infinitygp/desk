@@ -131,6 +131,18 @@ class Definitions(HostFiles):
         (images / "fedora-44-gnome.toml").write_text('distro = "fedora-44"\ndesktop = "gnome"\nwallpaper = "x"\n')
         with self.assertRaisesRegex(DeskError, "wallpaper"):
             load_image("fedora-44-gnome")
+        for text, why in (('desktop = 5\n', "desktop is the name of a block"),
+                          ('desktop = "gnome"\naddons = "cockpit"\n', "addons a list of names"),
+                          ('desktop = "gnome"\nmemory_mib = "lots"\n', 'memory_mib = "lots" is not int'),
+                          ('desktop = "gnome"\nvcpus = 2.5\n', "vcpus = 2.5 is not int"),
+                          ('desktop = "gnome"\nvcpus = true\n', "vcpus = true is not int"),
+                          ('desktop = "gnome"\nrebuild_days = "7"\n', 'rebuild_days = "7" is not int | None')):
+            (images / "fedora-44-gnome.toml").write_text(f'distro = "fedora-44"\n{text}')
+            with self.assertRaisesRegex(DeskError, why):
+                load_image("fedora-44-gnome")
+        (images / "fedora-44-gnome.toml").write_text('distro = "fedora-44"\ndesktop = "gnome"\nrebuild_days = 7\n'
+                                                     'secure_boot = false\nlayout = "pl"\n')
+        self.assertEqual(load_image("fedora-44-gnome").rebuild_days, 7)
 
     def test_what_it_writes_reads_back(self):
         self.images()

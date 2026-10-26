@@ -194,10 +194,12 @@ class ImageCommands(unittest.TestCase):
     def test_a_broken_definition_hides_no_other(self):
         self.assertEqual(self.desk("image", "add", "arch", "gnome")[0], 0)
         (self.images / "fedora-44-twm.toml").write_text('distro = "fedora-44"\ndesktop = "twm"\n')
+        (self.images / "fedora-44-gnome.toml").write_text('distro = "fedora-44"\ndesktop = 5\n')
         code, out, _ = self.desk("image", "list")
         self.assertEqual(code, 0)
         self.assertRegex(out, r"arch-gnome +- ")
         self.assertRegex(out, r"fedora-44-twm +- .*broken definition: fedora-44 needs one of the desktops gnome")
+        self.assertRegex(out, r"fedora-44-gnome +- .*broken definition: .*desktop is the name of a block")
 
     def test_what_blocks_do_not_make_is_refused(self):
         code, _, err = self.desk("image", "add", "windows-11", "gnome")
