@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from desk import cli, guest
+from desk import cli, config, guest
 from desk.cli import _cpus_arg, _memory_arg, _text_args, explain
 
 
@@ -188,8 +188,14 @@ class ImageCommands(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("set disk_gb there", err)
         self.assertEqual(self.desk("image", "set", "fedora-44-gnome")[0], 2)
-        self.assertEqual(self.desk("image", "rm", "fedora-44-gnome-cockpit")[0], 0)
+        code, out, _ = self.desk("image", "rm", "fedora-44-gnome-cockpit")
+        self.assertEqual(code, 0)
+        warm = config.WARM / "fedora-44-gnome-cockpit"
+        self.assertIn(f"its builds stay until deleted by hand ({warm}, {warm}.*)\n", out)
         self.assertEqual(sorted(p.name for p in self.images.iterdir()), ["fedora-44-gnome.toml"])
+        code, out, _ = self.desk("image", "rm", "fedora-44-gnome")
+        base, warm = config.BASE / "fedora-44-gnome", config.WARM / "fedora-44-gnome"
+        self.assertIn(f"({base}, {base}.*, {warm}, {warm}.*)\n", out)
 
     def test_a_broken_definition_hides_no_other(self):
         self.assertEqual(self.desk("image", "add", "arch", "gnome")[0], 0)

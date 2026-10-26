@@ -73,7 +73,8 @@ def cmd_image(args) -> None:
         except DeskError:
             variant = False  # a broken definition is removed all the same
         config.remove_image(args.name)
-        builds = f"{WARM / args.name}*" if variant else f"{BASE / args.name}*, {WARM / args.name}*"
+        # NAME and NAME.VERSION: NAME* is also the builds of the images whose names begin with it.
+        builds = ", ".join(f"{d / args.name}, {d / args.name}.*" for d in ((WARM,) if variant else (BASE, WARM)))
         print(f"removed {args.name}; its builds stay until deleted by hand ({builds})")
         return
     spec = load_image(args.name)
