@@ -465,6 +465,14 @@ def load_image(name: str) -> ImageSpec:
     data = read_image(name)
     distro, desktop, addons = data.pop("distro"), data.pop("desktop"), data.pop("addons")
     d_dir, layers, extra = _layers(distro, desktop, addons)
+    base = variant_of(distro, desktop, addons)
+    if base:
+        own = sorted(k for k in data if k in INSTALL_KEYS)
+        if own:
+            raise DeskError(f"{name} runs on the install of {base}: set {', '.join(own)} there")
+        # A variant runs on its base's install, so it has what the base's file sets too, under
+        # what its addons and its own file set.
+        layers.append({k: v for k, v in read_image(base).items() if k not in ("distro", "desktop", "addons")})
     spec: dict = {}
     for layer in layers + extra:
         for key, value in layer.items():
@@ -474,13 +482,7 @@ def load_image(name: str) -> ImageSpec:
                 raise DeskError(f"{name}: two of its blocks bring a prepare script")
             else:
                 spec[key] = value
-    base = variant_of(distro, desktop, addons)
     if base:
-        # A variant runs on its base's install, so it has its sizes too unless it sets its own.
-        own = sorted(k for k in data if k in INSTALL_KEYS)
-        if own:
-            raise DeskError(f"{name} runs on the install of {base}: set {', '.join(own)} there")
-        spec.update({k: v for k, v in read_image(base).items() if k not in ("distro", "desktop", "addons")})
         spec["base"] = base
     spec.update(data)
     spec.setdefault("layout", LAYOUT)

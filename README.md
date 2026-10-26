@@ -137,8 +137,9 @@ The settings that shape a run:
 
 An image whose addons only add to the warm state (provisioning, files, a prepare script) is a
 variant: it runs on the install of the image without them, which `desk image add` defines too when
-it is missing, and has a warm state of its own. It takes that image's settings unless it sets its
-own; an install setting (`disk_gb`) is set there only.
+it is missing, and has a warm state of its own. What that image's file sets comes between the
+desktop and the addons, so the variant's addons and its own file win over it; an install setting
+(`disk_gb`) is set there only.
 
 `prepare = "prepare.py"` runs `prepare(steps)` on the host once the provisioned session is up,
 before the warm state is saved (and after cold boots): what a user does before the tests start,

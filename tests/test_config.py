@@ -160,6 +160,17 @@ class HostBlocks(HostFiles):
         self.assertEqual(xx.provision_scripts[-1], str(d / "provision.sh"))
         self.assertEqual(config.describe(d), "Another language.")
 
+    def test_a_variants_addons_win_over_its_bases_file(self):
+        self.addon("xx", 'memory_mib = 8192\nlayout = "pl"\n')
+        self.images()
+        config.add_image("fedora-44", "gnome", ["xx"], {})
+        config.set_image("fedora-44-gnome", {"memory_mib": 6144, "vcpus": 3, "disk_gb": 60})
+        config.write_image("fedora-44-gnome", {**config.read_image("fedora-44-gnome"), "layout": "us"})
+        xx = load_image("fedora-44-gnome-xx")
+        self.assertEqual((xx.memory_mib, xx.layout, xx.vcpus, xx.disk_gb), (8192, "pl", 3, 60))
+        config.set_image("fedora-44-gnome-xx", {"memory_mib": 4096})
+        self.assertEqual(load_image("fedora-44-gnome-xx").memory_mib, 4096)
+
     def test_an_addon_that_installs_is_an_install_of_its_own(self):
         self.addon("xx", 'install = ["install.sh"]\n', **{"install.sh": "true\n"})
         self.images()
