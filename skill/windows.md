@@ -8,6 +8,10 @@ Part of the desk skill ([SKILL.md](SKILL.md)); the commands and pitfalls there a
   `--root` changes nothing; `desk exec --agent -- CMD` runs as SYSTEM (session 0, no desktop).
   Quoting is safe: commands reach PowerShell encoded. An exit code outside 0-255 (-196608 from
   `powershell -File` with a missing script, 0xC0000135) is printed in full and desk exits 1.
+- Windows PowerShell 5.1 then passes arguments to programs its own way: it splits an unquoted
+  `-name.x=1` at the dot (`./pkg.test.exe -test.count=1` gets `-test .count=1`; write
+  `'-test.count=1'`), and drops the double quotes inside one (`curl.exe -d '{"a":1}'` sends
+  `{a:1}`; write `'{\"a\":1}'` or pass a file, `-d '@C:/x.json'`).
 - Open Win32 menus (context menus, a window's system menu) show up as a focused window "menu"
   whose `menu item`s, disabled ones marked, `desk click --name ... --role "menu item"` clicks;
   they come from MSAA, as UI Automation does not see them.
