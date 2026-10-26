@@ -39,8 +39,10 @@ def cmd_image(args) -> None:
 
             from .virt import conn
 
+            # By its version too: fedora-44-gnome- begins the install of fedora-44-gnome-cockpit as well.
+            install = re.compile(rf"desk-install-{re.escape(spec.name)}-\d{{8}}-\d{{6}}")
             dom = next((d for d in conn().listAllDomains(libvirt.VIR_CONNECT_LIST_DOMAINS_ACTIVE)
-                        if d.name().startswith(f"desk-install-{spec.name}-")), None)
+                        if install.fullmatch(d.name())), None)
         if dom is None or not dom.isActive():
             raise DeskError(f"no install of {spec.name} is running")
         out = Path(images.LOGS) / f"{images.build_domain_name(spec)}-{int(time.time())}.png"

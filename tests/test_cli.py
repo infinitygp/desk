@@ -207,6 +207,27 @@ class ImageCommands(unittest.TestCase):
         self.assertRegex(out, r"fedora-44-twm +- .*broken definition: fedora-44 needs one of the desktops gnome")
         self.assertRegex(out, r"fedora-44-gnome +- .*broken definition: .*desktop is the name of a block")
 
+    def test_shot_of_an_install_is_of_that_image(self):
+        import shutil
+        import tempfile
+
+        self.assertEqual(self.desk("image", "add", "fedora-44", "gnome")[0], 0)
+        doms = [mock.Mock(**{"name.return_value": n, "isActive.return_value": True})
+                for n in ("desk-install-fedora-44-gnome-xx-20261025-030135",
+                          "desk-install-fedora-44-gnome-20261025-024826")]
+        logs = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, logs)
+        libvirt = mock.Mock(**{"listAllDomains.return_value": doms})
+        with mock.patch("desk.virt.lookup", return_value=None), mock.patch("desk.virt.conn", return_value=libvirt), \
+                mock.patch("desk.cli.display.screenshot", return_value=b"png") as shot, \
+                mock.patch("desk.images.LOGS", logs):
+            self.assertEqual(self.desk("image", "shot", "fedora-44-gnome")[0], 0)
+            shot.assert_called_once_with(doms[1])
+            libvirt.listAllDomains.return_value = doms[:1]
+            code, _, err = self.desk("image", "shot", "fedora-44-gnome")
+            self.assertEqual(code, 2)
+            self.assertIn("no install of fedora-44-gnome is running", err)
+
     def test_what_blocks_do_not_make_is_refused(self):
         code, _, err = self.desk("image", "add", "windows-11", "gnome")
         self.assertEqual(code, 2)
