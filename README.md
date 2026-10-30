@@ -461,8 +461,9 @@ orchestration (`desk/observe/__init__.py`) keeps the session and its guarantees:
   (`C:\desk\observe\<run>-<sN>`, `desk_<run>_<sN>`).
 - What runs in the guest goes through one helper, `helper.ps1`, pushed when its SHA-256 differs
   and run as a script block (no execution policy applies), over the same SSH as `desk exec`, with
-  the time limit kept in the guest. Captures are started detached from the SSH session, never
-  through the in-session agent, which serves one request at a time. Processes are told apart by
+  the time limit kept in the guest. Captures are started detached from the SSH session and with
+  none of its handles (through ShellExecute: with its output redirected a capture would hold the
+  pipe SSH reads, and its start would wait for its end), never through the in-session agent, which serves one request at a time. Processes are told apart by
   PID and creation time, as Windows reuses PIDs.
 - desk stops only what it started: a ProcMon or packet capture it did not start makes `start`
   refuse, `procmon /Terminate` (which ends every instance) runs only while desk's is alone, WPR
@@ -474,8 +475,9 @@ orchestration (`desk/observe/__init__.py`) keeps the session and its guarantees:
   as its format (`formats.py`: PML header and tables, pcap and pcapng record by record, ETL only
   as there and not empty). A file that is not whole stays on the host marked so, one that could
   not be copied stays in the guest, and the session is not complete; exit 2, desk's failure.
-- Lost events are what the trace session reported (Get-EtwTraceSession) before it stopped; where
-  it reports none the report says they were not measured.
+- Lost events are what the trace session counted before it stopped (ControlTrace's query:
+  EventsLost, LogBuffersLost, RealTimeBuffersLost; the session's CIM class holds only its settings);
+  where Windows does not answer, the report says they were not measured.
 - Clocks: the guest's time is sampled through qemu-guest-agent at start, every mark and stop, so
   guest times are moved onto the host's, which the timeline, screenshots and video use. A mark
   writes a file the guest's file system sees (ProcMon, file I/O traces) and an event of the
