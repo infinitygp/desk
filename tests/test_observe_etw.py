@@ -130,6 +130,7 @@ class Logman(Base):
         with self.assertRaisesRegex(observe.ObserveError, r"logman.exe exit -2147024891 \(0x80070005\): Access is denied"):
             self.start("etw", options={"providers": ["A"]})
         self.assertEqual(Store(self.run).find("s1").state, "failed")
+        self.assertIn(["C:\\desk\\observe\\r1-s1"], [c["paths"] for c in self.guest.ops("remove")][-1:])
 
     def test_without_logman_or_elevation(self):
         self.guest.commands["logman.exe"] = None

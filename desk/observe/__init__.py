@@ -253,6 +253,9 @@ def start(run, name: str, label: str | None = None, options: dict | None = None,
             p.cleanup(guest, s, host)
             if s.watchdog:
                 guest.stop_process(s.watchdog)
+            if s.guest_dir:
+                # Nothing in it is a capture: a preallocated log at most (ProcMon's 256 MiB).
+                guest.remove(s.guest_dir)
         except Exception as cleanup_error:  # noqa: BLE001 - the error that stopped the start is the one to report
             s.event("cleanup failed", str(cleanup_error))
             print(f"[desk] warning: cleaning up after the failed start: {cleanup_error}", file=sys.stderr)
