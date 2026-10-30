@@ -287,8 +287,9 @@ def logman_markers_and_processes():
     host = CiHost()
     p.preflight(g, s, host)
     p.start(g, s, host)
-    names = g.call("etw", names=[]).get("names") or []
-    assert s.tool["name"] in names, f"{s.tool['name']} not among the ETW sessions"
+    etw = g.call("etw", names=[s.tool["name"]])
+    assert s.tool["name"] in (etw.get("names") or []), f"{s.tool['name']} not among the ETW sessions"
+    props = sorted((etw.get("sessions") or {}).get(s.tool["name"]) or {})
     manifest = run_workload("ci01", "process")
     g.call("mark", path=win(GROOT, "marks", "mark-ci01.txt"), text="ci01", source=MARKER_SOURCE, event="DeskMark1")
     s.stats.update(p.sample(g, s))
@@ -301,7 +302,7 @@ def logman_markers_and_processes():
     assert check["ok"], check
     assert s.stats.get("tracerpt", {}).get("rc") == 0, s.stats.get("tracerpt")
     said = expect(manifest, "--tracerpt-csv", str(local / "events.csv"))
-    return "PASS", f"lost: {s.stats.get('lost', 'not reported')}; {said}"
+    return "PASS", f"lost: {s.stats.get('lost', 'not reported')}; session properties: {props}; {said}"
 
 
 @case("CI-P-02")
@@ -347,6 +348,8 @@ def pktmon_capture():
     names = g.call("etw", names=[]).get("names") or []
     manifest = run_workload("ci04", "dns")
     p.stop(g, s, CiHost())
+    left = [n for n in g.call("etw", names=[]).get("names") or [] if "pktmon" in n.lower()]
+    assert not left, f"still capturing after stop: {left}"
     arts = p.artifacts(s) + p.convert(g, s, CiHost())
     local = Path(os.environ["DESK_HOME"]) / "s4"
     for a in arts:
@@ -366,7 +369,12 @@ def netsh_capture():
     p.start(g, s, CiHost())
     names = g.call("etw", names=[]).get("names") or []
     run_workload("ci05", "dns")
+    from desk.observe.network import NETSH_SESSION, _capturing
+
+    assert _capturing(names, (NETSH_SESSION,)), f"netsh's session not recognised among {names}"
     p.stop(g, s, CiHost())
+    left = g.call("etw", names=[]).get("names") or []
+    assert not _capturing(left, (NETSH_SESSION,)), f"still capturing after stop: {left}"
     info = g.files([p.etl(s)])[p.etl(s)]
     assert info.get("exists") and info.get("size"), f"no ETL: {info}"
     return "PASS", f"{info['size']} bytes; ETW sessions while capturing: {[n for n in names if 'net' in n.lower()]}"

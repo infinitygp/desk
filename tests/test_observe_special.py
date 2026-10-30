@@ -94,6 +94,16 @@ class Pktmon(Base):
         self.assertIn("no PCAPNG: pktmon etl2pcap exit 1", " ".join(observe.provider("pktmon").summary(s)))
 
 
+class SessionNames(unittest.TestCase):
+    def test_a_numbered_session_of_the_tool_counts(self):
+        from desk.observe.network import NETSH_SESSION, PKTMON_SESSION, _capturing
+
+        # As Windows Server 2025 named them (Windows CI).
+        self.assertEqual(_capturing(["NetCfgTrace", "NetTrace-2"], (NETSH_SESSION,)), "NetTrace-2")
+        self.assertEqual(_capturing(["PktMon"], (PKTMON_SESSION,)), "PktMon")
+        self.assertIsNone(_capturing(["NetCfgTrace", "PktMonitor"]))
+
+
 class Netsh(Base):
     def test_filters_and_truncation(self):
         self.start("netsh", options={"filters": ["IPv4.Address=10.0.2.2", "Protocol=TCP"], "truncate": 256}, max_mb=32)

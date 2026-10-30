@@ -21,8 +21,8 @@ from .base import ArtifactSpec, Capability, Conflict, Option, Provider, command,
 from .guestops import ObserveError, win
 from .session import Session
 
-# The ETW session names the tools record under (to tell whether a capture runs already). Taken
-# from what the tools are known to create; desk also reports the tool's own error if it is wrong.
+# The ETW session names the tools record under, to tell whether a capture runs: seen on Windows
+# Server 2025 (Windows CI) as PktMon and NetTrace-2; a name with a -N suffix counts as the same.
 PKTMON_SESSION = "PktMon"
 NETSH_SESSION = "NetTrace"
 _FILTER = re.compile(r"[A-Za-z][A-Za-z0-9.]*=[^\s=]+")
@@ -33,10 +33,9 @@ def _filter(v: str) -> str | None:
 
 
 def _capturing(etw_names, names=(PKTMON_SESSION, NETSH_SESSION)) -> str | None:
-    for n in etw_names or []:
-        if n.lower() in {x.lower() for x in names}:
-            return n
-    return None
+    """The first trace session of these tools' names (NetTrace, NetTrace-2) among `etw_names`."""
+    pattern = re.compile("|".join(re.escape(x) for x in names) + r"(-\d+)?", re.I)
+    return next((n for n in etw_names or [] if pattern.fullmatch(n)), None)
 
 
 class _Capture(Provider):
