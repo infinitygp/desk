@@ -23,20 +23,31 @@ desk down                                  # the report has an Observation secti
 | `procmon` | file system, registry, processes and threads of the whole guest, as PML (`--set csv=true` also CSV) | the user's copy: `desk observe setup procmon ProcessMonitor.zip --accept-eula` (only when the user accepted the Sysinternals licence terms; ask) |
 | `wpr` | ETW by WPR profile (`--set profile=GeneralProfile,CPU.Light`), one ETL | Windows |
 | `etw` | ETW of the providers named (`--set providers=Microsoft-Windows-Kernel-Process:0x10:4`), one ETL, desk's marks as events | Windows |
-| `pktmon` | packets through the network adapters, ETL and PCAPNG; 128 bytes of each packet unless `--set pkt_size=0` | Windows 10 1809+ |
-| `netsh` | packets with netsh's capture filters (`--set filters=IPv4.Address=10.0.2.2`) | Windows |
+| `pktmon` | packets through the network adapters, ETL and PCAPNG; 128 bytes of each packet unless `--set pkt_size=0`; `--max-mb` 32 or more | Windows 10 1809+ |
+| `netsh` | packets with netsh's capture filters (`--set filters=Protocol=UDP`), ETL only (no PCAPNG of it) | Windows |
 | `ipc` | named pipes, TCP and UDP endpoints with their processes, listed at start, every mark and stop | Windows |
-| `usbpcap` | USB packets of one root hub, pcap | USBPcap installed in the guest (driver, reboot); a device handed over with `desk usb add` |
-| `dbgsrv`, `ida` | a debugger server in the guest, forwarded to 127.0.0.1 on the host; desk debugs nothing | Debugging Tools for Windows in the guest; IDA's server set up from the user's IDA |
+| `usbpcap` | USB packets of one root hub with the descriptors of the devices on it, pcap | USBPcap in the guest: its installer's `/S` leaves the driver out, so then `desk exec -- 'Start-Process rundll32.exe -ArgumentList "setupapi.dll,InstallHinfSection DefaultInstall.NTamd64 128 C:\Program Files\USBPcap\USBPcap.inf" -Wait'` and `desk reboot` |
+| `dbgsrv`, `ida` | a debugger server in the guest, forwarded to 127.0.0.1 on the host; desk debugs nothing | Debugging Tools for Windows in the guest; IDA's server set up from the user's IDA (`desk observe setup ida IDA/dbgsrv`; IDA 7: `--set server=win64_remote64.exe`) |
 
+- Start the program with `desk exec --gui` (or a `gui` step): one that `Start-Process` starts in
+  `desk exec` ends with that command.
 - Start before the program does what matters: a capture sees nothing from before its start.
   `--process app.exe` (or `--pid N`) follows that program and its children by PID and creation
-  time; the report lists them, so traces can be filtered by the right PIDs.
+  time; the report lists them, so traces can be filtered by the right PIDs. An image name follows
+  every process of it: `--process powershell.exe` also follows desk's own PowerShell.
 - Every capture stops itself (30 min, 4 GiB unless `--duration`/`--max-mb`), also when desk is
   gone; `desk down` stops and collects whatever is still open. One ProcMon, one packet capture
-  and one WPR at a time per run.
+  and one WPR at a time per run. Sizes seen on a Windows 11 guest: ProcMon unfiltered about
+  5 MiB/s (4 GiB in about 12 minutes), in 256 MiB steps, so `--max-mb` below 256 ends it at once;
+  WPR GeneralProfile 150 MiB in 47 s; WPR FileIO next to ProcMon 1.6 GiB in 2 minutes, as each
+  records the other's writes. A pktmon capture whose traffic outgrew `--max-mb` kept few or no
+  packets while pktmon said none were lost: keep its limit well above the traffic.
 - desk stops only what it started. A ProcMon or packet capture already running in the guest
   makes `start` refuse (exit 2): close it, or report it; never stop it by hand unless you started it.
+- With several captures (ProcMon with others) each `desk observe` command took 30-80 s on a
+  Windows 11 guest, and a mark's listing comes that much later: keep what a mark must see open
+  long enough. Sessions are stopped and copied one by one, so a packet capture still running
+  records desk copying the others' files: stop it first (`desk observe stop LABEL`).
 - `desk observe status` while it runs (file size, lost events); `desk observe list` the sessions.
 - A reboot or a snapshot restore ends or rewinds captures: the session says "interrupted" or
   that what was recorded after the snapshot's moment is gone; `stop` collects what is left.
