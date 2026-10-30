@@ -394,9 +394,15 @@ class ProcMonLife(unittest.TestCase):
     def test_one_that_appears_meanwhile_holds_the_stop_until_force_ends_desks_own_by_pid(self):
         self.start()
         foreign = self.guest.new_proc("Procmon64.exe")
+        first = Store(self.run).find("s1").watchdog
         with self.assertRaisesRegex(observe.Conflict, "besides this session's"):
             self.stop()
-        self.assertEqual(Store(self.run).find("s1").state, "running")
+        held = Store(self.run).find("s1")
+        self.assertEqual(held.state, "running")
+        # The capture goes on, and a watchdog with it: not the one the failed stop ended.
+        self.assertFalse(self.guest.procs[first["pid"]]["alive"])
+        self.assertNotEqual(held.watchdog["pid"], first["pid"])
+        self.assertTrue(self.guest.procs[held.watchdog["pid"]]["alive"])
         s, problems = self.stop(force=True)
         self.assertTrue(foreign["alive"])
         self.assertNotIn(["/AcceptEula", "/Terminate"], self.guest.execs("Procmon64.exe"))

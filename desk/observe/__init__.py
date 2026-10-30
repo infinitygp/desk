@@ -257,10 +257,10 @@ def start(run, name: str, label: str | None = None, options: dict | None = None,
     return s
 
 
-def _watch(guest: Guest, p: Provider, s: Session) -> None:
+def _watch(guest: Guest, p: Provider, s: Session, seconds: float | None = None) -> None:
     """A watchdog in the guest that ends the capture at its limits, also when desk is gone."""
     commands = p.stop_commands(s)
-    seconds = s.limits.get("duration")
+    seconds = seconds or s.limits.get("duration")
     if not seconds or (not commands and not s.tool.get("procs")):
         return
     if not commands:
@@ -483,15 +483,23 @@ def stop(run, ref: str | None = None, force: bool = False, keep_guest: bool = Fa
         s.state, s.pid = "stopping", os.getpid()
         s.event("stopping", reason)
         store.update(s)
+        watchdog_ended = False
         try:
             if live and not gone and (before == "running" or s.tool.get("procs")):
                 if before == "running":
                     s.stats.update(p.sample(guest, s))
                 _end_watchdog(guest, s)
+                watchdog_ended = True
                 p.stop(guest, s, host, force=force)
         except BaseException as e:
             s.state, s.pid = before, 0
             s.event("stop failed", str(e) or type(e).__name__)
+            if watchdog_ended and before == "running" and s.started:
+                # The capture goes on, so its limits do: what is left of its time, from now.
+                try:
+                    _watch(guest, p, s, seconds=max(10.0, s.limits.get("duration", 0) - (time.time() - s.started)))
+                except DeskError as again:
+                    s.event("watchdog gone", f"not started again after the failed stop: {again}")
             store.update(s)
             raise
         problems: list[str] = [f"interrupted: {s.error}"] if before == "interrupted" else []
