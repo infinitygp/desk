@@ -58,6 +58,10 @@ desk down                                  # the report has an Observation secti
   encrypted, loopback traffic does not pass the adapter. IPC listings show endpoints, never the
   data sent through them; `desk observe pipe NAME --send TEXT --read 64` connects to one pipe as a
   client, which the server sees like any client: use it only on the product's own pipes.
+- `ida` asks IDA for a password: desk makes one unless `--set password=` gives it, prints it at
+  start and keeps it in a file only you can read (`desk observe status` names it) until the
+  server stops. It reaches the server through its environment, never a command line, the
+  session or the report; a ProcMon running when the server starts records that environment.
 - Open the files with the user's tools (ProcMon for PML, WPA for ETL, Wireshark for PCAPNG and
   USBPcap's pcap). You cannot read them yourself beyond what the report says of them.
 

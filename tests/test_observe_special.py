@@ -259,6 +259,7 @@ def with_server(fake: FakeWindows, exe: str, port: int) -> None:
     def launch(f, argv, p):
         f.listening[port] = [{"address": "127.0.0.1", "pid": p["pid"]}]
         f.server = argv
+        f.server_env = p["env"]
         p["on_stop"] = lambda f, p: f.listening.pop(port, None)
 
     fake.launchers[Path(exe.replace("\\", "/")).name.lower()] = launch
@@ -319,8 +320,22 @@ class Debuggers(Base):
         del self.guest.disk[exe]  # it comes from the host
         s = self.start("ida", options={"password": "s3cret"})
         self.assertIn(exe, self.guest.pushed)
-        self.assertEqual(self.guest.server, ["-i127.0.0.1", "-p23946", "-Ps3cret"])
+        # In the server's environment, never on a command line, in the session or its report.
+        self.assertEqual(self.guest.server, ["-i127.0.0.1", "-p23946"])
+        self.assertEqual(self.guest.server_env, {"IDA_DBGSRV_PASSWD": "s3cret"})
         self.assertEqual(s.tool["listening"], ["127.0.0.1"])
+        self.assertNotIn("s3cret", json.dumps([params for _, params in self.guest.calls]))
+        self.assertNotIn("s3cret", (self.run.dir / "observe" / "sessions" / f"{s.id}.json").read_text())
+        self.assertEqual(Path(s.tool["password_file"]).read_text().strip(), "s3cret")
+        self.assertEqual(Path(s.tool["password_file"]).stat().st_mode & 0o777, 0o600)
+        s, _ = self.stop()
+        self.assertFalse(Path(s.tool["password_file"]).exists())
+        self.assertIn("password protected: the one given", observe.provider("ida").summary(s))
+        # None given: one desk makes, as long and random as a password should be.
+        s = self.start("ida")
+        made = self.guest.server_env["IDA_DBGSRV_PASSWD"]
+        self.assertGreaterEqual(len(made), 24)
+        self.assertEqual(Path(s.tool["password_file"]).read_text().strip(), made)
         self.stop()
 
 

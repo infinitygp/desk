@@ -157,10 +157,12 @@ class FakeWindows(Guest):
 
     # The helper's operations.
 
-    def call(self, op: str, limit: float = 60, **params):
+    def call(self, op: str, limit: float = 60, secret: str | None = None, **params):
         self.calls.append((op, params))
         if op in self.fail:
             raise self.fail[op]
+        if secret is not None:
+            params = {**params, "secret": secret}
         result = getattr(self, f"op_{op}")(**params)
         if isinstance(result, dict):
             result.setdefault("_now_ms", (time.time() + self.clock_offset) * 1000)
@@ -198,12 +200,12 @@ class FakeWindows(Guest):
             out["usb"] = list(self.usb)
         return out
 
-    def op_launch(self, exe, args, cwd=None):
+    def op_launch(self, exe, args, cwd=None, secret_env=None, secret=None):
         argv = split_windows(args or "")
         name = Path(exe.replace("\\", "/")).name
         if exe not in self.disk and name.lower() not in self.launchers and name.lower() != "powershell.exe":
             raise ObserveError(f"in the guest: launch: {exe} not found")
-        p = self.new_proc(name, argv=argv, exe=exe)
+        p = self.new_proc(name, argv=argv, exe=exe, env={secret_env: secret} if secret_env else {})
         handler = self.launchers.get(name.lower())
         if handler:
             handler(self, argv, p)

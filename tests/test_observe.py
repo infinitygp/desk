@@ -109,6 +109,33 @@ class Formats(unittest.TestCase):
         self.assertFalse(formats.check(Path("/nonexistent/x"), "pml")["ok"])
 
 
+class SecretChannel(unittest.TestCase):
+    def test_a_password_given_on_the_command_line_stays_out_of_the_timeline(self):
+        from desk.runs import logged_argv
+
+        self.assertEqual(logged_argv(["-r", "x", "observe", "start", "ida", "--set", "password=hunter2", "--set",
+                                      "port=5000", "--set=password=hunter2"]),
+                         ["-r", "x", "observe", "start", "ida", "--set", "password=(hidden)", "--set", "port=5000",
+                          "--set=password=(hidden)"])
+        self.assertEqual(logged_argv(["exec", "--", "echo password=1"]), ["exec", "--", "echo password=1"])
+
+    def test_a_secret_goes_on_standard_input_never_into_the_guests_command_line(self):
+        sent = []
+
+        class Recording(guestops.Guest):
+            def _powershell(self, script, limit, stdin=None):
+                sent.append((script, stdin))
+                return 0, '@@desk-observe@@{"ok": true, "result": {"pid": 1, "created": 2, "exited": false}}', ""
+
+        Recording().launch("C:\\x\\server.exe", ["-p1"], secret_env=("PASS", "hunter2-xyz"))
+        script, stdin = sent[0]
+        self.assertEqual(stdin, b"hunter2-xyz\n")
+        self.assertNotIn("hunter2-xyz", script)
+        payload = json.loads(base64.b64decode(script.split("-Request '")[1].split("'")[0]))
+        self.assertEqual((payload["secret_env"], "hunter2-xyz" in json.dumps(payload)), ("PASS", False))
+        self.assertIn("[Console]::In.ReadLine()", script)
+
+
 class Protocol(unittest.TestCase):
     """How desk talks to the helper: one request in, one tagged JSON line out."""
 
@@ -136,7 +163,7 @@ class Protocol(unittest.TestCase):
             def __init__(self, answers):
                 self.answers, self.pushed = list(answers), []
 
-            def _powershell(self, script, limit):
+            def _powershell(self, script, limit, stdin=None):
                 return 0, self.answers.pop(0), ""
 
             def push(self, local, remote, timeout=600):

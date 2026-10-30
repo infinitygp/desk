@@ -8,10 +8,16 @@ itself runs on the host and is the user's; desk debugs nothing and ships no debu
   tools come with the Windows SDK; desk looks where it installs them, or takes `exe`.
 - `ida`: IDA's remote debugging server for Windows (win64_remote*.exe, shipped with IDA, under
   IDA's licence): the host's copy is set up with `desk observe setup ida FILE`, started as
-  `SERVER -i127.0.0.1 -pPORT [-PPASSWORD]`.
+  `SERVER -i127.0.0.1 -pPORT` with its password in its environment (IDA_DBGSRV_PASSWD), not on a
+  command line every process listing shows. Without one given desk makes one, kept on the host
+  in a file only its user reads, next to the session.
 
 The guest's own network is user-mode (passt): nothing outside the host reaches a port in it
 unless desk forwards it, and desk forwards to the host's 127.0.0.1 only."""
+
+import os
+import secrets
+from pathlib import Path
 
 from .base import Capability, Conflict, Missing, Option, Provider
 from .guestops import items, win
@@ -53,6 +59,10 @@ class _Server(Provider):
         cap.available = not cap.problems
         return cap
 
+    def secret_env(self, session: Session) -> tuple[str, str] | None:
+        """(NAME, VALUE) for the server's environment."""
+        return None
+
     def start(self, guest, session: Session, host) -> None:
         port = session.options["port"]
         taken = items(guest.call("listening", port=port))
@@ -62,7 +72,8 @@ class _Server(Provider):
         if self.setup_files and host.setup(self.name):
             self.deploy(guest, session, host)
         exe = self.exe(session.options)
-        proc = guest.launch(exe, self.args(session))
+        secret = self.secret_env(session)
+        proc = guest.launch(exe, self.args(session), secret_env=secret) if secret else guest.launch(exe, self.args(session))
         if proc.get("exited"):
             raise Missing(f"{exe} ended at once (try it by hand with desk exec to see why)")
         session.tool.update(exe=exe, port=port, procs=[{**proc, "name": exe.rsplit("\\", 1)[-1]}])
@@ -98,6 +109,9 @@ class _Server(Provider):
         if session.tool.get("forwarded") and host is not None:
             host.unforward(session.tool["port"])
             session.tool["forwarded"] = False
+        if session.tool.get("password_file"):
+            # The server is gone: its password opens nothing any more.
+            Path(session.tool["password_file"]).unlink(missing_ok=True)
 
     def summary(self, session: Session) -> list[str]:
         if not session.tool.get("local_port"):
@@ -139,7 +153,8 @@ class IdaServer(_Server):
     licence = ""
     OPTIONS = {
         "port": Option(int, 23946, "guest port the server listens on", check=_port),
-        "password": Option(str, "", "password the server asks of IDA (-P)"),
+        "password": Option(str, "", "password the server asks of IDA (default: one desk makes and shows at start)",
+                           secret=True),
         "server": Option(str, "win64_remote.exe", "which of the files set up to start (IDA 8 and later ship "
                          "win64_remote.exe, IDA 7 win64_remote64.exe)",
                          choices=("win64_remote.exe", "win64_remote64.exe", "win32_remote.exe")),
@@ -161,8 +176,23 @@ class IdaServer(_Server):
         return cap
 
     def args(self, session: Session) -> list[str]:
-        args = ["-i127.0.0.1", f"-p{session.options['port']}"]
-        return args + ([f"-P{session.options['password']}"] if session.options["password"] else [])
+        return ["-i127.0.0.1", f"-p{session.options['port']}"]
+
+    def secret_env(self, session: Session) -> tuple[str, str]:
+        password = (getattr(session, "secrets", None) or {}).get("password") or secrets.token_urlsafe(18)
+        f = Path(session.tool["host_dir"]).with_suffix(".secret")
+        f.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(f, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as out:
+            out.write(password + "\n")
+        session.tool["password_file"] = str(f)
+        return "IDA_DBGSRV_PASSWD", password
+
+    def summary(self, session: Session) -> list[str]:
+        return super().summary(session) + (["password protected: " + ("the one given" if session.options["password"]
+                                                                       else "desk's own, shown at start")]
+                                           if session.tool.get("password_file") else [])
 
     def connect_hint(self, session: Session) -> str:
-        return f"IDA: Debugger > Process options: host 127.0.0.1, port {session.tool['local_port']}"
+        return (f"IDA: Debugger > Process options: host 127.0.0.1, port {session.tool['local_port']}, password in "
+                f"{session.tool.get('password_file')}")

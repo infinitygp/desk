@@ -43,6 +43,8 @@ class Option:
     choices: tuple | None = None
     # Text the value must match, said in `help` (a profile name, a provider).
     check: object = None
+    # Never kept with the session, in its report or a guest command line (a password).
+    secret: bool = False
 
 
 @dataclass

@@ -1,12 +1,13 @@
 # desk observation helper (Windows PowerShell 5.1). Pushed by desk to C:\desk\observe\helper.ps1
 # when its SHA-256 differs from the host's copy, and run as a script block (no execution policy
 # applies to that) with one request: base64 of UTF-8 JSON {"op": ..., ...}. It answers with one line,
-# @@desk-observe@@ and JSON. It decides nothing about tools: the providers on the host build the
-# command lines; this runs them within a time limit, starts captures detached from the SSH
-# session, tells processes apart by PID and creation time, and reads what the guest has.
+# @@desk-observe@@ and JSON; a secret comes as -Secret, read from standard input. It decides
+# nothing about tools: the providers on the host build the command lines; this runs them within
+# a time limit, starts captures detached from the SSH session, tells processes apart by PID and
+# creation time, and reads what the guest has.
 # With -Watch it is the watchdog of one capture: it stops the capture when its time is up or its
 # files have grown to their limit, and writes why to a file desk reads.
-param([string]$Request, [string]$Watch)
+param([string]$Request, [string]$Watch, [string]$Secret)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $Root = 'C:\desk\observe'
@@ -221,7 +222,13 @@ function Op-Launch($req) {
     # object when the session closes (seen on Windows 11 26H2), and a process WMI creates is in
     # no such job. It gets the caller's elevated token and none of this session's handles.
     $line = '"' + $req.exe + '"' + $(if ($req.args) { ' ' + $req.args } else { '' })
-    $hidden = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }
+    $startup = @{ ShowWindow = [uint16]0 }
+    if ($req.secret_env) {
+        # A secret goes into the program's environment (this one's and it), never a command line.
+        $startup.EnvironmentVariables = [string[]](@([Environment]::GetEnvironmentVariables().GetEnumerator() |
+            ForEach-Object { "$($_.Key)=$($_.Value)" }) + "$($req.secret_env)=$Secret")
+    }
+    $hidden = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property $startup
     $a = @{ CommandLine = $line; ProcessStartupInformation = $hidden }
     if ($req.cwd) { $a.CurrentDirectory = $req.cwd }
     $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments $a

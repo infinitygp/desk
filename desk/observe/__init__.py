@@ -206,6 +206,9 @@ def start(run, name: str, label: str | None = None, options: dict | None = None,
     if spec.family not in p.families:
         raise Unsupported(f"{name} observes {', '.join(p.families)} guests, and {run.image} is a {spec.family} one")
     opts = p.options(options or {})
+    # Secrets go to the provider only: the session, its report and observe.json say whether one was given.
+    secrets = {k: opts[k] for k, o in p.OPTIONS.items() if o.secret and opts[k]}
+    opts.update({k: "(given)" if opts[k] else "" for k, o in p.OPTIONS.items() if o.secret})
     limits = _limits(p, duration, max_mb)
     run.dom()
     host = host or Host(run)
@@ -219,6 +222,7 @@ def start(run, name: str, label: str | None = None, options: dict | None = None,
         _check_conflicts(p, s, others)
 
     s = store.new(name, label, conflicts)
+    s.secrets = secrets
     try:
         probe = p.preflight(guest, s, host)
         s.stats["arch"] = (probe.get("os") or {}).get("arch") or "AMD64"

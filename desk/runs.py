@@ -283,8 +283,25 @@ def resolve(run_id: str | None) -> Run:
         run = active[0]
     run.touch()
     run.hold()
-    run.log_event(argv=sys.argv[1:])
+    run.log_event(argv=logged_argv(sys.argv[1:]))
     return run
+
+
+def logged_argv(argv: list[str]) -> list[str]:
+    """A command line for the timeline (and so the report) with the values of secret options
+    (`desk observe start ida --set password=...`) left out."""
+    from .observe import PROVIDERS
+
+    secret = {k for p in PROVIDERS.values() for k, o in p.OPTIONS.items() if o.secret}
+    out, after_set = [], False
+    for a in argv:
+        flag, eq, value = a.partition("=") if a.startswith("--set=") else ("", "", a)
+        key = value.partition("=")[0]
+        if (after_set or flag) and key in secret and "=" in value:
+            value = f"{key}=(hidden)"
+        out.append(f"{flag}={value}" if flag else value)
+        after_set = a == "--set"
+    return out
 
 
 def idle_ttl() -> int:

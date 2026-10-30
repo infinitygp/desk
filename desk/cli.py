@@ -886,6 +886,8 @@ def cmd_observe(args) -> None:
         if s.stats.get("endpoint"):
             p = observe.provider(s.provider)
             print(f"endpoint: {s.stats['endpoint']} on the host: {p.connect_hint(s)}")
+        if s.tool.get("password_file") and not s.options.get("password"):
+            print(f"password: {Path(s.tool['password_file']).read_text().strip()}")
         return
     if args.observe_cmd == "status":
         s, live = observe.status(run, args.session)
