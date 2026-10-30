@@ -140,7 +140,8 @@ class IdaServer(_Server):
     OPTIONS = {
         "port": Option(int, 23946, "guest port the server listens on", check=_port),
         "password": Option(str, "", "password the server asks of IDA (-P)"),
-        "server": Option(str, "win64_remote64.exe", "which of the files set up to start",
+        "server": Option(str, "win64_remote.exe", "which of the files set up to start (IDA 8 and later ship "
+                         "win64_remote.exe, IDA 7 win64_remote64.exe)",
                          choices=("win64_remote.exe", "win64_remote64.exe", "win32_remote.exe")),
     }
     notes = ("IDA on the host connects to the forwarded port as Remote Windows debugger; desk only starts the "
@@ -148,6 +149,16 @@ class IdaServer(_Server):
 
     def exe(self, opts) -> str:
         return win(r"C:\desk\observe\tools\ida", opts["server"])
+
+    def assess(self, probe: dict, opts: dict, host) -> Capability:
+        cap = super().assess(probe, opts, host)
+        setup = host.setup(self.name)
+        have = [f["name"] for f in (setup or {}).get("files") or []]
+        if setup and opts["server"] not in have:
+            cap.problems.append(f"{opts['server']} is not among the files set up ({', '.join(have)}): "
+                                f"--set server={have[0] if have else '...'}")
+            cap.available = False
+        return cap
 
     def args(self, session: Session) -> list[str]:
         args = ["-i127.0.0.1", f"-p{session.options['port']}"]

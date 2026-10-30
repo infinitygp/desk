@@ -293,10 +293,14 @@ class Debuggers(Base):
             self.start("ida")
         z = tmpdir(self) / "dbgsrv.zip"
         with zipfile.ZipFile(z, "w") as f:
-            f.writestr("dbgsrv/win64_remote64.exe", "MZ ida")
+            f.writestr("dbgsrv/win64_remote.exe", "MZ ida")
         observe.setup("ida", z)
         self.addCleanup(shutil.rmtree, observe.Host.setup_dir("ida"), ignore_errors=True)
-        exe = "C:\\desk\\observe\\tools\\ida\\win64_remote64.exe"
+        # IDA 7's name is not what was set up: said before anything starts.
+        with self.assertRaisesRegex(observe.Missing, "win64_remote64.exe is not among the files set up "
+                                                     r"\(win64_remote.exe\): --set server=win64_remote.exe"):
+            self.start("ida", options={"server": "win64_remote64.exe"})
+        exe = "C:\\desk\\observe\\tools\\ida\\win64_remote.exe"
         with_server(self.guest, exe, 23946)
         del self.guest.disk[exe]  # it comes from the host
         s = self.start("ida", options={"password": "s3cret"})
