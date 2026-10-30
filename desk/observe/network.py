@@ -1,8 +1,11 @@
 """Packet capture inside the guest with what Windows has:
 
 - `pktmon` (Packet Monitor, Windows 10 1809 and later): `pktmon start --capture` with the
-  components (--comp), the bytes kept of each packet (--pkt-size, 0: all) and the file's size
-  (--file-size, MB), `pktmon stop`, and `pktmon etl2pcap` to PCAPNG, which desk reads back.
+  components (--comp) and the bytes kept of each packet (--pkt-size, 0: all), in multi-file mode:
+  segments net1.etl, net2.etl... of --file-size MB each, as its default circular file overwrites
+  what does not fit, and one that went round kept no packet at all (Windows 11 26H2, pktmon saying
+  no events were lost). `pktmon stop`, then every segment through `pktmon etl2pcap` to PCAPNG,
+  which desk reads back. A segment missing from the row makes the capture incomplete.
 - `netsh` (netsh trace): `netsh trace start capture=yes` with netsh's capture filters
   (`netsh trace show capturefilterhelp`), for when a filter at capture time is needed. Its ETL
   stays ETL: the packets are in it, and pktmon etl2pcap formats none of them (0 on Windows 11
@@ -13,7 +16,9 @@ of either runs, and stops only one writing its own file.
 
 What a capture holds is metadata of every packet (addresses, ports, sizes, times) and of its
 payload only the bytes kept per packet; encrypted traffic (TLS) stays encrypted. Traffic over
-loopback (127.0.0.1) does not pass the network adapter and is not seen with the nics component."""
+loopback (127.0.0.1) does not pass the network adapter and is not seen with the nics component.
+Events ETW could not take in time are lost even so: the trace session's counters and pktmon's
+own word on them are in the report."""
 
 import re
 
@@ -26,7 +31,11 @@ from .session import Session
 # Windows 11 26H2), which counts as the same. Whose capture one is, the file it writes says.
 PKTMON_SESSION = "PktMon"
 NETSH_SESSION = "NetTrace"
-MIN_PKTMON_MB = 32
+# Segments came out 80-150 MiB at --file-size 64 (Windows 11 26H2), and the one being written shows
+# no size until it is closed: the watchdog's limit holds to within about two segments.
+MIN_PKTMON_MB = 64
+_SEGMENT = re.compile(r"net(\d+)\.etl", re.I)
+_LOST = re.compile(r"\((No|\d+) events? lost\)", re.I)
 _FILTER = re.compile(r"[A-Za-z][A-Za-z0-9.]*=[^\s=]+")
 
 
@@ -87,34 +96,21 @@ class _Capture(Provider):
             return False
         sessions = guest.call("etw", names=running).get("sessions") or {}
         files = {n: (p or {}).get("LocalFilePath") for n, p in sessions.items()}
-        if any(f and f.lower() == self.etl(session).lower() for f in files.values()):
+        if any(f and self._ours(session, f) for f in files.values()):
             return True
         raise Conflict(f"{self.title} runs, but not into this session's file (trace session "
                        + ", ".join(f"{n} writes {f or 'no file it says'}" for n, f in files.items())
                        + "): it is somebody else's capture")
 
-    def pcapng(self, guest, session: Session) -> list[ArtifactSpec]:
-        out = win(session.guest_dir, "net.pcapng")
-        r = guest.exec("pktmon.exe", ["etl2pcap", self.etl(session), "--out", out], timeout=900)
-        session.stats["etl2pcap"] = {"rc": r.get("rc"), "said": " ".join((r.get("stdout") or "").split())[-300:]}
-        return [ArtifactSpec("net.pcapng", out, "pcapng", required=False,
-                             description="the capture as PCAPNG (pktmon etl2pcap)")]
+    def _ours(self, session: Session, path: str) -> bool:
+        return path.lower() == self.etl(session).lower()
 
     def artifacts(self, session: Session) -> list[ArtifactSpec]:
         return [ArtifactSpec("net.etl", self.etl(session), "etl", description=f"{self.title} capture (ETL)")]
 
     def summary(self, session: Session) -> list[str]:
         kept = session.stats.get("payload")
-        lines = [kept] if kept else []
-        pcap = next((a for a in session.artifacts if a["name"] == "net.pcapng"), None)
-        if pcap and pcap.get("check"):
-            lines.append(f"PCAPNG: {pcap['check'].get('detail')}")
-        elif pcap and pcap.get("in_guest"):
-            lines.append(f"PCAPNG made in the guest, not read on the host: {pcap.get('detail')}")
-        elif session.stats.get("etl2pcap"):
-            lines.append(f"no PCAPNG: pktmon etl2pcap exit {session.stats['etl2pcap'].get('rc')}: "
-                         f"{session.stats['etl2pcap'].get('said')}")
-        return lines
+        return [kept] if kept else []
 
 
 class Pktmon(_Capture):
@@ -125,14 +121,13 @@ class Pktmon(_Capture):
     OPTIONS = {
         "components": Option(str, "nics", "pktmon --comp: nics (the network adapters), all, or component ids"),
         "pkt_size": Option(int, 128, "bytes kept of each packet (pktmon --pkt-size; 0: whole packets)"),
-        "pcapng": Option(bool, True, "turn the capture into PCAPNG in the guest (pktmon etl2pcap)"),
+        "pcapng": Option(bool, True, "turn every segment into PCAPNG in the guest (pktmon etl2pcap)"),
     }
     notes = ("packet metadata of every packet the adapters pass; payload only up to pkt_size bytes per packet "
              "(128 by default), encrypted traffic stays encrypted; loopback traffic is not seen with the nics "
              "component",
-             "pktmon's file is circular and made 16 MiB at a time: a capture whose traffic outgrew --max-mb kept "
-             "few or no packets, and pktmon said no events were lost (Windows 11 26H2); keep --max-mb well above "
-             "the traffic expected (4 GiB by default)")
+             "kept in segments net1.etl, net2.etl..., each with a PCAPNG; the capture stops within about two "
+             "segments (150 MiB each, about 1 GiB each above a 1 GiB limit) of its size limit")
 
     def check_options(self, opts: dict) -> None:
         if opts["pkt_size"] < 0:
@@ -140,29 +135,105 @@ class Pktmon(_Capture):
         if not re.fullmatch(r"nics|all|\d+( \d+)*", opts["components"]):
             raise ObserveError(f"components is nics, all or component ids (got {opts['components']!r})")
 
+    def _ours(self, session: Session, path: str) -> bool:
+        return path.lower().rsplit("\\", 1)[0] == session.guest_dir.lower()
+
     def start(self, guest, session: Session, host) -> None:
         mb = max(1, (session.limits.get("max_bytes") or 512 << 20) >> 20)
         if mb < MIN_PKTMON_MB:
-            # It makes its file 16 MiB at once and grows it 16 MiB at a time, whatever --file-size says.
-            raise ObserveError(f"pktmon writes its file 16 MiB at a time: --max-mb {MIN_PKTMON_MB} or more")
+            raise ObserveError(f"pktmon writes segments of 64 MiB and more: --max-mb {MIN_PKTMON_MB} or more")
+        segment = 64 if mb <= 1024 else 512
         args = ["start", "--capture", "--comp", *session.options["components"].split(),
-                "--pkt-size", str(session.options["pkt_size"]), "--file-name", self.etl(session), "--file-size", str(mb)]
+                "--pkt-size", str(session.options["pkt_size"]), "--file-name", self.etl(session),
+                "--file-size", str(segment), "--log-mode", "multi-file"]
         tool_run(guest, "pktmon.exe", args, 120, "starting Packet Monitor")
-        session.tool.update(etl=self.etl(session), file_mb=mb)
+        session.tool.update(etl=self.etl(session), segment_mb=segment)
         n = session.options["pkt_size"]
         session.stats["payload"] = ("whole packets kept" if n == 0 else f"{n} bytes kept of each packet (headers "
                                     "and the start of the payload)")
 
+    def watch_files(self, session: Session) -> list[str]:
+        return [session.guest_dir]
+
     def stop_commands(self, session: Session) -> list[dict]:
         return [command("pktmon.exe", ["stop"], 300)]
 
+    def sample(self, guest, session: Session) -> dict:
+        names = [n for n in guest.call("etw", names=[]).get("names") or [] if _capturing([n], self.session_names)]
+        if not names:
+            return {}
+        sessions = guest.call("etw", names=names).get("sessions") or {}
+        found = {k: v for p in sessions.values() for k, v in (p or {}).items()
+                 if "lost" in k.lower() and isinstance(v, (int, float))}
+        return {"lost": found} if found else {}
+
     def stop(self, guest, session: Session, host, force: bool = False) -> None:
         if self._running(guest, session):
-            tool_run(guest, "pktmon.exe", ["stop"], 300, "stopping Packet Monitor")
+            r = tool_run(guest, "pktmon.exe", ["stop"], 300, "stopping Packet Monitor")
+            session.stats["pktmon_stop"] = " ".join((r.get("stdout") or "").split())[-300:]
+
+    def found(self, guest, session: Session) -> None:
+        listing = guest.files([session.guest_dir]).get(session.guest_dir) or {}
+        segments = []
+        for f in listing.get("files") or []:
+            m = _SEGMENT.fullmatch(f["path"].rsplit("\\", 1)[-1])
+            if m:
+                segments.append({"n": int(m[1]), "path": f["path"], "bytes": f.get("size") or 0})
+        session.tool["segments"] = sorted(segments, key=lambda x: x["n"])
+
+    def _segments(self, session: Session) -> list[dict]:
+        """Segments 1 to the last one with data; one missing from the row is one ("missing")."""
+        segs = {x["n"]: x for x in session.tool.get("segments") or []}
+        last = max([n for n, x in segs.items() if x["bytes"]] or [1])
+        return [segs.get(n) or {"n": n, "path": win(session.guest_dir, f"net{n}.etl"), "bytes": 0, "missing": True}
+                for n in range(1, last + 1)]
+
+    def artifacts(self, session: Session) -> list[ArtifactSpec]:
+        return [ArtifactSpec(f"net{x['n']}.etl", x["path"], "etl", description=f"Packet Monitor segment {x['n']} (ETL)")
+                for x in self._segments(session)]
 
     def convert(self, guest, session: Session, host) -> list[ArtifactSpec]:
-        return self.pcapng(guest, session) if session.options.get("pcapng") else []
+        if not session.options.get("pcapng"):
+            return []
+        out, said = [], {}
+        for x in self._segments(session):
+            if x.get("missing") or not x["bytes"]:
+                continue
+            pcap = win(session.guest_dir, f"net{x['n']}.pcapng")
+            r = guest.exec("pktmon.exe", ["etl2pcap", x["path"], "--out", pcap], timeout=900)
+            said[f"net{x['n']}"] = {"rc": r.get("rc"), "said": " ".join((r.get("stdout") or "").split())[-200:]}
+            out.append(ArtifactSpec(f"net{x['n']}.pcapng", pcap, "pcapng", required=False,
+                                    description=f"segment {x['n']} as PCAPNG (pktmon etl2pcap)"))
+        session.stats["etl2pcap"] = said
+        return out
 
+    def summary(self, session: Session) -> list[str]:
+        lines = super().summary(session)
+        etls = [a for a in session.artifacts if a["kind"] == "etl"]
+        pcaps = [a for a in session.artifacts if a["kind"] == "pcapng"]
+        if etls:
+            lines.append(f"{len(etls)} segment(s), {sum(a.get('guest_bytes') or 0 for a in etls) / 2**20:.1f} MiB")
+        read = [a for a in pcaps if a.get("check") and a["check"].get("ok")]
+        if pcaps:
+            lines.append(f"PCAPNG: {sum(a['check'].get('packets', 0) for a in read)} packets in {len(read)} of "
+                         f"{len(pcaps)} file(s)" + ("" if len(read) == len(pcaps) else
+                                                    "; not read: " + ", ".join(f"{a['name']} ({a.get('detail')})"
+                                                                               for a in pcaps if a not in read)))
+        failed = {k: v for k, v in (session.stats.get("etl2pcap") or {}).items() if v.get("rc") != 0}
+        for k, v in failed.items():
+            lines.append(f"no PCAPNG of {k}.etl: pktmon etl2pcap exit {v.get('rc')}: {v.get('said')}")
+        loss = session.stats.get("lost")
+        said = session.stats.get("pktmon_stop") or " ".join(
+            (r or {}).get("stdout") or "" for r in (session.stats.get("watchdog") or {}).get("stop") or [])
+        m = _LOST.search(said or "")
+        if loss:
+            lines.append("events lost (as the trace session counted them before it stopped): "
+                         + ", ".join(f"{k} {v}" for k, v in sorted(loss.items())))
+        if m:
+            lines.append(f"pktmon at its stop: {m[0].strip('()')}")
+        if not loss and not m:
+            lines.append("events lost: not measured")
+        return lines
 
 
 class NetshTrace(_Capture):

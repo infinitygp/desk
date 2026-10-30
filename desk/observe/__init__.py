@@ -515,6 +515,10 @@ def stop(run, ref: str | None = None, force: bool = False, keep_guest: bool = Fa
             else:
                 if s.target and not gone:
                     _follow(guest, s)
+                try:
+                    p.found(guest, s)
+                except DeskError as e:
+                    problems.append(f"looking for its files in the guest: {e}")
                 arts = p.artifacts(s)
                 if not gone:
                     try:

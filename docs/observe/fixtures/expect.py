@@ -4,7 +4,7 @@ the files `desk observe stop` copied to the host (or the report's observe/ folde
 
     python3 docs/observe/fixtures/expect.py manifest.json --procmon-csv observe/s1/procmon.csv
     python3 docs/observe/fixtures/expect.py manifest.json --tracerpt-csv observe/s2/events.csv
-    python3 docs/observe/fixtures/expect.py manifest.json --pcapng observe/s3/net.pcapng
+    python3 docs/observe/fixtures/expect.py manifest.json --pcapng observe/s3/net*.pcapng
     python3 docs/observe/fixtures/expect.py manifest.json --ipc-dir observe/s4
     python3 docs/observe/fixtures/expect.py --usb-pcap observe/s5/usb.pcap --usb-id 0fd9:0084
 
@@ -117,15 +117,17 @@ def packets(path: Path):
         at += length
 
 
-def pcapng(manifest: dict, path: Path) -> None:
-    c = formats.pcapng(path)
-    check(c["ok"], "pcapng: whole file", c["detail"])
+def pcapng(manifest: dict, paths: list[Path]) -> None:
+    """One file or a capture's segments (pktmon's net1.pcapng, net2.pcapng...)."""
+    for path in paths:
+        c = formats.pcapng(path)
+        check(c["ok"], f"pcapng: whole file {path.name}", c["detail"])
     if "dns" not in manifest["steps"]:
         say("SKIP", "pcapng: the workload's DNS query", "no dns step")
         return
     label = manifest["token"].encode()
     wire = bytes([len(label)]) + label
-    hits = sum(1 for p in packets(path) if wire in p)
+    hits = sum(1 for path in paths for p in packets(path) if wire in p)
     check(hits > 0, "pcapng: the workload's DNS query left through the adapter", f"{hits} packets with "
           f"{manifest['steps']['dns']['query']}")
 
@@ -159,7 +161,7 @@ def main() -> None:
     ap.add_argument("manifest", nargs="?")
     ap.add_argument("--procmon-csv", type=Path)
     ap.add_argument("--tracerpt-csv", type=Path)
-    ap.add_argument("--pcapng", type=Path)
+    ap.add_argument("--pcapng", type=Path, nargs="+")
     ap.add_argument("--ipc-dir", type=Path)
     ap.add_argument("--usb-pcap", type=Path)
     ap.add_argument("--usb-id", help="VENDOR:PRODUCT of a device handed to the run")

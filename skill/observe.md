@@ -23,7 +23,7 @@ desk down                                  # the report has an Observation secti
 | `procmon` | file system, registry, processes and threads of the whole guest, as PML (`--set csv=true` also CSV) | the user's copy: `desk observe setup procmon ProcessMonitor.zip --accept-eula` (only when the user accepted the Sysinternals licence terms; ask) |
 | `wpr` | ETW by WPR profile (`--set profile=GeneralProfile,CPU.Light`), one ETL | Windows |
 | `etw` | ETW of the providers named (`--set providers=Microsoft-Windows-Kernel-Process:0x10:4`), one ETL, desk's marks as events | Windows |
-| `pktmon` | packets through the network adapters, ETL and PCAPNG; 128 bytes of each packet unless `--set pkt_size=0`; `--max-mb` 32 or more | Windows 10 1809+ |
+| `pktmon` | packets through the network adapters, in segments net1.etl, net2.etl... each with its PCAPNG; 128 bytes of each packet unless `--set pkt_size=0`; `--max-mb` 64 or more, kept to within about two segments | Windows 10 1809+ |
 | `netsh` | packets with netsh's capture filters (`--set filters=Protocol=UDP`), ETL only (no PCAPNG of it) | Windows |
 | `ipc` | named pipes, TCP and UDP endpoints with their processes, listed at start, every mark and stop | Windows |
 | `usbpcap` | USB packets of one root hub with the descriptors of the devices on it, pcap | USBPcap in the guest: its installer's `/S` leaves the driver out, so then `desk exec -- 'Start-Process rundll32.exe -ArgumentList "setupapi.dll,InstallHinfSection DefaultInstall.NTamd64 128 C:\Program Files\USBPcap\USBPcap.inf" -Wait'` and `desk reboot` |
@@ -40,8 +40,7 @@ desk down                                  # the report has an Observation secti
   and one WPR at a time per run. Sizes seen on a Windows 11 guest: ProcMon unfiltered about
   5 MiB/s (4 GiB in about 12 minutes), in 256 MiB steps, so `--max-mb` below 256 ends it at once;
   WPR GeneralProfile 150 MiB in 47 s; WPR FileIO next to ProcMon 1.6 GiB in 2 minutes, as each
-  records the other's writes. A pktmon capture whose traffic outgrew `--max-mb` kept few or no
-  packets while pktmon said none were lost: keep its limit well above the traffic.
+  records the other's writes.
 - desk stops only what it started. A ProcMon or packet capture already running in the guest
   makes `start` refuse (exit 2): close it, or report it; never stop it by hand unless you started it.
 - With several captures (ProcMon with others) each `desk observe` command took 30-80 s on a

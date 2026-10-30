@@ -264,6 +264,9 @@ class Provider:
         """End the capture in the guest; nothing to do when it ended already."""
         raise NotImplementedError
 
+    def found(self, guest, session: Session) -> None:
+        """Look in the guest for what only a look there tells (pktmon's segments), before artifacts."""
+
     def artifacts(self, session: Session) -> list[ArtifactSpec]:
         """The files the capture leaves in the guest, also when it was cut off."""
         return []

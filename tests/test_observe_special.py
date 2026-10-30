@@ -38,26 +38,46 @@ class Base(unittest.TestCase):
 
 
 class Pktmon(Base):
-    def test_capture_stop_and_pcapng_read_back(self):
-        s = self.start("pktmon", max_mb=64)
+    D = "C:\\desk\\observe\\r1-s1"
+
+    def test_segments_captured_stopped_and_each_read_back(self):
+        s = self.start("pktmon", max_mb=256)
         self.assertEqual(self.guest.execs("pktmon.exe")[0],
                          ["start", "--capture", "--comp", "nics", "--pkt-size", "128", "--file-name",
-                          "C:\\desk\\observe\\r1-s1\\net.etl", "--file-size", "64"])
+                          f"{self.D}\\net.etl", "--file-size", "64", "--log-mode", "multi-file"])
         self.assertEqual(s.stats["payload"], "128 bytes kept of each packet (headers and the start of the payload)")
+        # It went on into a second and third segment.
+        for n in (2, 3):
+            self.guest.disk[f"{self.D}\\net{n}.etl"] = b"\x16" * 4096
+            self.guest.pktmon_segments.append(f"{self.D}\\net{n}.etl")
         s, problems = self.stop()
         self.assertEqual(problems, [])
-        self.assertEqual(self.guest.execs("pktmon.exe")[1:], [["stop"], ["etl2pcap", "C:\\desk\\observe\\r1-s1\\net.etl",
-                                                                         "--out", "C:\\desk\\observe\\r1-s1\\net.pcapng"]])
-        pcap = next(a for a in s.artifacts if a["name"] == "net.pcapng")
-        self.assertEqual((pcap["verified"], pcap["check"]["packets"]), (True, 5))
+        self.assertEqual(self.guest.execs("pktmon.exe")[1], ["stop"])
+        self.assertEqual([a[:2] for a in self.guest.execs("pktmon.exe")[2:]], [["etl2pcap", f"{self.D}\\net{n}.etl"]
+                                                                              for n in (1, 2, 3)])
+        # The empty fourth one pktmon opens as it stops is no segment of the capture.
+        self.assertEqual([a["name"] for a in s.artifacts],
+                         ["net1.etl", "net2.etl", "net3.etl", "net1.pcapng", "net2.pcapng", "net3.pcapng"])
         lines = observe.provider("pktmon").summary(s)
-        self.assertIn("PCAPNG: pcapng, 1 interface(s) (Ethernet), 5 packets", lines)
+        self.assertIn("3 segment(s), 0.0 MiB", lines)
+        self.assertIn("PCAPNG: 15 packets in 3 of 3 file(s)", lines)
+        self.assertIn("pktmon at its stop: No events lost", lines)
+        self.assertIn("events lost (as the trace session counted them before it stopped): EventsLost 0", lines)
+
+    def test_a_segment_missing_from_the_row_makes_it_incomplete(self):
+        self.start("pktmon")
+        # Three segments, of which the second is gone.
+        self.guest.disk[f"{self.D}\\net3.etl"] = b"\x16" * 4096
+        self.guest.pktmon_segments += [f"{self.D}\\net2.etl", f"{self.D}\\net3.etl"]
+        s, problems = self.stop()
+        self.assertEqual(problems, ["net2.etl was not made"])
+        self.assertFalse(s.complete)
 
     def test_whole_packets_and_all_components_on_request(self):
         self.start("pktmon", options={"pkt_size": 0, "components": "all", "pcapng": False})
         self.assertIn("0", self.guest.execs("pktmon.exe")[0])
         s, _ = self.stop()
-        self.assertEqual([a["name"] for a in s.artifacts], ["net.etl"])
+        self.assertEqual([a["name"] for a in s.artifacts], ["net1.etl"])
         self.assertEqual(s.stats["payload"], "whole packets kept")
 
     def test_a_capture_desk_did_not_start_is_left_alone(self):
@@ -69,33 +89,33 @@ class Pktmon(Base):
     def test_a_capture_that_is_not_desks_file_is_not_stopped(self):
         self.start("pktmon")
         # Ours ended and somebody started another one meanwhile.
-        self.guest.etw["PktMon"]["LocalFilePath"] = "C:\\Users\\tester\\theirs.etl"
-        with self.assertRaisesRegex(observe.Conflict, "PktMon writes C:.*theirs.etl.*somebody else's capture"):
+        self.guest.etw["PktMon"]["LocalFilePath"] = "C:\\Users\\tester\\theirs1.etl"
+        with self.assertRaisesRegex(observe.Conflict, "PktMon writes C:.*theirs1.etl.*somebody else's capture"):
             self.stop()
         self.assertNotIn(["stop"], self.guest.execs("pktmon.exe"))
         self.assertEqual(Store(self.run).find("s1").state, "running")
 
-    def test_a_limit_below_pktmons_first_16_mib_is_refused_and_one_above_is_the_watchdogs(self):
-        with self.assertRaisesRegex(observe.ObserveError, "16 MiB at a time: --max-mb 32 or more"):
-            self.start("pktmon", max_mb=8)
+    def test_a_limit_below_a_segment_is_refused_and_the_watchdog_holds_the_folder(self):
+        with self.assertRaisesRegex(observe.ObserveError, "segments of 64 MiB and more: --max-mb 64 or more"):
+            self.start("pktmon", max_mb=32)
         self.assertEqual(self.guest.execs("pktmon.exe"), [])
-        s = self.start("pktmon", max_mb=64)
+        s = self.start("pktmon", max_mb=2048)
         order = json.loads(base64.b64decode(self.guest.procs[s.watchdog["pid"]]["argv"][-1]))
-        self.assertEqual((order["max_bytes"], order["files"]), (64 << 20, ["C:\\desk\\observe\\r1-s2\\net.etl"]))
-        self.assertIn("64", self.guest.execs("pktmon.exe")[0])
+        self.assertEqual((order["max_bytes"], order["files"]), (2048 << 20, ["C:\\desk\\observe\\r1-s2"]))
+        self.assertEqual(self.guest.execs("pktmon.exe")[0][-3:], ["512", "--log-mode", "multi-file"])
 
     def test_one_packet_capture_at_a_time(self):
         self.start("pktmon")
         with self.assertRaisesRegex(observe.Conflict, "holds packet-capture"):
             self.start("netsh")
 
-    def test_a_pcapng_whose_copy_differs_is_not_said_to_be_missing(self):
+    def test_a_pcapng_whose_copy_differs_is_not_counted(self):
         self.start("pktmon")
         self.guest.pull_hook = lambda remote, data: data[:10]
         s, problems = self.stop()
-        self.assertIn("net.pcapng: the copy differs", " ".join(problems))
-        self.assertIn("PCAPNG made in the guest, not read on the host: the copy differs",
-                      " ".join(observe.provider("pktmon").summary(s)))
+        self.assertIn("net1.pcapng: the copy differs", " ".join(problems))
+        self.assertIn("PCAPNG: 0 packets in 0 of 1 file(s); not read: net1.pcapng (the copy differs from the guest's "
+                      "file (SHA-256))", observe.provider("pktmon").summary(s))
 
     def test_a_failed_conversion_is_said_and_the_etl_stays(self):
         self.start("pktmon")
@@ -104,7 +124,8 @@ class Pktmon(Base):
                                                           if argv[0] == "etl2pcap" else tool(f, argv))
         s, problems = self.stop()
         self.assertEqual(problems, [])  # the PCAPNG is a conversion, the ETL is the capture
-        self.assertIn("no PCAPNG: pktmon etl2pcap exit 1", " ".join(observe.provider("pktmon").summary(s)))
+        self.assertIn("no PCAPNG of net1.etl: pktmon etl2pcap exit 1: Unknown format",
+                      observe.provider("pktmon").summary(s))
 
 
 class SessionNames(unittest.TestCase):

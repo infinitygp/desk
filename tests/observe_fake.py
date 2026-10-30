@@ -403,13 +403,19 @@ def with_windows_tools(fake: FakeWindows) -> None:
         if argv[0] == "start":
             if "PktMon" in f.etw:
                 return {"rc": 1, "stdout": "Packet Monitor is already running."}
-            f.etw["PktMon"] = {"EventsLost": 0, "LocalFilePath": argv[argv.index("--file-name") + 1]}
-            f.disk[argv[argv.index("--file-name") + 1]] = b"\x16" * 2048
+            # Multi-file, as Windows 11 26H2 writes it: net1.etl, net2.etl... beside the name given.
+            base = argv[argv.index("--file-name") + 1].rsplit(".", 1)[0]
+            f.pktmon_segments = [f"{base}1.etl"]
+            f.etw["PktMon"] = {"EventsLost": 0, "LocalFilePath": f.pktmon_segments[0]}
+            f.disk[f.pktmon_segments[0]] = b"\x16" * 2048
             f.pktmon = argv
             return {"rc": 0}
         if argv[0] == "stop":
             f.etw.pop("PktMon", None)
-            return {"rc": 0}
+            # It opens one more, empty, segment as it stops, and names that one.
+            last = f.pktmon_segments[0].rsplit("1.etl", 1)[0] + f"{len(f.pktmon_segments) + 1}.etl"
+            f.disk[last] = b""
+            return {"rc": 0, "stdout": f"Flushing logs...\nLog file: {last} (No events lost)"}
         if argv[0] == "etl2pcap":
             f.disk[argv[argv.index("--out") + 1]] = pcapng_bytes(5)
             return {"rc": 0, "stdout": "Processed 5 packets"}

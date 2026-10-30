@@ -6,7 +6,7 @@
 #   desk -r RUN pull C:/desk/observe/workload/e2e1/manifest.json manifest.json
 #   expect.py manifest.json --procmon-csv REPORT/observe/s1/procmon.csv
 #   expect.py manifest.json --tracerpt-csv REPORT/observe/s2/events.csv
-#   expect.py manifest.json --pcapng REPORT/observe/s3/net.pcapng
+#   expect.py manifest.json --pcapng REPORT/observe/s3/net*.pcapng
 #   expect.py manifest.json --ipc-dir REPORT/observe/s4
 image = "windows-11"
 record = true

@@ -1,5 +1,5 @@
 # WIN-NET-02: Packet Monitor captures the workload's DNS query (it leaves through the adapter) and
-# its PCAPNG holds it. Afterwards: expect.py MANIFEST --pcapng REPORT/observe/s1/net.pcapng
+# its PCAPNG holds it. Afterwards: expect.py MANIFEST --pcapng REPORT/observe/s1/net*.pcapng
 image = "windows-11"
 [build]
 artifacts = ["docs/observe/fixtures/workload.ps1"]
