@@ -455,6 +455,8 @@ def gc_idle(verbose: bool = True) -> list[str]:
             except DeskError:
                 return False  # gone: somebody else took it down
 
+        # Before its own line: a report written after the run's last command stays as it is.
+        reported = evidence.reported(run)
         try:
             # Whoever left it may still want what it showed: the report keeps the screenshots,
             # the timeline and, while the guest runs, its logs.
@@ -462,7 +464,7 @@ def gc_idle(verbose: bool = True) -> list[str]:
         except OSError:
             pass  # a full disk is when this must go on
         try:
-            report, _ = evidence.finish(run, stopped=not evidence.reported(run), unless=lambda: not still_idle())
+            report, _ = evidence.finish(run, stopped=not reported, unless=lambda: not still_idle())
         except DeskError:
             continue  # another command is taking it down already
         if run.dir.exists():
