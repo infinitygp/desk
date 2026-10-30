@@ -16,10 +16,10 @@ from pathlib import Path
 
 PML_SIGNATURE = b"PML_"
 PML_VERSION = 9
-# signature, version, is_64bit, computer name (32 UTF-16 characters), system root (260), events,
-# unused, then the offsets of the events, the events' offset array, the process, string and icon
-# tables (procmon-parser's PmlHeader).
-_PML = struct.Struct("<4sII64s520sIQQQQQQ")
+# signature, version, is_64bit, computer name (0x20 bytes), system root (0x208 bytes), events at
+# 0x234, unused, then the offsets of the events, the events' offset array, the process, string and
+# icon tables (procmon-parser's PmlHeader; so laid out by Process Monitor 4.01 on Windows 11 26H2).
+_PML = struct.Struct("<4sII32s520sIQQQQQQ")
 LINKTYPE_USBPCAP = 249
 LINKTYPES = {1: "Ethernet", 101: "raw IP", 113: "Linux cooked", LINKTYPE_USBPCAP: "USBPcap"}
 

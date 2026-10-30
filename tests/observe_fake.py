@@ -24,7 +24,7 @@ def pml_bytes(events: int = 3, complete: bool = True, computer: str = "DESK-WIN"
     offsets_at = events_at + len(body)
     tables_at = offsets_at + 5 * events
     tail = b"\0" * 64
-    head = struct.pack("<4sII64s520sIQQQQQQ", b"PML_", 9, 1, computer.encode("utf-16-le"),
+    head = struct.pack("<4sII32s520sIQQQQQQ", b"PML_", 9, 1, computer.encode("utf-16-le"),
                        "C:\\Windows".encode("utf-16-le"), events, 0,
                        events_at if complete else 0, offsets_at if complete else 0,
                        tables_at if complete else 0, tables_at + 16 if complete else 0,

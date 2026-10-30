@@ -7,6 +7,7 @@ import io
 import json
 import os
 import shutil
+import struct
 import tempfile
 import unittest
 import zipfile
@@ -37,6 +38,22 @@ class Formats(unittest.TestCase):
         c = formats.pml(self.write(pml_bytes(7)))
         self.assertTrue(c["ok"], c)
         self.assertEqual((c["events"], c["computer"], c["version"]), (7, "DESK-WIN", 9))
+
+    def test_the_header_is_read_where_process_monitor_writes_it(self):
+        # The offsets of a log Process Monitor 4.01 wrote on Windows 11 26H2, laid out by hand.
+        size = 531619992
+        head = bytearray(0x3A8)
+        head[0:12] = b"PML_" + struct.pack("<II", 9, 1)
+        head[12:32] = "DESK-WIN11".encode("utf-16-le")
+        head[0x2C:0x40] = "C:\\WINDOWS".encode("utf-16-le")
+        struct.pack_into("<I", head, 0x234, 1048604)
+        struct.pack_into("<QQQQQ", head, 0x240, 936, 525189288, 530432308, 531119384, 531569900)
+        p = self.write(bytes(head))
+        with p.open("r+b") as f:
+            f.truncate(size)
+        c = formats.pml(p)
+        self.assertTrue(c["ok"], c)
+        self.assertEqual((c["events"], c["computer"], c["system_root"]), (1048604, "DESK-WIN11", "C:\\WINDOWS"))
 
     def test_a_log_procmon_did_not_close_is_incomplete(self):
         c = formats.pml(self.write(pml_bytes(7, complete=False)))
