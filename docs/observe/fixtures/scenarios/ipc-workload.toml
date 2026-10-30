@@ -8,7 +8,8 @@ provider = "ipc"
 label = "ipc"
 options = {udp = true}
 [[step]]
-exec = "Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File C:/Users/tester/desk/workload.ps1 -Token ipc1 -Steps cpu -HoldSeconds 90'"
+# In the desktop session: a process Start-Process starts over SSH ends with the SSH session.
+gui = ["conhost.exe", "--headless", "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "C:/Users/tester/desk/workload.ps1", "-Token", "ipc1", "-Steps", "cpu", "-HoldSeconds", "90"]
 [[step]]
 exec = "Test-Path C:/desk/observe/workload/ipc1/manifest.json"
 output = "True"
