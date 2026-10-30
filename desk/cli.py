@@ -242,7 +242,7 @@ def cmd_down(args) -> None:
         # A VM that is gone (QEMU ended) still has its screenshots and timeline to report.
         report, videos = evidence.finish(run, keep=args.keep, diff=args.diff, report=not args.no_report,
                                          stopped=not evidence.reported(run))
-        if args.keep:
+        if args.keep or run.dir.exists():
             print(f"run {run.id} down (files kept in {run.dir})")
         else:
             print(f"run {run.id} down; deleted {run.dir}{gone} (--keep keeps it)"

@@ -591,12 +591,16 @@ def finish(run, keep: bool = False, diff: bool = False, report: bool = True,
         except Exception as e:  # noqa: BLE001 - a video that cannot be made must not keep the VM running
             print(f"[desk] warning: no video ({type(e).__name__}: {e})", file=sys.stderr)
         out = None
+        unreported = False
         if report and (stopped or run.live_domain() is not None):
-            # A report that cannot be written must not keep the VM running.
+            # A report that cannot be written must not keep the VM running, nor take with it the
+            # files it would have been made of.
             try:
                 out = collect(run, diff=diff)
             except Exception as e:  # noqa: BLE001
-                print(f"[desk] warning: no report ({type(e).__name__}: {e})", file=sys.stderr)
+                unreported = True
+                print(f"[desk] warning: no report ({type(e).__name__}: {e}); the run's files stay in {run.dir}",
+                      file=sys.stderr)
         # Videos outlive the run in its report directory, report or not.
         try:
             videos = record.save_videos(run, out or REPORTS / run.id)
@@ -608,7 +612,7 @@ def finish(run, keep: bool = False, diff: bool = False, report: bool = True,
             # here, so that nobody waits for a report to be written.
             with runs.state_lock():
                 if not (unless and unless()):
-                    runs.down(run, keep=keep)
+                    runs.down(run, keep=keep or unreported)
     return out, videos
 
 

@@ -171,6 +171,13 @@ class Gc(unittest.TestCase):
             self.assertEqual(runs.gc_idle(verbose=False), [])
         self.assertTrue((old.dir / "run.json").exists())
 
+    def test_a_report_that_cannot_be_written_leaves_the_files_it_would_be_made_of(self):
+        old = self.run_idle_for("old", 3)
+        with mock.patch("desk.evidence.collect", side_effect=KeyError("name")), mock.patch("sys.stderr"):
+            report, _ = evidence.finish(old, stopped=True)
+        self.assertIsNone(report)
+        self.assertTrue((old.dir / "shots" / "0001.png").exists())
+
     def test_one_teardown_at_a_time(self):
         old = self.run_idle_for("old", 3)
 
