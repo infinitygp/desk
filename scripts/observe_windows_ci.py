@@ -293,6 +293,7 @@ def logman_markers_and_processes():
     manifest = run_workload("ci01", "process")
     g.call("mark", path=win(GROOT, "marks", "mark-ci01.txt"), text="ci01", source=MARKER_SOURCE, event="DeskMark1")
     s.stats.update(p.sample(g, s))
+    assert "EventsLost" in s.stats.get("lost", {}), f"no lost-event counts from ControlTrace: {props}"
     p.stop(g, s, host)
     arts = p.artifacts(s) + p.convert(g, s, host)
     local = Path(os.environ["DESK_HOME"]) / "s1"
@@ -328,12 +329,13 @@ def wpr_instance():
     s = session("wpr", "s3", profile=["CPU.Light"], pdbgen=False)
     p.start(g, s, CiHost())
     time.sleep(5)
+    during = [n for n in g.call("etw", names=[]).get("names") or [] if "wpr" in n.lower() or "desk" in n.lower()]
     s.stats.update(p.sample(g, s))
     p.stop(g, s, CiHost())
     info = g.files([p.etl(s)])[p.etl(s)]
     assert info.get("exists") and info.get("size"), f"no ETL: {info}"
     p.cleanup(g, s)
-    return "PASS", f"{info['size']} bytes; lost: {s.stats.get('lost', 'not reported')}"
+    return "PASS", f"{info['size']} bytes; lost: {s.stats.get('lost', 'not reported')}; sessions while recording: {during}"
 
 
 @case("CI-P-04")

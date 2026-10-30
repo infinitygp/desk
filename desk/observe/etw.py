@@ -8,8 +8,9 @@
   `desk observe mark` in the trace.
 
 Both write native ETL. tracerpt (also part of Windows) turns it into CSV and a summary on request.
-Events lost are read from the trace session while it runs (Get-EtwTraceSession) where Windows
-reports them; where it does not, the report says they were not measured, never that none were lost.
+Events lost are read from the trace session while it runs (ControlTrace's query, as
+EVENT_TRACE_PROPERTIES counts them: EventsLost, LogBuffersLost, RealTimeBuffersLost); where Windows
+does not answer, the report says they were not measured, never that none were lost.
 """
 
 import hashlib

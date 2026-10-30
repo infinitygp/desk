@@ -112,6 +112,42 @@ function EtwSessions {
     } catch { $null }
 }
 
+# What a running trace session counts, from ControlTrace(EVENT_TRACE_CONTROL_QUERY): the CIM class
+# above has its settings only (Windows CI). EVENT_TRACE_PROPERTIES on 64-bit Windows: WNODE_HEADER
+# (48 bytes), then ULONGs to EventsLost at 88, BuffersWritten 92, LogBuffersLost 96,
+# RealTimeBuffersLost 100, the logger thread handle at 104, the two name offsets at 112 and 116.
+function EtwCounts($name) {
+    if (-not ('DeskObserve.Etw' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace DeskObserve {
+    public static class Etw {
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode)]
+        static extern int ControlTraceW(ulong handle, string name, IntPtr properties, uint code);
+        public static long[] Query(string name) {
+            int size = 120 + 2 * 2048;
+            IntPtr p = Marshal.AllocHGlobal(size);
+            try {
+                for (int i = 0; i < size; i++) Marshal.WriteByte(p, i, 0);
+                Marshal.WriteInt32(p, 0, size);
+                Marshal.WriteInt32(p, 112, 120 + 2048);
+                Marshal.WriteInt32(p, 116, 120);
+                int rc = ControlTraceW(0, name, p, 0);
+                if (rc != 0) return new long[] { rc };
+                return new long[] { 0, (uint)Marshal.ReadInt32(p, 88), (uint)Marshal.ReadInt32(p, 92),
+                                    (uint)Marshal.ReadInt32(p, 96), (uint)Marshal.ReadInt32(p, 100) };
+            } finally { Marshal.FreeHGlobal(p); }
+        }
+    }
+}
+'@
+    }
+    $r = [DeskObserve.Etw]::Query($name)
+    if ($r[0] -ne 0) { return @{ control_trace_error = [int]$r[0] } }
+    @{ EventsLost = $r[1]; BuffersWritten = $r[2]; LogBuffersLost = $r[3]; RealTimeBuffersLost = $r[4] }
+}
+
 function EtwProps($s) {
     $props = @{}
     foreach ($p in $s.CimInstanceProperties) {
@@ -301,7 +337,11 @@ function Op-Etw($req) {
     foreach ($n in @($req.names)) {
         if (-not $n) { continue }
         $s = $all | Where-Object { $_.Name -eq $n } | Select-Object -First 1
-        $sessions[$n] = $(if ($s) { EtwProps $s } else { $null })
+        if (-not $s) { $sessions[$n] = $null; continue }
+        $props = EtwProps $s
+        try { $counts = EtwCounts $n } catch { $counts = @{ control_trace_error = $_.Exception.Message } }
+        foreach ($k in $counts.Keys) { $props[$k] = $counts[$k] }
+        $sessions[$n] = $props
     }
     @{ available = $true; sessions = $sessions; names = @($all | ForEach-Object { $_.Name }) }
 }
