@@ -21,6 +21,8 @@ the desktop, a boot, SELinux, polkit, reboots.
 Read the file for your task before you start:
 
 - Windows guests (`windows-11`): [windows.md](windows.md)
+- What a Windows program does inside (files, registry, processes, ETW, packets, USB, pipes) and
+  debugger servers in the guest: [observe.md](observe.md)
 - Cockpit plugins, also on phone-sized screens: [cockpit.md](cockpit.md)
 - OpenWrt packages and LuCI apps: [openwrt.md](openwrt.md)
 - Monitors (resolution, scaling, several displays), extra disks, host USB devices (hardware the
@@ -82,6 +84,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk browser console [--errors] [--all]` | Web console of every page since the run started (see Pitfalls) |
 | `desk record start [--fps N]`, `desk record stop`, `desk up --record` | Record the screen as a WebM video, kept with the report |
 | `desk usb ls`, `desk usb add VENDOR:PRODUCT\|BUS.DEVICE`, `desk usb rm ...`, `desk up IMAGE --usb ...` | Hand a host USB device to the guest ([system.md](system.md)) |
+| `desk observe start PROVIDER`, `desk observe mark TEXT`, `desk observe stop`, `desk observe providers` | Record what a program does inside a Windows guest with its own tools (Process Monitor, ETW, pktmon, USBPcap, IPC listings, debugger servers); files copied, hashed and checked ([observe.md](observe.md)) |
 | `desk doctor` | What this host has: where desk keeps its files, which host tools are missing (with the command that installs them), which images are built |
 
 Action commands (`click`, `type`, `key`, `scroll`, `action`, ...) accept `--shot` to screenshot
@@ -264,7 +267,9 @@ new one makes the step fail with exit 2, desk's failure, not the product's). In 
 report every console message is tagged with the step running when it was logged (`[before the
 first step]` for what the warm state and setup logged; a page logs a moment after the step that
 opened it, so look at the step before as well), so no extra step is needed just to separate setup
-noise. Every step takes `name` for the
+noise. `[[observe]]` tables start
+captures before the first step, `observe_start`, `observe_stop` and `mark` steps drive them
+([observe.md](observe.md)). Every step takes `name` for the
 report, and `soft = true` for an independent check whose failure should not stop the steps after it.
 `desk scenario check FILE` validates a file without starting anything: the image, every value's
 type, and options a step would not read (`rc` on a `click`). When a scenario fails,

@@ -49,6 +49,7 @@ scripts/             build.py makes desk.pyz, the release; pyz_main.py is its en
 skill/               agent skill: SKILL.md, and a file per task it points to
 desk/                harness code (guest_a11y.py runs inside the guest)
 tests/               unit tests
+docs/observe/        desk observe: handoff and validation records, the Windows workload and its checker
 images/              blocks images are made of: distros/, desktops/, addons/; shared/ what desktops share
 <home>/              base/, warm/, runs/, reports/, maintain/, cache/, logs/, keys/, ssh/  (see Host setup)
 ```
@@ -445,6 +446,47 @@ logs are, memory, swap, other runs), since a full disk that ends QEMU shows in t
   nothing. Stopping encodes them with GStreamer to WebM (VP9) with the wall-clock time in a bar
   below the picture, and `desk down` copies the videos next to the report. A recording stops by
   itself after 30 minutes (`--limit`) or 4 GiB.
+
+## Observation
+
+`desk observe` (`desk/observe/`, [skill/observe.md](skill/observe.md)) records inside a Windows
+guest with Windows' own tools and the user's: Process Monitor (PML), ETW through WPR or logman
+(ETL), pktmon and netsh trace (ETL, PCAPNG), USBPcap (pcap), listings of pipes and sockets, and
+debugger servers forwarded to the host. Providers build command lines and read answers; the
+orchestration (`desk/observe/__init__.py`) keeps the session and its guarantees:
+
+- A session belongs to its run (`runs/<id>/observe/`), with states starting, running, ended,
+  interrupted, stopping, stopped and failed, and a lock per session so two commands never stop
+  one capture twice. Guest folders and trace names carry the run and session
+  (`C:\desk\observe\<run>-<sN>`, `desk_<run>_<sN>`).
+- What runs in the guest goes through one helper, `helper.ps1`, pushed when its SHA-256 differs
+  and run as a script block (no execution policy applies), over the same SSH as `desk exec`, with
+  the time limit kept in the guest. Captures are started detached from the SSH session, never
+  through the in-session agent, which serves one request at a time. Processes are told apart by
+  PID and creation time, as Windows reuses PIDs.
+- desk stops only what it started: a ProcMon or packet capture it did not start makes `start`
+  refuse, `procmon /Terminate` (which ends every instance) runs only while desk's is alone, WPR
+  records under an instance name of desk's own and logman under a session name of desk's own.
+- Every capture has a watchdog in the guest (`helper.ps1 -Watch`) that stops it at its duration
+  (by a stopwatch, so `desk clock` does not move it) or its files' size, also when desk is gone,
+  and writes why; `desk down`, gc and the end of a scenario stop and collect what is open.
+- A capture counts as made only by its file: copied, compared by SHA-256 with the guest's, read
+  as its format (`formats.py`: PML header and tables, pcap and pcapng record by record, ETL only
+  as there and not empty). A file that is not whole stays on the host marked so, one that could
+  not be copied stays in the guest, and the session is not complete; exit 2, desk's failure.
+- Lost events are what the trace session reported (Get-EtwTraceSession) before it stopped; where
+  it reports none the report says they were not measured.
+- Clocks: the guest's time is sampled through qemu-guest-agent at start, every mark and stop, so
+  guest times are moved onto the host's, which the timeline, screenshots and video use. A mark
+  writes a file the guest's file system sees (ProcMon, file I/O traces) and an event of the
+  EventSource `Desk-Observe-Marker`, whose provider GUID follows from its name and which desk's
+  logman sessions enable.
+- Reboots end captures (the boot time differs: interrupted); snapshots carry the sessions, so a
+  restore says which captures went back to the snapshot's moment, which were never there, and
+  brings a capture that was collected since back as a session of its own.
+
+What is verified where, and what is still open on a real Windows 11 guest:
+[docs/observe/handoff.md](docs/observe/handoff.md), [docs/observe/validation.md](docs/observe/validation.md).
 
 ## Exit codes, locks, limits
 
