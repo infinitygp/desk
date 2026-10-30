@@ -97,10 +97,9 @@ class UsbPcap(Provider):
         elif iface not in [i["value"] for i in found]:
             raise Missing(f"USBPcap has no interface {iface} (it lists: {', '.join(i['value'] for i in found) or 'none'})")
         pcap = win(session.guest_dir, "usb.pcap")
-        proc = guest.launch(exe, ["-d", iface, "-o", pcap, "-s", str(session.options["snaplen"]), "-A"],
-                            win(session.guest_dir, "usbpcap.out"), win(session.guest_dir, "usbpcap.err"))
+        proc = guest.launch(exe, ["-d", iface, "-o", pcap, "-s", str(session.options["snaplen"]), "-A"])
         if proc.get("exited"):
-            raise Missing(f"USBPcapCMD ended at once (see {session.guest_dir}\\usbpcap.err)")
+            raise Missing(f"USBPcapCMD ended at once (try it by hand: desk exec -- '& \"{exe}\" -d {iface} -o x.pcap -A')")
         session.tool.update(interface=iface, pcap=pcap, procs=[{**proc, "name": "USBPcapCMD.exe"}])
 
     def watch_files(self, session: Session) -> list[str]:
@@ -112,8 +111,7 @@ class UsbPcap(Provider):
 
     def artifacts(self, session: Session) -> list[ArtifactSpec]:
         return [ArtifactSpec("usb.pcap", session.tool.get("pcap") or win(session.guest_dir, "usb.pcap"), "pcap",
-                             description=f"USB capture of {session.tool.get('interface', 'the root hub')}"),
-                ArtifactSpec("usbpcap.err", win(session.guest_dir, "usbpcap.err"), "text", required=False)]
+                             description=f"USB capture of {session.tool.get('interface', 'the root hub')}")]
 
     def verify(self, path, art):
         check = super().verify(path, art)

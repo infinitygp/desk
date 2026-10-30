@@ -119,10 +119,11 @@ class Guest:
         return self.call("exec", limit=timeout + OVERHEAD, exe=exe, args=subprocess.list2cmdline(args),
                          timeout=timeout, encoding=encoding, cwd=cwd)
 
-    def launch(self, exe: str, args: list[str], stdout: str, stderr: str, cwd: str | None = None) -> dict:
-        """Start a program detached from the SSH session; its identity (pid, creation time)."""
+    def launch(self, exe: str, args: list[str], cwd: str | None = None) -> dict:
+        """Start a program detached from the SSH session, with none of its handles (so neither SSH
+        nor this call waits for it); its identity (pid, creation time). Its output is not kept."""
         line = subprocess.list2cmdline(args)
-        return self.call("launch", exe=exe, args=line or None, stdout=stdout, stderr=stderr, cwd=cwd)
+        return self.call("launch", exe=exe, args=line or None, cwd=cwd)
 
     def alive(self, procs: list[dict]) -> list[dict]:
         if not procs:

@@ -147,6 +147,10 @@ class Protocol(unittest.TestCase):
         # PowerShell 7 only: null-coalescing, ternaries, pipeline chains, ConvertFrom-Json -AsHashtable.
         for construct in ("??", "?.", " && ", " || ", "-AsHashtable"):
             self.assertNotIn(construct, helper)
+        # A capture is started with none of the session's handles: redirecting its output would
+        # hand it the pipe SSH reads, and the command that started it would wait for it to end.
+        launch = helper[helper.index("function Op-Launch"):helper.index("function Op-Alive")]
+        self.assertNotIn("RedirectStandard", launch)
         # It refuses to create, write, read or remove anything outside its folder.
         self.assertEqual(helper.count("Under-Root"), 6)
 

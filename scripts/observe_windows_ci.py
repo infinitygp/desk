@@ -87,7 +87,8 @@ def session(provider: str, sid: str, **options) -> Session:
 
 
 def launch(exe: str, args: list[str], name: str) -> dict:
-    return g.launch(exe, args, win(GROOT, "ci", f"{name}.out"), win(GROOT, "ci", f"{name}.err"))
+    """`name` only says what it is in a failure."""
+    return g.launch(exe, args)
 
 
 def watch(order: dict, timeout: float = 60) -> dict:

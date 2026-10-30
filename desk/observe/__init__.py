@@ -272,8 +272,7 @@ def _watch(guest: Guest, p: Provider, s: Session) -> None:
              "tool": (s.tool.get("procs") or [None])[0], "stop": commands, "out": out}
     payload = base64.b64encode(json.dumps(order).encode()).decode()
     proc = guest.launch("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-                                           "-WindowStyle", "Hidden", "-File", GUEST_HELPER, "-Watch", payload],
-                        win(s.guest_dir, "watchdog.out"), win(s.guest_dir, "watchdog.err"))
+                                           "-WindowStyle", "Hidden", "-File", GUEST_HELPER, "-Watch", payload])
     s.watchdog = {"pid": proc["pid"], "created": proc["created"], "out": out}
 
 

@@ -108,9 +108,9 @@ class ProcMon(Provider):
             args += ["/LoadConfig", session.options["config"]]
         if session.limits.get("duration"):
             args += ["/Runtime", str(int(session.limits["duration"]))]
-        proc = guest.launch(exe, args, win(session.guest_dir, "procmon.out"), win(session.guest_dir, "procmon.err"))
+        proc = guest.launch(exe, args)
         if proc.get("exited") or proc.get("created") is None:
-            raise Missing(f"{exe} ended at once (see {session.guest_dir}\\procmon.err)")
+            raise Missing(f"{exe} ended at once (licence terms not accepted, or not a program for this Windows)")
         session.tool.update(exe=exe, pml=pml, procs=[{**proc, "name": exe.rsplit("\\", 1)[-1]}])
         # Capturing only from here: ProcMon says so with /WaitForIdle.
         tool_run(guest, exe, [*self.eula_args(session), "/WaitForIdle"], 90, "waiting for Process Monitor to start")
@@ -149,9 +149,7 @@ class ProcMon(Provider):
 
     def artifacts(self, session: Session) -> list[ArtifactSpec]:
         return [ArtifactSpec("procmon.pml", session.tool.get("pml") or win(session.guest_dir, "procmon.pml"), "pml",
-                             description="Process Monitor log"),
-                ArtifactSpec("procmon.err", win(session.guest_dir, "procmon.err"), "text", required=False,
-                             description="what ProcMon wrote to its error output")]
+                             description="Process Monitor log")]
 
     def convert(self, guest, session: Session, host) -> list[ArtifactSpec]:
         if not session.options.get("csv"):

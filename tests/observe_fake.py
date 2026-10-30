@@ -198,14 +198,12 @@ class FakeWindows(Guest):
             out["usb"] = list(self.usb)
         return out
 
-    def op_launch(self, exe, args, stdout, stderr, cwd=None):
+    def op_launch(self, exe, args, cwd=None):
         argv = split_windows(args or "")
         name = Path(exe.replace("\\", "/")).name
         if exe not in self.disk and name.lower() not in self.launchers and name.lower() != "powershell.exe":
             raise ObserveError(f"in the guest: launch: {exe} not found")
         p = self.new_proc(name, argv=argv, exe=exe)
-        self.disk[stdout] = b""
-        self.disk[stderr] = b""
         handler = self.launchers.get(name.lower())
         if handler:
             handler(self, argv, p)

@@ -13,7 +13,7 @@ itself runs on the host and is the user's; desk debugs nothing and ships no debu
 The guest's own network is user-mode (passt): nothing outside the host reaches a port in it
 unless desk forwards it, and desk forwards to the host's 127.0.0.1 only."""
 
-from .base import ArtifactSpec, Capability, Conflict, Missing, Option, Provider
+from .base import Capability, Conflict, Missing, Option, Provider
 from .guestops import items, win
 from .session import Session
 
@@ -62,10 +62,9 @@ class _Server(Provider):
         if self.setup_files and host.setup(self.name):
             self.deploy(guest, session, host)
         exe = self.exe(session.options)
-        proc = guest.launch(exe, self.args(session), win(session.guest_dir, "server.out"),
-                            win(session.guest_dir, "server.err"))
+        proc = guest.launch(exe, self.args(session))
         if proc.get("exited"):
-            raise Missing(f"{exe} ended at once (see {session.guest_dir}\\server.err)")
+            raise Missing(f"{exe} ended at once (try it by hand with desk exec to see why)")
         session.tool.update(exe=exe, port=port, procs=[{**proc, "name": exe.rsplit("\\", 1)[-1]}])
         import time
 
@@ -76,7 +75,7 @@ class _Server(Provider):
                 break
             alive = guest.alive(session.tool["procs"])
             if not alive or not alive[0].get("alive"):
-                raise Missing(f"{exe} ended before it listened on port {port} (see {session.guest_dir}\\server.err)")
+                raise Missing(f"{exe} ended before it listened on port {port} (try it by hand with desk exec to see why)")
             if time.monotonic() > deadline:
                 raise Missing(f"{exe} runs but does not listen on port {port} after {LISTEN_WAIT}s")
             time.sleep(1)
@@ -99,10 +98,6 @@ class _Server(Provider):
         if session.tool.get("forwarded") and host is not None:
             host.unforward(session.tool["port"])
             session.tool["forwarded"] = False
-
-    def artifacts(self, session: Session) -> list[ArtifactSpec]:
-        return [ArtifactSpec("server.out", win(session.guest_dir, "server.out"), "text", required=False),
-                ArtifactSpec("server.err", win(session.guest_dir, "server.err"), "text", required=False)]
 
     def summary(self, session: Session) -> list[str]:
         if not session.tool.get("local_port"):

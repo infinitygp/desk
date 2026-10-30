@@ -157,9 +157,10 @@ function Op-Probe($req) {
 }
 
 function Op-Launch($req) {
-    New-Item -ItemType Directory -Force -Path ([IO.Path]::GetDirectoryName($req.stdout)) | Out-Null
-    $sp = @{ FilePath = $req.exe; PassThru = $true; WindowStyle = 'Hidden'
-             RedirectStandardOutput = $req.stdout; RedirectStandardError = $req.stderr }
+    # Without redirection Start-Process starts it through ShellExecute, which hands over none of
+    # this session's handles: with its output redirected the program would inherit the pipe SSH
+    # (or whoever started this PowerShell) reads, and the caller would wait until it ended.
+    $sp = @{ FilePath = $req.exe; PassThru = $true; WindowStyle = 'Hidden' }
     if ($req.args) { $sp.ArgumentList = $req.args }
     if ($req.cwd) { $sp.WorkingDirectory = $req.cwd }
     $p = Start-Process @sp
