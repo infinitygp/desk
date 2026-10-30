@@ -39,9 +39,10 @@ MARKER_SOURCE = "Desk-Observe-Marker"
 
 
 def _providers() -> dict[str, Provider]:
+    from .etw import Logman, Wpr
     from .procmon import ProcMon
 
-    return {p.name: p for p in (ProcMon(),)}
+    return {p.name: p for p in (ProcMon(), Wpr(), Logman())}
 
 
 PROVIDERS = _providers()
