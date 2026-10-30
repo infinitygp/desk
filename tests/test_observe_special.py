@@ -197,12 +197,14 @@ class UsbPcap(Base):
 
     def test_the_only_interface_captured_until_ended_by_pid(self):
         with_usbpcap(self.guest)
-        s = self.start("usbpcap", options={"snaplen": 4096})
+        s = self.start("usbpcap", options={"snaplen": 4096, "descriptors": False})
         self.assertEqual(self.guest.usbpcap, ["-d", "\\\\.\\USBPcap1", "-o", "C:\\desk\\observe\\r1-s1\\usb.pcap", "-s",
                                               "4096", "-A"])
         self.assertEqual(s.tool["interface"], "\\\\.\\USBPcap1")
         s, problems = self.stop()
         self.assertEqual(problems, [])
+        self.start("usbpcap")
+        self.assertEqual(self.guest.usbpcap[-1], "--inject-descriptors")
         pcap = s.artifacts[0]
         self.assertTrue(pcap["verified"])
         self.assertIn("the 3 packets before it are whole", pcap["detail"])

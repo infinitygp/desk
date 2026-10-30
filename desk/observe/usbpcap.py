@@ -9,7 +9,8 @@ USBPcapCMD lists say.
 
 Interfaces are listed the way Wireshark asks USBPcapCMD for them (its extcap interface,
 `--extcap-interfaces`, lines `interface {value=...}{display=...}`); a capture is
-`USBPcapCMD.exe -d \\\\.\\USBPcapN -o FILE -s SNAPLEN -A` (all devices of that root hub), and
+`USBPcapCMD.exe -d \\\\.\\USBPcapN -o FILE -s SNAPLEN -A --inject-descriptors` (all devices of
+that root hub, with the descriptors of those connected already at its start), and
 it is ended by its PID: USBPcapCMD has no command that stops it, so the last packet of the file
 may be cut off, which the check of the file says."""
 
@@ -41,6 +42,8 @@ class UsbPcap(Provider):
         "interface": Option(str, "", "the root hub's capture interface, \\\\.\\USBPcapN (default: the only one)",
                             check=_iface),
         "snaplen": Option(int, 65535, "bytes kept of each USB packet"),
+        "descriptors": Option(bool, True, "put the descriptors of the devices already connected at the start of the "
+                              "capture (USBPcapCMD --inject-descriptors), so it says which device each packet is of"),
         "exe": Option(str, DEFAULT_EXE, "where USBPcapCMD.exe is in the guest"),
     }
     notes = ("USB packets (URBs) of every device on the root hub captured, with their data up to snaplen; HID "
@@ -97,7 +100,8 @@ class UsbPcap(Provider):
         elif iface not in [i["value"] for i in found]:
             raise Missing(f"USBPcap has no interface {iface} (it lists: {', '.join(i['value'] for i in found) or 'none'})")
         pcap = win(session.guest_dir, "usb.pcap")
-        proc = guest.launch(exe, ["-d", iface, "-o", pcap, "-s", str(session.options["snaplen"]), "-A"])
+        args = ["-d", iface, "-o", pcap, "-s", str(session.options["snaplen"]), "-A"]
+        proc = guest.launch(exe, args + (["--inject-descriptors"] if session.options["descriptors"] else []))
         if proc.get("exited"):
             raise Missing(f"USBPcapCMD ended at once (try it by hand: desk exec -- '& \"{exe}\" -d {iface} -o x.pcap -A')")
         session.tool.update(interface=iface, pcap=pcap, procs=[{**proc, "name": "USBPcapCMD.exe"}])
