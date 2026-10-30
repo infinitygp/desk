@@ -103,7 +103,14 @@ function Size-Of($path) {
     $item.Length
 }
 
-function Boot { Micro (Get-CimInstance Win32_OperatingSystem).LastBootUpTime }
+# Which boot this is: the counter Windows adds one to at every boot. LastBootUpTime is the clock
+# minus the uptime, and moved by days when desk set the clock of a guest restored from a warm
+# state, which then read as a reboot.
+function Boot {
+    $id = (Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management\PrefetchParameters' `
+        -Name BootId -ErrorAction SilentlyContinue).BootId
+    if ($null -ne $id) { "boot-$id" } else { "uptime-$(Micro (Get-CimInstance Win32_OperatingSystem).LastBootUpTime)" }
+}
 
 # The trace sessions there are, from the class Get-EtwTraceSession reads (which takes no listing
 # without -Name); $null where Windows has no such class.
@@ -168,7 +175,7 @@ function Op-Probe($req) {
         admin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
         os = @{ caption = $os.Caption; version = $os.Version; build = $os.BuildNumber; arch = $env:PROCESSOR_ARCHITECTURE }
         session = [Diagnostics.Process]::GetCurrentProcess().SessionId
-        boot = Micro $os.LastBootUpTime
+        boot = (Boot)
         files = @{}; commands = @{}; services = @{}; registry = @{}; processes = @()
     }
     foreach ($f in @($req.files)) {
