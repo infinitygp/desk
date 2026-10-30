@@ -26,6 +26,7 @@ from .session import Session
 # Windows 11 26H2), which counts as the same. Whose capture one is, the file it writes says.
 PKTMON_SESSION = "PktMon"
 NETSH_SESSION = "NetTrace"
+MIN_PKTMON_MB = 32
 _FILTER = re.compile(r"[A-Za-z][A-Za-z0-9.]*=[^\s=]+")
 
 
@@ -129,7 +130,9 @@ class Pktmon(_Capture):
     notes = ("packet metadata of every packet the adapters pass; payload only up to pkt_size bytes per packet "
              "(128 by default), encrypted traffic stays encrypted; loopback traffic is not seen with the nics "
              "component",
-             "the capture file is circular at its size limit: once full, the oldest packets are overwritten")
+             "pktmon's file is circular and made 16 MiB at a time: a capture whose traffic outgrew --max-mb kept "
+             "few or no packets, and pktmon said no events were lost (Windows 11 26H2); keep --max-mb well above "
+             "the traffic expected (4 GiB by default)")
 
     def check_options(self, opts: dict) -> None:
         if opts["pkt_size"] < 0:
@@ -139,6 +142,9 @@ class Pktmon(_Capture):
 
     def start(self, guest, session: Session, host) -> None:
         mb = max(1, (session.limits.get("max_bytes") or 512 << 20) >> 20)
+        if mb < MIN_PKTMON_MB:
+            # It makes its file 16 MiB at once and grows it 16 MiB at a time, whatever --file-size says.
+            raise ObserveError(f"pktmon writes its file 16 MiB at a time: --max-mb {MIN_PKTMON_MB} or more")
         args = ["start", "--capture", "--comp", *session.options["components"].split(),
                 "--pkt-size", str(session.options["pkt_size"]), "--file-name", self.etl(session), "--file-size", str(mb)]
         tool_run(guest, "pktmon.exe", args, 120, "starting Packet Monitor")
@@ -157,13 +163,6 @@ class Pktmon(_Capture):
     def convert(self, guest, session: Session, host) -> list[ArtifactSpec]:
         return self.pcapng(guest, session) if session.options.get("pcapng") else []
 
-    def summary(self, session: Session) -> list[str]:
-        lines = super().summary(session)
-        etl = next((a for a in session.artifacts if a["name"] == "net.etl"), None)
-        if etl and etl.get("guest_bytes") and session.tool.get("file_mb") and \
-                etl["guest_bytes"] >= 0.95 * (session.tool["file_mb"] << 20):
-            lines.append("the capture file reached its size limit: the oldest packets may have been overwritten")
-        return lines
 
 
 class NetshTrace(_Capture):

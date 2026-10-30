@@ -2,6 +2,7 @@
 endpoints, USBPcap and debugger servers. Their tools' real behaviour on Windows is for
 docs/observe/validation.md (WIN-NET-*, WIN-IPC-*, HW-USB-*, WIN-DBG-*)."""
 
+import base64
 import json
 import shutil
 import tempfile
@@ -74,11 +75,14 @@ class Pktmon(Base):
         self.assertNotIn(["stop"], self.guest.execs("pktmon.exe"))
         self.assertEqual(Store(self.run).find("s1").state, "running")
 
-    def test_a_full_circular_file_says_old_packets_may_be_gone(self):
-        s = self.start("pktmon", max_mb=1)
-        self.guest.disk["C:\\desk\\observe\\r1-s1\\net.etl"] = b"\x00" * (1 << 20)
-        s, _ = self.stop()
-        self.assertIn("oldest packets may have been overwritten", " ".join(observe.provider("pktmon").summary(s)))
+    def test_a_limit_below_pktmons_first_16_mib_is_refused_and_one_above_is_the_watchdogs(self):
+        with self.assertRaisesRegex(observe.ObserveError, "16 MiB at a time: --max-mb 32 or more"):
+            self.start("pktmon", max_mb=8)
+        self.assertEqual(self.guest.execs("pktmon.exe"), [])
+        s = self.start("pktmon", max_mb=64)
+        order = json.loads(base64.b64decode(self.guest.procs[s.watchdog["pid"]]["argv"][-1]))
+        self.assertEqual((order["max_bytes"], order["files"]), (64 << 20, ["C:\\desk\\observe\\r1-s2\\net.etl"]))
+        self.assertIn("64", self.guest.execs("pktmon.exe")[0])
 
     def test_one_packet_capture_at_a_time(self):
         self.start("pktmon")
