@@ -12,7 +12,7 @@ starts ProcMon only where the guest's registry says its terms were accepted alre
 a ProcMon desk did not start is never ended."""
 
 from .base import ArtifactSpec, Capability, Conflict, Missing, Option, Provider, command, tool_run
-from .guestops import win
+from .guestops import ObserveError, win
 from .session import Session
 
 NAMES = ("Procmon.exe", "Procmon64.exe", "Procmon64a.exe")
@@ -142,8 +142,13 @@ class ProcMon(Provider):
                 guest.stop_process(p)
             session.notes.append("ended by its PID (--force): ProcMon may not have finished its log")
         else:
-            tool_run(guest, session.tool["exe"], [*self.eula_args(session), "/Terminate"], 120,
-                     "stopping Process Monitor")
+            try:
+                tool_run(guest, session.tool["exe"], [*self.eula_args(session), "/Terminate"], 120,
+                         "stopping Process Monitor")
+            except ObserveError as e:
+                # Seen once on Windows 11 (exit 1, ProcMon running on); not reproduced since.
+                raise ObserveError(f"{e}; it still runs: desk observe stop again, or with --force, which ends it "
+                                   "by its PID (its log may then be incomplete)") from None
         if not guest.wait_gone(procs, 120):
             raise Conflict("Process Monitor is still running 120 s after it was told to stop")
 

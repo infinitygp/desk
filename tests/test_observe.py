@@ -437,6 +437,14 @@ class ProcMonLife(unittest.TestCase):
         self.assertIn("incomplete", problems[0])
         self.assertIn("ended by its PID", " ".join(s.notes))
 
+    def test_a_terminate_procmon_refuses_says_how_to_end_it(self):
+        self.start()
+        tool = self.guest.tools["procmon64.exe"]
+        self.guest.tools["procmon64.exe"] = lambda f, argv: {"rc": 1} if "/Terminate" in argv else tool(f, argv)
+        with self.assertRaisesRegex(observe.ObserveError, "exit 1; it still runs: .* --force"):
+            self.stop()
+        self.assertEqual(Store(self.run).find("s1").state, "running")
+
     def test_a_second_procmon_session_of_the_run_is_refused(self):
         self.start()
         with self.assertRaisesRegex(observe.Conflict, "holds procmon"):
