@@ -293,14 +293,15 @@ def logged_argv(argv: list[str]) -> list[str]:
     from .observe import PROVIDERS
 
     secret = {k for p in PROVIDERS.values() for k, o in p.OPTIONS.items() if o.secret}
+    set_flags = {"--s", "--se", "--set"}  # argparse accepts unambiguous long-option prefixes.
     out, after_set = [], False
     for a in argv:
-        flag, eq, value = a.partition("=") if a.startswith("--set=") else ("", "", a)
-        key = value.partition("=")[0]
+        flag, eq, value = a.partition("=") if a.partition("=")[0] in set_flags and "=" in a else ("", "", a)
+        key = value.partition("=")[0].strip()
         if (after_set or flag) and key in secret and "=" in value:
             value = f"{key}=(hidden)"
         out.append(f"{flag}={value}" if flag else value)
-        after_set = a == "--set"
+        after_set = a in set_flags
     return out
 
 

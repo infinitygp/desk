@@ -434,6 +434,29 @@ class Debuggers(Base):
 
 
 class Registry(unittest.TestCase):
+    def test_secret_option_keys_normalized_by_cli_are_redacted_from_the_timeline(self):
+        from desk.cli import _observe_options, build_parser
+        from desk.runs import logged_argv
+
+        marker = "SYNTHETIC_REDACTION_MARKER"
+        parser = build_parser()
+        for key in ("password", "password ", " password", " password "):
+            for inline in (False, True):
+                for flag in ("--s", "--se", "--set"):
+                    with self.subTest(key=key, inline=inline, flag=flag):
+                        value = f"{key}={marker}"
+                        self.assertEqual(_observe_options([value]), {"password": marker})
+                        option = [f"{flag}={value}"] if inline else [flag, value]
+                        argv = ["observe", "start", "ida", *option, "--set", "port=23946"]
+                        original = list(argv)
+                        parsed = parser.parse_args(argv)
+                        self.assertEqual(_observe_options(parsed.set)["password"], marker)
+                        logged = logged_argv(argv)
+                        self.assertNotIn(marker, json.dumps(logged))
+                        self.assertIn("port=23946", logged)
+                        self.assertEqual(argv, original)
+
+
     def test_every_provider_says_what_it_is(self):
         for p in observe.PROVIDERS.values():
             with self.subTest(p=p.name):
