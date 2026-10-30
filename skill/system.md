@@ -38,6 +38,12 @@ open; otherwise `desk usb add` refuses and prints a udev rule as a fish command 
 to the user to run. A device that re-enumerates (a firmware update, a phone switching USB mode)
 gets a new device number on the host: `desk usb add` it again.
 
+Host passthrough needs QEMU's `usb-host` backend (`qemu-hw-usb-host` on Arch,
+`qemu-device-usb-host` on Fedora), not just a guest USB controller. `desk doctor` lists this
+optional feature. `usb add` and `up --usb` refuse early with install hints if QEMU does not
+advertise it or the capability probe fails; `up --usb` does so before starting a VM.
+`usb ls`, `usb rm` and ordinary runs still work without it.
+
 ## Guest clock
 
 For what depends on time (schedules, timers, expiry, retention): `desk clock +3d` (also `-2h30m`;

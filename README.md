@@ -381,6 +381,10 @@ journalctl --user -u desk-maintain  # output of the last runs
   by bus and device number, plugged into the guest's xHCI controller. QEMU runs as the user
   (`qemu:///session`), so `desk usb add` checks that the device node is the user's to open and
   otherwise prints the udev rule that gives it to the kvm group.
+  Host passthrough also needs QEMU's `usb-host` backend, distinct from the guest's controller:
+  `desk doctor` lists it as optional, and `usb add` and `up --usb` check QEMU's advertised devices
+  before attaching or starting a run, with package install hints if absent or the probe fails.
+  Listing, removal and runs without host USB do not need it.
 - `desk clock` (`desk/clock.py`) sets the guest's time through qemu-guest-agent with the guest's
   time sync off and keeps the offset in `run.json`, put back after snapshot restores and reboots
   (tried for 20 s, as the agent may answer a moment late after a restore). A moved clock that
@@ -549,7 +553,7 @@ libvirt bindings to run.
 |---|---|---|
 | To start runs | `libvirt` `libvirt-python` `qemu-system-x86` `qemu-hw-display-virtio-vga` `qemu-img` `edk2-ovmf` `passt` `openssh` | `libvirt-daemon-driver-qemu` `python3-libvirt` `qemu-system-x86-core` `qemu-device-display-virtio-vga` `qemu-img` `edk2-ovmf` `passt` `openssh-clients` |
 | To build images | `virt-install` `openssh`; cloud images (`arch`, `debian-13`, `ubuntu-26.04`): `curl` `openssl`; `openwrt-*`: `curl` `gzip` `gptfdisk` `parted` `libguestfs`; `windows-11`: `curl` `7zip` `libisoburn` | `virt-install` `openssh`; cloud images (`arch`, `debian-13`, `ubuntu-26.04`): `curl` `openssl`; `openwrt-*`: `curl` `gzip` `gdisk` `parted` `libguestfs`; `windows-11`: `curl` `7zip` `xorriso` |
-| Single features | `python-pillow` (crops, several monitors), `qemu-hw-display-virtio-gpu-pci` (`--resolution`, `--displays`), `guestfs-tools` (`desk diff`), `gstreamer` `gst-plugins-base` `gst-plugins-good` (`desk record`), `github-cli` (installing and `desk update` from a private repository) | `python3-pillow`, `qemu-device-display-virtio-gpu-pci`, `guestfs-tools`, `gstreamer1` `gstreamer1-plugins-base` `gstreamer1-plugins-good`, `gh` |
+| Single features | `python-pillow` (crops, several monitors), `qemu-hw-display-virtio-gpu-pci` (`--resolution`, `--displays`), `qemu-hw-usb-host` (`usb add`, `up --usb`), `guestfs-tools` (`desk diff`), `gstreamer` `gst-plugins-base` `gst-plugins-good` (`desk record`), `github-cli` (installing and `desk update` from a private repository) | `python3-pillow`, `qemu-device-display-virtio-gpu-pci`, `qemu-device-usb-host`, `guestfs-tools`, `gstreamer1` `gstreamer1-plugins-base` `gstreamer1-plugins-good`, `gh` |
 
 The user needs `/dev/kvm` (the `kvm` group where it is not open to everybody); VMs run under
 `qemu:///session`, so nothing runs as root.

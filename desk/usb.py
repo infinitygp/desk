@@ -82,6 +82,11 @@ def attached(dom) -> list[tuple[int, int]]:
 
 def usable(query: str) -> dict:
     """The host device `query` names, if this user can hand it over; refused before a VM starts."""
+    from .doctor import USB_HOST, install_command
+
+    if not USB_HOST.present():
+        raise DeskError("QEMU usb-host is unavailable (or QEMU's device probe failed); host USB passthrough needs it: "
+                        + install_command(None, [USB_HOST]))
     device = pick(host_devices(), query)
     if not device["access"]:
         raise DeskError(f"{device['node']} ({device['id']} {device['name']}) cannot be opened by this user, "
