@@ -937,8 +937,15 @@ def cmd_observe(args) -> None:
         print("nothing to stop")
         return
     failed = []
-    for ref in sessions:
-        s, problems = observe.stop(run, ref, force=args.force, keep_guest=args.keep_guest, reason="desk observe stop")
+    for ref, done in zip(sessions, observe.stop_many(run, sessions, force=args.force, keep_guest=args.keep_guest,
+                                                     reason="desk observe stop")):
+        if isinstance(done, BaseException):
+            if len(sessions) == 1:
+                raise done
+            print(f"session {ref}: not stopped: {done}")
+            failed.append(f"{ref}: not stopped ({done})")
+            continue
+        s, problems = done
         _print_session(run, s)
         if problems:
             failed.append(f"{s.name()}: " + "; ".join(problems))

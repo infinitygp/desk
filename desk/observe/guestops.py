@@ -124,7 +124,8 @@ class Guest:
         return self.call("exec", limit=timeout + OVERHEAD, exe=exe, args=subprocess.list2cmdline(args),
                          timeout=timeout, encoding=encoding, cwd=cwd)
 
-    def launch(self, exe: str, args: list[str], cwd: str | None = None, secret_env: tuple[str, str] | None = None) -> dict:
+    def launch(self, exe: str, args: list[str], cwd: str | None = None,
+               secret_env: tuple[str, str] | None = None) -> dict:
         """Start a program detached from the SSH session, with none of its handles (so neither SSH
         nor this call waits for it); its identity (pid, creation time). Its output is not kept.
         `secret_env` (NAME, VALUE) is added to its environment, never to a command line."""

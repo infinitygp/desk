@@ -128,6 +128,57 @@ class Pktmon(Base):
                       observe.provider("pktmon").summary(s))
 
 
+class TwoPasses(Base):
+    """stop --all, observe_stop = true and desk down stop every capture before copying any."""
+
+    def setUp(self):
+        super().setUp()
+        from tests.observe_fake import with_procmon
+
+        with_procmon(self.guest)
+        self.guest.registry["HKCU:\\Software\\Sysinternals\\Process Monitor\\EulaAccepted"] = 1
+        self.guest.disk["C:\\pm\\Procmon64.exe"] = b"MZ"
+        self.order = []
+        call, pull = self.guest.call, self.guest.pull
+
+        def calling(op, limit=60, **params):
+            if op == "exec":
+                self.order.append(("exec", Path(params["exe"].replace("\\", "/")).name, params["args"]))
+            return call(op, limit, **params)
+
+        def pulling(remote, local, timeout=600):
+            self.order.append(("pull", remote.rsplit("\\", 1)[-1]))
+            return pull(remote, local, timeout)
+
+        self.guest.call, self.guest.pull = calling, pulling
+
+    def test_every_capture_stops_before_any_is_converted_or_copied(self):
+        self.start("procmon", options={"exe": "C:\\pm\\Procmon64.exe"})
+        self.start("pktmon")
+        self.order.clear()
+        results = observe.stop_many(self.run, ["s1", "s2"], host=self.host, guest=self.guest)
+        self.assertEqual([r[1] for r in results], [[], []])
+        first_pull = next(i for i, o in enumerate(self.order) if o[0] == "pull")
+        stops = [i for i, o in enumerate(self.order) if o[0] == "exec" and ("/Terminate" in o[2] or o[2] == "stop")]
+        converts = [i for i, o in enumerate(self.order) if o[0] == "exec" and "etl2pcap" in o[2]]
+        self.assertEqual(len(stops), 2)
+        self.assertLess(max(stops), min(converts))
+        self.assertLess(max(stops), first_pull)
+
+    def test_one_that_does_not_stop_stays_to_be_stopped_again_and_the_others_are_collected(self):
+        self.start("procmon", options={"exe": "C:\\pm\\Procmon64.exe"})
+        self.start("pktmon")
+        foreign = self.guest.new_proc("Procmon64.exe")
+        results = observe.stop_many(self.run, ["s1", "s2"], host=self.host, guest=self.guest)
+        self.assertIsInstance(results[0], observe.Conflict)
+        self.assertEqual(results[1][1], [])
+        held = Store(self.run).load("s1")
+        self.assertEqual((held.state, held.artifacts), ("running", []))
+        foreign["alive"] = False
+        s, problems = observe.stop(self.run, "s1", host=self.host, guest=self.guest)
+        self.assertEqual((s.state, problems), ("stopped", []))
+
+
 class SessionNames(unittest.TestCase):
     def test_a_numbered_session_of_the_tool_counts(self):
         from desk.observe.network import NETSH_SESSION, PKTMON_SESSION, _capturing

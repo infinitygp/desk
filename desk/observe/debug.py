@@ -73,7 +73,7 @@ class _Server(Provider):
             self.deploy(guest, session, host)
         exe = self.exe(session.options)
         secret = self.secret_env(session)
-        proc = guest.launch(exe, self.args(session), secret_env=secret) if secret else guest.launch(exe, self.args(session))
+        proc = guest.launch(exe, self.args(session), **({"secret_env": secret} if secret else {}))
         if proc.get("exited"):
             raise Missing(f"{exe} ended at once (try it by hand with desk exec to see why)")
         session.tool.update(exe=exe, port=port, procs=[{**proc, "name": exe.rsplit("\\", 1)[-1]}])

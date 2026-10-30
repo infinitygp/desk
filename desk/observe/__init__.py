@@ -17,6 +17,7 @@ import os
 import shutil
 import sys
 import time
+from contextlib import ExitStack
 from pathlib import Path
 
 from ..config import CACHE, DeskError
@@ -25,7 +26,7 @@ from .guestops import GUEST_HELPER, ROOT, Guest, ObserveError, win
 from .session import ACTIVE, COLLECTABLE, Session, Store, pid_alive, process_key
 
 __all__ = ["ObserveError", "Missing", "Unsupported", "Conflict", "Privileges", "PROVIDERS", "start", "stop",
-           "status", "listing", "mark", "setup", "capabilities", "collect_all", "snapshot_saved",
+           "stop_many", "status", "listing", "mark", "setup", "capabilities", "collect_all", "snapshot_saved",
            "snapshot_restored"]
 
 # A capture nobody stops ends by itself after this long, or at this size of its files.
@@ -339,7 +340,8 @@ def reconcile(run, guest: Guest | None = None, store: Store | None = None) -> li
                 changed.append(s)
         else:
             guest = guest or guest_for(run)
-            procs = [pr for s in watching for pr in [*(s.tool.get("procs") or []), *([s.watchdog] if s.watchdog else [])]]
+            procs = [pr for s in watching
+                     for pr in [*(s.tool.get("procs") or []), *([s.watchdog] if s.watchdog else [])]]
             state = guest.call("state", procs=procs, watch=[s.watchdog["out"] for s in watching if s.watchdog],
                                etw=any(PROVIDERS[s.provider].name in ("wpr", "etw", "pktmon", "netsh")
                                        for s in watching))
@@ -471,93 +473,129 @@ def stop(run, ref: str | None = None, force: bool = False, keep_guest: bool = Fa
     """Stop the capture (if it still runs), copy its files, check them; the session and what is
     wrong with what it left (nothing: complete). A capture that could not be stopped (another
     ProcMon in the way) stays as it was, to be stopped again."""
+    [done] = stop_many(run, [ref], force=force, keep_guest=keep_guest, reason=reason, host=host, guest=guest)
+    if isinstance(done, BaseException):
+        raise done
+    return done
+
+
+def stop_many(run, refs: list[str | None], force: bool = False, keep_guest: bool = False, reason: str = "",
+              host: Host | None = None, guest: Guest | None = None) -> list:
+    """Several sessions in two passes: every capture is stopped first, and only then is any of
+    them converted and copied, so that no capture still running records desk taking the others'
+    files. Per session, in the order given: (session, problems), or the error that kept it from
+    stopping; such a one stays as it was, to be stopped again, and the others go on."""
     store = Store(run)
     host = host or Host(run)
     live = run.live_domain() is not None
     guest = guest or (guest_for(run) if live else None)
     reconcile(run, guest=guest, store=store)
-    s = store.find(ref)
-    if s.state not in COLLECTABLE:
-        raise DeskError(f"session {s.name()} is {s.state}" + (": another desk command is stopping it"
-                                                               if s.state == "stopping" else " (desk observe list)"))
-    with store.operation(s.id):
-        s = store.load(s.id)
-        before = s.state
-        p = PROVIDERS[s.provider]
-        # The tools of a rebooted or restored guest are gone with it; there is nothing to stop.
-        gone = before == "interrupted" and s.error.startswith(("the guest rebooted", "snapshot", "the VM"))
-        s.state, s.pid = "stopping", os.getpid()
-        s.event("stopping", reason)
+    results: dict[int, object] = {}
+    ended = []
+    with ExitStack() as held:
+        # Pass 1: stop.
+        for i, ref in enumerate(refs):
+            try:
+                s = store.find(ref)
+                if s.state not in COLLECTABLE:
+                    raise DeskError(f"session {s.name()} is {s.state}" + (
+                        ": another desk command is stopping it" if s.state == "stopping" else " (desk observe list)"))
+                held.enter_context(store.operation(s.id))
+                ended.append((i, *_end_capture(store, guest, host, s.id, live, force, reason)))
+            except DeskError as e:
+                results[i] = e
+        # Pass 2: convert, copy, check, clean up.
+        for i, s, before, gone in ended:
+            results[i] = (s, _finish(run, store, guest, host, s, before, gone, live, keep_guest))
+    return [results[i] for i in range(len(refs))]
+
+
+def _end_capture(store: Store, guest: Guest, host: Host, sid: str, live: bool, force: bool,
+                 reason: str) -> tuple[Session, str, bool]:
+    s = store.load(sid)
+    before = s.state
+    p = PROVIDERS[s.provider]
+    # The tools of a rebooted or restored guest are gone with it; there is nothing to stop.
+    gone = before == "interrupted" and s.error.startswith(("the guest rebooted", "snapshot", "the VM"))
+    s.state, s.pid = "stopping", os.getpid()
+    s.event("stopping", reason)
+    store.update(s)
+    watchdog_ended = False
+    try:
+        if live and not gone and (before == "running" or s.tool.get("procs")):
+            if before == "running":
+                s.stats.update(p.sample(guest, s))
+            _end_watchdog(guest, s)
+            watchdog_ended = True
+            p.stop(guest, s, host, force=force)
+    except BaseException as e:
+        s.state, s.pid = before, 0
+        s.event("stop failed", str(e) or type(e).__name__)
+        if watchdog_ended and before == "running" and s.started:
+            # The capture goes on, so its limits do: what is left of its time, from now.
+            try:
+                _watch(guest, p, s, seconds=max(10.0, s.limits.get("duration", 0) - (time.time() - s.started)))
+            except DeskError as again:
+                s.event("watchdog gone", f"not started again after the failed stop: {again}")
         store.update(s)
-        watchdog_ended = False
-        try:
-            if live and not gone and (before == "running" or s.tool.get("procs")):
-                if before == "running":
-                    s.stats.update(p.sample(guest, s))
-                _end_watchdog(guest, s)
-                watchdog_ended = True
-                p.stop(guest, s, host, force=force)
-        except BaseException as e:
-            s.state, s.pid = before, 0
-            s.event("stop failed", str(e) or type(e).__name__)
-            if watchdog_ended and before == "running" and s.started:
-                # The capture goes on, so its limits do: what is left of its time, from now.
+        raise
+    store.update(s)
+    return s, before, gone
+
+
+def _finish(run, store: Store, guest: Guest, host: Host, s: Session, before: str, gone: bool, live: bool,
+            keep_guest: bool) -> list[str]:
+    p = PROVIDERS[s.provider]
+    problems: list[str] = [f"interrupted: {s.error}"] if before == "interrupted" else []
+    try:
+        if not live:
+            problems.append("the VM is not running: nothing could be collected from the guest")
+        else:
+            if s.target and not gone:
+                _follow(guest, s)
+            try:
+                p.found(guest, s)
+            except DeskError as e:
+                problems.append(f"looking for its files in the guest: {e}")
+            arts = p.artifacts(s)
+            if not gone:
                 try:
-                    _watch(guest, p, s, seconds=max(10.0, s.limits.get("duration", 0) - (time.time() - s.started)))
-                except DeskError as again:
-                    s.event("watchdog gone", f"not started again after the failed stop: {again}")
-            store.update(s)
-            raise
-        problems: list[str] = [f"interrupted: {s.error}"] if before == "interrupted" else []
-        try:
-            if not live:
-                problems.append("the VM is not running: nothing could be collected from the guest")
-            else:
-                if s.target and not gone:
-                    _follow(guest, s)
-                try:
-                    p.found(guest, s)
+                    arts += p.convert(guest, s, host)
                 except DeskError as e:
-                    problems.append(f"looking for its files in the guest: {e}")
-                arts = p.artifacts(s)
-                if not gone:
-                    try:
-                        arts += p.convert(guest, s, host)
-                    except DeskError as e:
-                        s.notes.append(f"conversion failed: {e}")
-                problems += _collect(guest, store, s, p, arts)
+                    s.notes.append(f"conversion failed: {e}")
+            problems += _collect(guest, store, s, p, arts)
+            try:
+                s.clock.append({**guest.clock(), "at": "stop"})
+            except DeskError:
+                pass
+            if not gone:
                 try:
-                    s.clock.append({**guest.clock(), "at": "stop"})
-                except DeskError:
-                    pass
-                if not gone:
-                    try:
-                        p.cleanup(guest, s, host)
-                    except DeskError as e:
-                        problems.append(f"cleaning up in the guest: {e}")
-                if not s.guest_dir:
-                    pass  # it never got as far as a folder in the guest
-                elif not keep_guest and all(a.get("transferred") or not a.get("in_guest") for a in s.artifacts):
-                    guest.remove(s.guest_dir)
-                elif s.artifacts:
-                    s.notes.append(f"the guest keeps {s.guest_dir}")
-        except BaseException as e:
-            problems.append(f"collecting stopped: {e or type(e).__name__}")
-            raise
-        finally:
-            s.state, s.pid, s.stopped = "stopped", 0, time.time()
-            verdict = s.stats.get("watchdog") or {}
-            if verdict.get("reason") in ("duration", "size"):
-                s.notes.append(_ended_why(verdict))
-            if s.stats.get("watchdog_gone"):
-                s.notes.append("its watchdog ended early: the time and size limits were not kept from then on")
-            s.complete = not problems
-            s.error = "; ".join(problems)
-            s.event("stopped", "complete" if s.complete else s.error)
-            store.update(s)
-            run.log_event(observe="stop", session=s.id, provider=s.provider, complete=s.complete,
-                          artifacts=[a["name"] for a in s.artifacts if a.get("transferred")])
-    return s, problems
+                    p.cleanup(guest, s, host)
+                except DeskError as e:
+                    problems.append(f"cleaning up in the guest: {e}")
+            if not s.guest_dir:
+                pass  # it never got as far as a folder in the guest
+            elif not keep_guest and all(a.get("transferred") or not a.get("in_guest") for a in s.artifacts):
+                guest.remove(s.guest_dir)
+            elif s.artifacts:
+                s.notes.append(f"the guest keeps {s.guest_dir}")
+    except BaseException as e:
+        problems.append(f"collecting stopped: {e or type(e).__name__}")
+        raise
+    finally:
+        s.state, s.pid, s.stopped = "stopped", 0, time.time()
+        verdict = s.stats.get("watchdog") or {}
+        if verdict.get("reason") in ("duration", "size"):
+            s.notes.append(_ended_why(verdict))
+        if s.stats.get("watchdog_gone"):
+            s.notes.append("its watchdog ended early: the time and size limits were not kept from then on")
+        s.complete = not problems
+        s.error = "; ".join(problems)
+        s.event("stopped", "complete" if s.complete else s.error)
+        store.update(s)
+        run.log_event(observe="stop", session=s.id, provider=s.provider, complete=s.complete,
+                      artifacts=[a["name"] for a in s.artifacts if a.get("transferred")])
+    return problems
 
 
 def _end_watchdog(guest: Guest, s: Session) -> None:
@@ -647,15 +685,18 @@ def collect_all(run, reason: str, guest: Guest | None = None, host: Host | None 
     if not (store.dir / "sessions").is_dir():
         return []
     warnings = []
-    for s in store.all():
-        if s.state not in COLLECTABLE and s.state not in ("starting", "stopping"):
-            continue
-        try:
-            done, problems = stop(run, s.id, reason=reason, guest=guest, host=host)
-            if problems:
-                warnings.append(f"observation {done.name()} ({done.provider}): " + "; ".join(problems))
-        except DeskError as e:
-            warnings.append(f"observation {s.name()} ({s.provider}) not collected: {e}")
+    open_ = [s for s in store.all() if s.state in COLLECTABLE or s.state in ("starting", "stopping")]
+    if not open_:
+        return []
+    try:
+        results = stop_many(run, [s.id for s in open_], reason=reason, guest=guest, host=host)
+    except DeskError as e:
+        return [f"observation sessions not collected: {e}"]
+    for s, done in zip(open_, results):
+        if isinstance(done, BaseException):
+            warnings.append(f"observation {s.name()} ({s.provider}) not collected: {done}")
+        elif done[1]:
+            warnings.append(f"observation {done[0].name()} ({done[0].provider}): " + "; ".join(done[1]))
     return warnings
 
 

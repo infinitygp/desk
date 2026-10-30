@@ -257,13 +257,18 @@ def _observe_step(run, steps: Steps, action: str, value) -> str:
             m = observe.mark(run, value)
             return f"mark {m['seq']} in {', '.join(m['sessions'])}"
         refs = ([s.id for s in observe.listing(run) if s.state in observe.COLLECTABLE] if value is True else [value])
-        done = []
-        for ref in refs:
-            s, problems = observe.stop(run, ref, reason="scenario step")
+        done, wrong = [], []
+        for ref, result in zip(refs, observe.stop_many(run, refs, reason="scenario step") if refs else []):
+            if isinstance(result, BaseException):
+                wrong.append(f"observation {ref} not stopped: {result}")
+                continue
+            s, problems = result
             if problems:
-                raise observe.ObserveError(f"observation {s.name()} is not complete: " + "; ".join(problems))
+                wrong.append(f"observation {s.name()} is not complete: " + "; ".join(problems))
             done.append(f"{s.name()}: " + ", ".join(a["name"] for a in s.artifacts
                                                     if a.get("verified") and a["kind"] != "text"))
+        if wrong:
+            raise observe.ObserveError("; ".join(wrong))
         return "; ".join(done) or "no session open"
     except observe.ObserveError:
         raise
