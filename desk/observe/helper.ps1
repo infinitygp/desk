@@ -217,20 +217,17 @@ function Op-Probe($req) {
 }
 
 function Op-Launch($req) {
-    # Without redirection Start-Process starts it through ShellExecute, which hands over none of
-    # this session's handles: with its output redirected the program would inherit the pipe SSH
-    # (or whoever started this PowerShell) reads, and the caller would wait until it ended.
-    $sp = @{ FilePath = $req.exe; PassThru = $true; WindowStyle = 'Hidden' }
-    if ($req.args) { $sp.ArgumentList = $req.args }
-    if ($req.cwd) { $sp.WorkingDirectory = $req.cwd }
-    $p = Start-Process @sp
-    $created = $null
-    try { $created = Micro $p.StartTime } catch { }
-    if ($null -eq $created) {
-        $c = Get-CimInstance Win32_Process -Filter "ProcessId = $($p.Id)" -ErrorAction SilentlyContinue
-        if ($c) { $created = Micro $c.CreationDate }
-    }
-    @{ pid = $p.Id; created = $created; exited = $p.HasExited }
+    # Through WMI, not Start-Process: Windows' OpenSSH ends every process of a session's job
+    # object when the session closes (seen on Windows 11 26H2), and a process WMI creates is in
+    # no such job. It gets the caller's elevated token and none of this session's handles.
+    $line = '"' + $req.exe + '"' + $(if ($req.args) { ' ' + $req.args } else { '' })
+    $hidden = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }
+    $a = @{ CommandLine = $line; ProcessStartupInformation = $hidden }
+    if ($req.cwd) { $a.CurrentDirectory = $req.cwd }
+    $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments $a
+    if ($r.ReturnValue -ne 0) { throw "Win32_Process.Create of $($req.exe) failed with $($r.ReturnValue)" }
+    $c = Get-CimInstance Win32_Process -Filter "ProcessId = $($r.ProcessId)" -ErrorAction SilentlyContinue
+    @{ pid = [int]$r.ProcessId; created = $(if ($c) { Micro $c.CreationDate } else { $null }); exited = (-not $c) }
 }
 
 function Op-Alive($req) {

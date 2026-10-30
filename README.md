@@ -461,10 +461,11 @@ orchestration (`desk/observe/__init__.py`) keeps the session and its guarantees:
   (`C:\desk\observe\<run>-<sN>`, `desk_<run>_<sN>`).
 - What runs in the guest goes through one helper, `helper.ps1`, pushed when its SHA-256 differs
   and run as a script block (no execution policy applies), over the same SSH as `desk exec`, with
-  the time limit kept in the guest. Captures are started detached from the SSH session and with
-  none of its handles (through ShellExecute: with its output redirected a capture would hold the
-  pipe SSH reads, and its start would wait for its end), never through the in-session agent, which serves one request at a time. Processes are told apart by
-  PID and creation time, as Windows reuses PIDs.
+  the time limit kept in the guest. Captures and watchdogs are started through WMI
+  (`Win32_Process.Create`), outside the SSH session: Windows' OpenSSH ends every process of a
+  session when it closes, and one WMI creates holds none of its handles and keeps the elevated
+  token. Never through the in-session agent, which serves one request at a time. Processes are
+  told apart by PID and creation time, as Windows reuses PIDs.
 - desk stops only what it started: a ProcMon or packet capture it did not start makes `start`
   refuse, `procmon /Terminate` (which ends every instance) runs only while desk's is alone, WPR
   records under an instance name of desk's own and logman under a session name of desk's own.
