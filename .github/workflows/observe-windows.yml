@@ -4,6 +4,9 @@ name: Observe on Windows
 # desk runs in guests, and scripts/observe_windows_ci.py runs the helper's operations and the
 # providers' command lines (logman, WPR, pktmon, netsh, tracerpt) for real, without a VM. Not a
 # desk run, not Windows 11 and neither ProcMon nor USBPcap: docs/observe/validation.md, CI-*.
+# Only when asked: run by hand (workflow_dispatch, once the workflow is on the default branch), or
+# a push whose last commit message says [windows-ci]. Other pushes skip the job, which uses no
+# runner minutes.
 on:
   push:
     paths:
@@ -20,6 +23,7 @@ concurrency:
 
 jobs:
   observe:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[windows-ci]')
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
