@@ -540,12 +540,18 @@ def collect(run, diff: bool = False) -> Path:
 
 
 def reported(run) -> bool:
-    """A report of this run exists (not of an earlier run of the same name, nor the directory of
-    one that could not be written)."""
+    """A report of this run exists and holds what it did: written after its last timeline entry
+    (a run kept after its scenario's report went on), not of an earlier run of the same name, nor
+    the directory of one that could not be written."""
     try:
-        return (REPORTS / run.id / "report.md").stat().st_mtime >= run.created
+        at = (REPORTS / run.id / "report.md").stat().st_mtime
     except OSError:
         return False
+    try:
+        last = (Path(run.dir) / "log.jsonl").stat().st_mtime
+    except OSError:
+        last = run.created
+    return at >= max(run.created, last)
 
 
 @contextmanager
