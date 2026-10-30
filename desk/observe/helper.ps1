@@ -94,6 +94,23 @@ function Size-Of($path) {
 
 function Boot { Micro (Get-CimInstance Win32_OperatingSystem).LastBootUpTime }
 
+# The trace sessions there are, from the class Get-EtwTraceSession reads (which takes no listing
+# without -Name); $null where Windows has no such class.
+function EtwSessions {
+    try {
+        @(Get-CimInstance -Namespace root/Microsoft/Windows/EventTracingManagement -ClassName MSFT_EtwTraceSession -ErrorAction Stop)
+    } catch { $null }
+}
+
+function EtwProps($s) {
+    $props = @{}
+    foreach ($p in $s.CimInstanceProperties) {
+        $v = $p.Value
+        if ($v -is [ValueType] -or $v -is [string]) { $props[$p.Name] = $v }
+    }
+    $props
+}
+
 function Op-Probe($req) {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($id)
@@ -142,11 +159,8 @@ function Op-Probe($req) {
         })
     }
     if ($req.etw) {
-        if (Get-Command Get-EtwTraceSession -ErrorAction SilentlyContinue) {
-            $out.etw_sessions = @(Get-EtwTraceSession -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
-        } else {
-            $out.etw_sessions = $null
-        }
+        $all = EtwSessions
+        $out.etw_sessions = $(if ($null -eq $all) { $null } else { @($all | ForEach-Object { $_.Name }) })
     }
     if ($req.usb) {
         $out.usb = @(Get-CimInstance Win32_PnPEntity | Where-Object { $_.DeviceID -like 'USB\VID_*' } | ForEach-Object {
@@ -271,21 +285,15 @@ function Op-Mark($req) {
 }
 
 function Op-Etw($req) {
-    if (-not (Get-Command Get-EtwTraceSession -ErrorAction SilentlyContinue)) { return @{ available = $false } }
+    $all = EtwSessions
+    if ($null -eq $all) { return @{ available = $false } }
     $sessions = @{}
     foreach ($n in @($req.names)) {
         if (-not $n) { continue }
-        $s = Get-EtwTraceSession -Name $n -ErrorAction SilentlyContinue
-        if (-not $s) { $sessions[$n] = $null; continue }
-        $props = @{}
-        foreach ($p in $s.PSObject.Properties) {
-            $v = $null
-            try { $v = $p.Value } catch { continue }
-            if ($v -is [ValueType] -or $v -is [string]) { $props[$p.Name] = $v }
-        }
-        $sessions[$n] = $props
+        $s = $all | Where-Object { $_.Name -eq $n } | Select-Object -First 1
+        $sessions[$n] = $(if ($s) { EtwProps $s } else { $null })
     }
-    @{ available = $true; sessions = $sessions; names = @(Get-EtwTraceSession -ErrorAction SilentlyContinue | ForEach-Object { $_.Name }) }
+    @{ available = $true; sessions = $sessions; names = @($all | ForEach-Object { $_.Name }) }
 }
 
 function Op-Ipc($req) {
@@ -364,8 +372,9 @@ function Op-State($req) {
         if (-not $f) { continue }
         $out.watch[$f] = $(if ((Under-Root $f) -and (Test-Path -LiteralPath $f)) { [IO.File]::ReadAllText($f) } else { $null })
     }
-    if ($req.etw -and (Get-Command Get-EtwTraceSession -ErrorAction SilentlyContinue)) {
-        $out.etw_sessions = @(Get-EtwTraceSession -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+    if ($req.etw) {
+        $all = EtwSessions
+        if ($null -ne $all) { $out.etw_sessions = @($all | ForEach-Object { $_.Name }) }
     }
     $out
 }

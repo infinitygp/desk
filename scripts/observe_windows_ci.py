@@ -177,7 +177,7 @@ def files_and_root():
     data = os.urandom(100_000)
     Path(win(GROOT, "ci", "x.bin")).write_bytes(data)
     info = g.files([win(GROOT, "ci", "x.bin")], hash=True)[win(GROOT, "ci", "x.bin")]
-    assert info["sha256"] == hashlib.sha256(data).hexdigest(), info
+    assert info.get("sha256") == hashlib.sha256(data).hexdigest(), f"the guest's answer: {info}"
     for op, params in (("remove", {"paths": ["C:\\Windows\\Temp\\desk-ci"]}), ("mkdir", {"paths": ["C:\\desk-ci"]}),
                        ("read", {"path": "C:\\Windows\\win.ini"})):
         try:
