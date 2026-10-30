@@ -275,7 +275,12 @@ class Provider:
 
     def cleanup(self, guest, session: Session, host=None) -> None:
         """Take back what the provider set up in the guest and still holds, its own only."""
-        for p in session.tool.get("procs") or []:
+        procs = session.tool.get("procs") or []
+        if not procs and session.guest_dir:
+            # A desk killed before it kept what it launched: desk's are those that name this
+            # session's own folder (ProcMon's /BackingFile, USBPcapCMD's -o).
+            procs = [p for p in guest.processes() if session.guest_dir.lower() in (p.get("cmdline") or "").lower()]
+        for p in procs:
             guest.stop_process(p, tree=True)
 
     def on_mark(self, guest, session: Session, marker: dict) -> None:

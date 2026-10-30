@@ -6,6 +6,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from desk import observe
 from desk.observe import etw
@@ -152,8 +153,8 @@ class Wpr(Base):
                       self.guest.execs("wpr.exe"))
         self.assertEqual(s.stats["lost"], {"WPR_initiated_desk_r1_s1.EventsLost": 7,
                                            "WPR_initiated_desk_r1_s1.BuffersLost": 0})
-        # Cleanup cancels only its own instance, which is gone already.
-        self.assertEqual(self.guest.execs("wpr.exe")[-1], ["-cancel", "-instancename", "desk_r1_s1"])
+        # Its own instance is gone already: nothing to cancel.
+        self.assertNotIn("-cancel", [a[0] for a in self.guest.execs("wpr.exe")])
 
     def test_skip_pdb_generation_on_request(self):
         s = self.start("wpr", options={"pdbgen": False})
@@ -168,8 +169,31 @@ class Wpr(Base):
         n = len(self.guest.execs("wpr.exe"))
         s, problems = self.stop()
         self.assertEqual(problems, [])
-        self.assertEqual([a[0] for a in self.guest.execs("wpr.exe")[n:]], ["-cancel"])
+        self.assertEqual(self.guest.execs("wpr.exe")[n:], [])
         self.assertIn("time limit", " ".join(s.notes))
+
+    def test_a_desk_killed_while_wpr_starts_leaves_a_recording_its_stop_cancels(self):
+        tool = self.guest.tools["wpr.exe"]
+        kept = {}
+
+        def starting(f, argv):
+            if argv[0] == "-start":
+                kept.update(guest_dir=Store(self.run).load("s1").guest_dir)
+            return tool(f, argv)
+
+        self.guest.tools["wpr.exe"] = starting
+        self.start("wpr")
+        # What the store holds while WPR starts is what a kill -9 then leaves.
+        self.assertEqual(kept["guest_dir"], "C:\\desk\\observe\\r1-s1")
+        with Store(self.run).edit("s1") as s:
+            s.state, s.pid, s.tool, s.watchdog = "starting", 999999, {}, None
+        with mock.patch("desk.observe.pid_alive", return_value=False):
+            listed = observe.listing(self.run, guest=self.guest)
+        self.assertEqual(listed[0].state, "interrupted")
+        s, problems = self.stop()
+        self.assertIn(["-cancel", "-instancename", "desk_r1_s1"], self.guest.execs("wpr.exe"))
+        self.assertNotIn("WPR_initiated_desk_r1_s1", self.guest.etw)
+        self.assertFalse(s.complete)
 
     def test_a_second_wpr_of_the_run_is_refused(self):
         self.start("wpr")

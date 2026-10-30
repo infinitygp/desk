@@ -504,6 +504,19 @@ class ProcMonLife(unittest.TestCase):
         self.assertTrue(s.complete)
         self.assertIn("size limit", " ".join(s.notes))
 
+    def test_a_procmon_whose_start_desk_did_not_live_to_keep_is_found_by_its_folder_and_ended(self):
+        self.start()
+        pm = self.guest.running("Procmon64.exe")[0]
+        pm["cmdline"] = '"C:\\desk\\observe\\tools\\procmon\\Procmon64.exe" /BackingFile C:\\desk\\observe\\r1-s1\\procmon.pml'
+        other = self.guest.new_proc("Procmon64.exe", cmdline="Procmon64.exe /BackingFile C:\\Users\\x\\theirs.pml")
+        with Store(self.run).edit("s1") as s:
+            s.state, s.pid, s.tool, s.watchdog = "starting", 999999, {}, None
+        with mock.patch("desk.observe.pid_alive", return_value=False):
+            self.assertEqual(observe.listing(self.run, guest=self.guest)[0].state, "interrupted")
+        self.stop()
+        self.assertFalse(pm["alive"])
+        self.assertTrue(other["alive"])
+
     def test_a_watchdog_that_ended_without_a_verdict_is_said_not_taken_for_a_guard(self):
         s = self.start(duration=600)
         self.guest.procs[s.watchdog["pid"]]["alive"] = False

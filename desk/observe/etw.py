@@ -185,9 +185,12 @@ class Wpr(_EtwBase):
         return [ArtifactSpec("trace.etl", self.etl(session), "etl", description="WPR recording (ETL)")]
 
     def cleanup(self, guest, session: Session, host=None) -> None:
-        # A recording left running under desk's own instance name (a stop that failed) is cancelled.
-        if session.tool.get("instance"):
-            guest.exec("wpr.exe", ["-cancel", "-instancename", session.tool["instance"]], timeout=120)
+        # A recording left running under desk's own instance name (a stop that failed, a desk
+        # killed while WPR started) is cancelled.
+        instance = session.tool.get("instance") or session_name(session)
+        names = guest.call("etw", names=[]).get("names")
+        if names is None or any(instance in n for n in names):
+            guest.exec("wpr.exe", ["-cancel", "-instancename", instance], timeout=120)
 
 
 class Logman(_EtwBase):
@@ -247,9 +250,9 @@ class Logman(_EtwBase):
 
     def cleanup(self, guest, session: Session, host=None) -> None:
         # Only a session of desk's own name that is still there.
-        names = guest.call("etw", names=[]).get("names") or []
-        if session.tool.get("name") in names:
-            guest.exec("logman.exe", ["stop", session.tool["name"], "-ets"], timeout=120)
+        name = session.tool.get("name") or session_name(session)
+        if name in (guest.call("etw", names=[]).get("names") or []):
+            guest.exec("logman.exe", ["stop", name, "-ets"], timeout=120)
 
     def summary(self, session: Session) -> list[str]:
         lines = [f"providers: {', '.join(session.tool.get('providers') or session.options['providers'])}"]

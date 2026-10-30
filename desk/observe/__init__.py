@@ -225,6 +225,8 @@ def start(run, name: str, label: str | None = None, options: dict | None = None,
         s.stats["os"] = probe.get("os")
         s.boot = str(probe.get("boot"))
         s.guest_dir = win(ROOT, f"{run.id}-{s.id}")
+        # Kept now: a desk killed while the tool starts leaves a session whose cleanup finds it.
+        store.update(s)
         # A folder of this name left by a snapshot restore holds nothing of this session.
         guest.remove(s.guest_dir)
         guest.mkdir(s.guest_dir)
@@ -525,7 +527,9 @@ def stop(run, ref: str | None = None, force: bool = False, keep_guest: bool = Fa
                         p.cleanup(guest, s, host)
                     except DeskError as e:
                         problems.append(f"cleaning up in the guest: {e}")
-                if not keep_guest and all(a.get("transferred") or not a.get("in_guest") for a in s.artifacts):
+                if not s.guest_dir:
+                    pass  # it never got as far as a folder in the guest
+                elif not keep_guest and all(a.get("transferred") or not a.get("in_guest") for a in s.artifacts):
                     guest.remove(s.guest_dir)
                 elif s.artifacts:
                     s.notes.append(f"the guest keeps {s.guest_dir}")
