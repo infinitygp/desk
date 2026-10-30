@@ -451,7 +451,7 @@ logs are, memory, swap, other runs), since a full disk that ends QEMU shows in t
 
 `desk observe` (`desk/observe/`, [skill/observe.md](skill/observe.md)) records inside a Windows
 guest with Windows' own tools and the user's: Process Monitor (PML), ETW through WPR or logman
-(ETL), pktmon and netsh trace (ETL, PCAPNG), USBPcap (pcap), listings of pipes and sockets, and
+(ETL), pktmon (ETL, PCAPNG) and netsh trace (ETL), USBPcap (pcap), listings of pipes and sockets, and
 debugger servers forwarded to the host. Providers build command lines and read answers; the
 orchestration (`desk/observe/__init__.py`) keeps the session and its guarantees:
 

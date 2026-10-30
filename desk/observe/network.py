@@ -4,9 +4,9 @@
   components (--comp), the bytes kept of each packet (--pkt-size, 0: all) and the file's size
   (--file-size, MB), `pktmon stop`, and `pktmon etl2pcap` to PCAPNG, which desk reads back.
 - `netsh` (netsh trace): `netsh trace start capture=yes` with netsh's capture filters
-  (`netsh trace show capturefilterhelp`), for when a filter at capture time is needed. Its ETL is
-  turned into PCAPNG only on request, with pktmon etl2pcap, and only kept when the result reads
-  as PCAPNG.
+  (`netsh trace show capturefilterhelp`), for when a filter at capture time is needed. Its ETL
+  stays ETL: pktmon etl2pcap formats none of its packets (0 of them on Windows 11 26H2, while the
+  ETL held them), so it is read with a tool that knows netsh's format (Microsoft's etl2pcapng).
 
 Both are one capture per Windows, which desk does not share: it starts only while no capture
 of either runs, and stops only one writing its own file.
@@ -173,12 +173,10 @@ class NetshTrace(_Capture):
         "filters": Option(list, [], "netsh capture filters KEY=VALUE (IPv4.Address=10.0.2.2, Protocol=TCP; "
                           "netsh trace show capturefilterhelp)", check=_filter),
         "truncate": Option(int, 0, "bytes kept of each packet (packettruncatebytes; 0: netsh's default)"),
-        "pcapng": Option(bool, False, "try turning the trace into PCAPNG with pktmon etl2pcap (kept only when it "
-                         "reads as PCAPNG)"),
     }
     notes = ("packets as netsh's capture filters let them through; payload up to the truncation length, encrypted "
              "traffic stays encrypted",
-             "PCAPNG only when pktmon etl2pcap reads netsh's ETL, which is not documented")
+             "ETL only: pktmon etl2pcap formats none of netsh's packets; Microsoft's etl2pcapng turns it into PCAPNG")
 
     def start(self, guest, session: Session, host) -> None:
         mb = max(1, (session.limits.get("max_bytes") or 512 << 20) >> 20)
@@ -197,6 +195,3 @@ class NetshTrace(_Capture):
     def stop(self, guest, session: Session, host, force: bool = False) -> None:
         if self._running(guest, session):
             tool_run(guest, "netsh.exe", ["trace", "stop"], 600, "stopping netsh trace")
-
-    def convert(self, guest, session: Session, host) -> list[ArtifactSpec]:
-        return self.pcapng(guest, session) if session.options.get("pcapng") else []
