@@ -5,8 +5,8 @@
   (--file-size, MB), `pktmon stop`, and `pktmon etl2pcap` to PCAPNG, which desk reads back.
 - `netsh` (netsh trace): `netsh trace start capture=yes` with netsh's capture filters
   (`netsh trace show capturefilterhelp`), for when a filter at capture time is needed. Its ETL
-  stays ETL: pktmon etl2pcap formats none of its packets (0 of them on Windows 11 26H2, while the
-  ETL held them), so it is read with a tool that knows netsh's format (Microsoft's etl2pcapng).
+  stays ETL: the packets are in it, and pktmon etl2pcap formats none of them (0 on Windows 11
+  26H2), so desk makes no PCAPNG of it.
 
 Both are one capture per Windows, which desk does not share: it starts only while no capture
 of either runs, and stops only one writing its own file.
@@ -177,7 +177,7 @@ class NetshTrace(_Capture):
     }
     notes = ("packets as netsh's capture filters let them through; payload up to the truncation length, encrypted "
              "traffic stays encrypted",
-             "ETL only: pktmon etl2pcap formats none of netsh's packets; Microsoft's etl2pcapng turns it into PCAPNG")
+             "ETL only: the packets are in it, and pktmon etl2pcap formats none of them, so there is no PCAPNG")
 
     def start(self, guest, session: Session, host) -> None:
         mb = max(1, (session.limits.get("max_bytes") or 512 << 20) >> 20)
