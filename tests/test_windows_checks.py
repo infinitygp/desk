@@ -1,7 +1,9 @@
 """Windows guests answer through the in-session agent; what desk makes of a refusal there."""
 
 import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -91,12 +93,15 @@ class Taskbar(unittest.TestCase):
 
 class Forward(unittest.TestCase):
     def test_another_local_port_for_a_forwarded_one_is_refused(self):
+        home = tempfile.TemporaryDirectory(prefix="desk-forward-")
+        self.addCleanup(home.cleanup)
+        run = SimpleNamespace(**vars(RUN), dir=Path(home.name))
         live = [{"port": 22, "local": 40001, "pid": 1, "alive": True}]
         with mock.patch("desk.forward.listing", return_value=live):
-            self.assertEqual(forward.start(RUN, 22), 40001)
-            self.assertEqual(forward.start(RUN, 22, 40001), 40001)
+            self.assertEqual(forward.start(run, 22), 40001)
+            self.assertEqual(forward.start(run, 22, 40001), 40001)
             with self.assertRaisesRegex(DeskError, "forwarded to 127.0.0.1:40001 already"):
-                forward.start(RUN, 22, 40002)
+                forward.start(run, 22, 40002)
 
 
 if __name__ == "__main__":

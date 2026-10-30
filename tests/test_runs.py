@@ -134,10 +134,15 @@ class Gc(unittest.TestCase):
 
     def test_a_run_reported_before_is_not_reported_again(self):
         old = self.run_idle_for("old", 3)
-        evidence.collect(old)  # desk down --keep wrote it then
+        report = evidence.collect(old) / "report.md"  # desk down --keep wrote it then
+        # The run's last command before it, gc's own line after it.
+        os.utime(old.dir / "log.jsonl", (time.time() - 10,) * 2)
+        os.utime(report, (time.time() - 5,) * 2)
+        written = report.stat().st_mtime
         runs.gc_idle(verbose=False)
         self.assertFalse(old.dir.exists())
         self.assertEqual([p.name for p in (self.home / "reports").iterdir()], ["old"])
+        self.assertEqual(report.stat().st_mtime, written)
 
     def test_an_earlier_run_of_the_same_name_does_not_count_as_its_report(self):
         yesterday = self.home / "reports" / "old"
@@ -165,6 +170,13 @@ class Gc(unittest.TestCase):
         with mock.patch("desk.evidence.collect", collect_slowly):
             self.assertEqual(runs.gc_idle(verbose=False), [])
         self.assertTrue((old.dir / "run.json").exists())
+
+    def test_a_report_that_cannot_be_written_leaves_the_files_it_would_be_made_of(self):
+        old = self.run_idle_for("old", 3)
+        with mock.patch("desk.evidence.collect", side_effect=KeyError("name")), mock.patch("sys.stderr"):
+            report, _ = evidence.finish(old, stopped=True)
+        self.assertIsNone(report)
+        self.assertTrue((old.dir / "shots" / "0001.png").exists())
 
     def test_one_teardown_at_a_time(self):
         old = self.run_idle_for("old", 3)

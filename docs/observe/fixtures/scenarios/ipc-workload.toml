@@ -1,0 +1,24 @@
+# WIN-IPC-02: the IPC listings taken at a mark see the pipe and the TCP listener the workload holds
+# open, with the workload's PID. Afterwards: expect.py MANIFEST --ipc-dir REPORT/observe/s1
+image = "windows-11"
+[build]
+artifacts = ["docs/observe/fixtures/workload.ps1"]
+[[observe]]
+provider = "ipc"
+label = "ipc"
+options = {udp = true}
+[[step]]
+# A manifest of an earlier run of it would pass the wait for this one's.
+exec = "Remove-Item -Recurse -Force C:/desk/observe/workload/ipc1 -ErrorAction SilentlyContinue"
+[[step]]
+# In the desktop session: a process Start-Process starts over SSH ends with the SSH session.
+gui = ["conhost.exe", "--headless", "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "C:/Users/tester/desk/workload.ps1", "-Token", "ipc1", "-Steps", "cpu", "-HoldSeconds", "90"]
+[[step]]
+exec = "Test-Path C:/desk/observe/workload/ipc1/manifest.json"
+output = "True"
+until = true
+timeout = 60
+[[step]]
+mark = "endpoints held"
+[[step]]
+observe_stop = "ipc"

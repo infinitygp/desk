@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from desk import usb
+from desk import cli, doctor, usb
 from desk.config import DeskError
 
 
@@ -56,6 +56,48 @@ def domain(*addresses):
 
 
 class AddRemove(unittest.TestCase):
+    def setUp(self):
+        capability = mock.patch.object(doctor, "_qemu_devices", return_value='name "usb-host", bus USB\n')
+        capability.start()
+        self.addCleanup(capability.stop)
+
+    def test_missing_backend_refuses_add_before_touching_the_guest(self):
+        run = mock.Mock()
+        with mock.patch.object(doctor, "_qemu_devices", return_value='name "qemu-xhci", bus PCI\n'), \
+             mock.patch.object(usb, "host_devices") as devices, \
+             self.assertRaisesRegex(DeskError, "QEMU usb-host.*qemu-hw-usb-host.*qemu-device-usb-host"):
+            usb.add(run, "0fd9:0084")
+        devices.assert_not_called()
+        run.dom.assert_not_called()
+
+    def test_missing_backend_refuses_up_usb_before_starting_a_run(self):
+        args = SimpleNamespace(resolution=None, image="windows-11", memory=None, cpus=None, displays=1,
+                               scale=None, disk=[], usb=["0fd9:0084"])
+        with mock.patch.object(doctor, "_qemu_devices", return_value=""), \
+             mock.patch.object(cli, "load_image"), mock.patch("desk.monitors.check"), \
+             mock.patch("desk.runs.up") as up, self.assertRaisesRegex(DeskError, "QEMU usb-host"):
+            cli.cmd_up(args)
+        up.assert_not_called()
+
+    def test_up_without_usb_does_not_probe_host_passthrough(self):
+        args = SimpleNamespace(resolution=None, image="windows-11", memory=None, cpus=None, displays=1,
+                               scale=None, disk=[], usb=[], name=None, cold=False, force=False, label=None,
+                               record=False, forward=[])
+        with mock.patch.object(doctor, "_qemu_devices", side_effect=AssertionError("USB probe on an ordinary run")), \
+             mock.patch.object(cli, "load_image"), mock.patch("desk.monitors.check"), \
+             mock.patch("desk.runs.up") as up, mock.patch("builtins.print"):
+            cli.cmd_up(args)
+        up.assert_called_once()
+
+    def test_listing_and_removal_do_not_need_the_backend(self):
+        run = mock.Mock(**{"dom.return_value": domain((3, 7))})
+        with mock.patch.object(doctor, "_qemu_devices", side_effect=AssertionError("USB backend probe")), \
+             mock.patch.object(usb, "host_devices", return_value=[DECK]), \
+             mock.patch("desk.runs.all_runs", return_value=[]):
+            self.assertEqual(usb.listing(), [{**DECK, "run": None}])
+            self.assertEqual(usb.remove(run, "0fd9:0084"), DECK)
+        run.dom.return_value.detachDeviceFlags.assert_called_once()
+
     def test_refuses_a_node_this_user_cannot_open_and_says_how(self):
         with mock.patch.object(usb, "host_devices", return_value=[{**DECK, "access": False}]), \
              self.assertRaisesRegex(DeskError, 'ATTRS{idVendor}=="0fd9".*GROUP="kvm"'):

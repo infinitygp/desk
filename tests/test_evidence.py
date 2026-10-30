@@ -1,3 +1,4 @@
+import os
 import subprocess
 import time
 import unittest
@@ -180,6 +181,24 @@ class DiffFailure(unittest.TestCase):
                 md = (evidence.collect(run, diff=True) / "report.md").read_text()
                 self.assertTrue(evidence.reported(run))
         self.assertIn("reflink", md)
+
+    def test_a_report_the_run_went_on_after_is_not_its_report(self):
+        import tempfile
+
+        from desk import evidence
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            run_dir.mkdir()
+            run = mock.Mock(id="r1", dir=run_dir, created=time.time() - 60)
+            (Path(tmp) / "r1").mkdir()
+            report = Path(tmp) / "r1" / "report.md"
+            report.write_text("# a scenario's report, the run kept")
+            os.utime(report, (time.time() - 30,) * 2)
+            with mock.patch.object(evidence, "REPORTS", Path(tmp)):
+                self.assertTrue(evidence.reported(run))
+                (run_dir / "log.jsonl").write_text('{"observe": "start"}\n')
+                self.assertFalse(evidence.reported(run))
 
     def test_a_report_directory_without_a_report_is_not_a_report(self):
         import tempfile

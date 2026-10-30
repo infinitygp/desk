@@ -29,8 +29,9 @@ def module(name: str) -> Callable[[], bool]:
 @cache
 def _qemu_devices() -> str:
     try:
-        return subprocess.run(["qemu-system-x86_64", "-device", "help"], capture_output=True, text=True,
-                              timeout=30).stdout
+        result = subprocess.run(["qemu-system-x86_64", "-device", "help"], capture_output=True, text=True,
+                                timeout=30)
+        return result.stdout if result.returncode == 0 else ""
     except (OSError, subprocess.TimeoutExpired):
         return ""
 
@@ -112,11 +113,14 @@ INSTALLERS = {
     ],
 }
 # Features that say so themselves when what they need is missing.
+USB_HOST = Need("QEMU usb-host", "desk usb add, desk up --usb", qemu_device("usb-host"),
+                "qemu-hw-usb-host", "qemu-device-usb-host")
 FEATURES = [
     Need("Pillow", "desk shot --region/--window/--zoom, several monitors", module("PIL"), "python-pillow",
          "python3-pillow"),
     Need("QEMU virtio-gpu-pci", "desk up --resolution/--displays", qemu_device("virtio-gpu-pci"),
          "qemu-hw-display-virtio-gpu-pci", "qemu-device-display-virtio-gpu-pci"),
+    USB_HOST,
     Need("virt-diff", "desk diff, desk down --diff", tool("virt-diff"), "guestfs-tools", "guestfs-tools"),
     Need("gh", "desk update from a private repository", tool("gh"), "github-cli", "gh"),
     Need("GStreamer with VP9, WebM, PNG and text overlay", "desk record",

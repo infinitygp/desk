@@ -242,7 +242,7 @@ def cmd_down(args) -> None:
         # A VM that is gone (QEMU ended) still has its screenshots and timeline to report.
         report, videos = evidence.finish(run, keep=args.keep, diff=args.diff, report=not args.no_report,
                                          stopped=not evidence.reported(run))
-        if args.keep:
+        if args.keep or run.dir.exists():
             print(f"run {run.id} down (files kept in {run.dir})")
         else:
             print(f"run {run.id} down; deleted {run.dir}{gone} (--keep keeps it)"
@@ -665,6 +665,15 @@ def cmd_reboot(args) -> None:
         clock.apply(run)
     for line in inhibitors:
         print(f"note: shutdown was blocked by: {line}")
+    from .observe.session import Store
+
+    if any(s.state == "running" for s in Store(run).all()):
+        from . import observe
+
+        for s in observe.listing(run):
+            if s.state == "interrupted" and s.error.startswith("the guest rebooted"):
+                print(f"note: observation {s.name()} ended with the reboot; desk observe stop {s.id} collects what it "
+                      "left")
     dom = run.dom()
     png, _ = display.wait_stable(dom, timeout=30)
     print(f"rebooted in {took:.0f}s")
@@ -727,6 +736,10 @@ def cmd_scenario(args) -> None:
         for i, step in enumerate(data.get("step", []), 1):
             action, arg = scenario.describe(step)
             print(f"  {i:>2}. {step.get('name') or (action + ' ' + arg).strip()}")
+        scenario.check_observations(data, load_image(image))
+        for label, t in scenario.observations(path, data).items():
+            print(f"  observe {label}: {t['provider']}, "
+                  + ("before the first step" if t.get("start", "before") == "before" else "at its observe_start step"))
         for w in scenario.fixed_waits(data):
             print(f"warning: {w}")
         return
@@ -759,6 +772,185 @@ def cmd_snapshot(args) -> None:
         else:
             took = snapshot.restore(run, args.name)
             print(f"restored {args.name} ({took:.1f}s)")
+
+
+def _mib(n) -> str:
+    return f"{(n or 0) / 2**20:.1f} MiB"
+
+
+def _since(run: runs.Run, t: float | None) -> str:
+    if not t:
+        return "-"
+    offset = t - run.created
+    return f"+{int(offset // 60):02d}:{int(offset % 60):02d}"
+
+
+def _observe_target(args) -> dict | None:
+    if args.process and args.pid:
+        raise DeskError("give --process or --pid, not both")
+    return {"image": args.process} if args.process else {"pid": args.pid} if args.pid else None
+
+
+def _observe_options(items: list[str] | None) -> dict:
+    out = {}
+    for item in items or []:
+        key, sep, value = item.partition("=")
+        if not sep or not key:
+            raise DeskError(f"--set takes KEY=VALUE (got {item!r})")
+        out[key.strip()] = value
+    return out
+
+
+def _print_session(run: runs.Run, s, live: dict | None = None) -> None:
+    from . import observe
+
+    p = observe.PROVIDERS.get(s.provider)
+    print(f"session {s.name()}: {s.provider} ({p.title if p else '?'}), {s.state}"
+          + (", complete" if s.complete else ", NOT complete" if s.complete is False else ""))
+    print(f"  started {_since(run, s.started or s.created)}, stopped {_since(run, s.stopped)}"
+          + (f"; limits: {s.limits.get('duration', 0):.0f} s" if s.limits.get("duration") else "")
+          + (f", {_mib(s.limits['max_bytes'])}" if s.limits.get("max_bytes") else ""))
+    if s.target:
+        print(f"  following {s.target.get('image') or 'pid ' + str(s.target.get('pid'))}: "
+              + (", ".join(f"{x['name']} pid {x['pid']}" for x in list(s.processes.values())[:10]) or "not seen yet"))
+    for k, v in (live or {}).items():
+        print(f"  {k}: {_mib(v) if k == 'bytes' else v}")
+    shown = ("ended", "interrupted", "snapshot restored", "stop failed", "watchdog gone")
+    for e in [e for e in s.events if e["event"] in shown][-3:]:
+        print(f"  {e['event']}: {e.get('detail', '')}")
+    if s.stats.get("endpoint"):
+        print(f"  endpoint: {s.stats['endpoint']} on the host ({p.connect_hint(s) if hasattr(p, 'connect_hint') else ''})")
+    for a in s.artifacts:
+        state = "ok" if a.get("verified") else "NOT VERIFIED" if a.get("transferred") else "NOT COPIED"
+        size = _mib(a.get("bytes") or a.get("guest_bytes"))
+        print(f"  {a['name']}: {state}, {size}" + (f", sha256 {a['sha256'][:16]}" if a.get("sha256") else "")
+              + (f": {a.get('detail')}" if a.get("detail") else "") + (f"\n    {a['path']}" if a.get("path") else ""))
+    if p and s.state == "stopped":
+        for line in p.summary(s):
+            print(f"  {line}")
+    if s.error and s.state in ("failed", "interrupted", "stopped"):
+        print(f"  problem: {s.error}")
+
+
+def cmd_observe(args) -> None:
+    from . import observe
+
+    if args.observe_cmd == "setup":
+        info = observe.setup(args.provider, Path(args.file), accept_licence=args.accept_eula,
+                             who=runs.default_label()[0])
+        print(f"{args.provider}: set up {', '.join(f['name'] for f in info['files'])} in "
+              f"{observe.Host.setup_dir(args.provider)}" + ("; licence terms accepted" if info["licence_accepted"] else ""))
+        p = observe.provider(args.provider)
+        if p.licence and not info["licence_accepted"]:
+            print(f"note: the {p.licence} are not accepted, so desk starts it only where the guest has accepted them "
+                  "(read them, then set up again with --accept-eula)")
+        return
+    if args.observe_cmd == "providers":
+        run = None
+        if not args.offline:
+            try:
+                run = runs.resolve(args.run)
+            except DeskError as e:
+                if args.run or os.environ.get("DESK_RUN"):
+                    raise
+                print(f"(no guest asked: {e})")
+        for p, cap in observe.capabilities(run, args.provider or None):
+            if isinstance(cap, str):
+                state = cap
+            elif cap.available:
+                state = "available" + (f" ({cap.version})" if cap.version else "")
+            else:
+                state = "NOT available: " + "; ".join(cap.problems)
+            print(f"{p.name:<9}{p.title}: {state}")
+            if args.verbose:
+                for k, o in p.OPTIONS.items():
+                    print(f"    --set {k}=  {o.help} (default {o.default!r})")
+                for n in p.notes:
+                    print(f"    note: {n}")
+                if not isinstance(cap, str):
+                    for k, v in cap.details.items():
+                        print(f"    {k}: {v}")
+        return
+    run = runs.resolve(args.run)
+    if args.observe_cmd == "start":
+        s = observe.start(run, args.provider, label=args.label, options=_observe_options(args.set),
+                          duration=args.duration, max_mb=args.max_mb, target=_observe_target(args))
+        limits = []
+        if s.limits.get("duration"):
+            limits.append(f"{s.limits['duration'] / 60:g} min")
+        if s.limits.get("max_bytes"):
+            limits.append(_mib(s.limits["max_bytes"]))
+        print(f"observing: session {s.name()} ({s.provider})" + (f"; it stops itself after {' or '.join(limits)}"
+                                                                 if limits else "")
+              + f"; desk observe stop {s.id}")
+        if s.stats.get("endpoint"):
+            p = observe.provider(s.provider)
+            print(f"endpoint: {s.stats['endpoint']} on the host: {p.connect_hint(s)}")
+        if s.tool.get("password_file") and not s.options.get("password"):
+            print(f"password: {Path(s.tool['password_file']).read_text().strip()}")
+        return
+    if args.observe_cmd == "status":
+        s, live = observe.status(run, args.session)
+        _print_session(run, s, live)
+        return
+    if args.observe_cmd == "list":
+        sessions = observe.listing(run)
+        for s in sessions:
+            print(f"{s.id}\t{s.label or '-'}\t{s.provider}\t{s.state}"
+                  + ("\tcomplete" if s.complete else "\tNOT complete" if s.complete is False else "\t-")
+                  + f"\t{_since(run, s.started or s.created)}\t{len(s.artifacts)} artifact(s)")
+        if not sessions:
+            print(f"no observation sessions in run {run.id} (desk observe start PROVIDER)")
+        return
+    if args.observe_cmd == "mark":
+        m = observe.mark(run, args.text, ref=args.session)
+        print(f"mark {m['seq']} in {', '.join(m['sessions'])}: guest time {m['guest']:.3f}, host time "
+              f"{m['host']:.3f} (clocks {m['offset']:+.3f} s apart, ±{m['uncertainty']:.3f} s)"
+              + ("" if m.get("event") else f"; no ETW marker event ({m.get('event_error') or 'not emitted'})"))
+        for problem in m.get("problems") or []:
+            print(f"warning: {problem}", file=sys.stderr)
+        if args.shot:
+            png, _ = display.wait_stable(run.dom(), timeout=3)
+            _emit_shot(run, png, None, f"mark-{m['seq']}")
+        return
+    if args.observe_cmd == "pipe":
+        from .observe import ipc
+
+        reply = ipc.probe_pipe(observe.guest_for(run), args.name, send=(args.send or "").encode(), read=args.read,
+                               timeout=args.timeout)
+        if not reply.get("connected"):
+            raise DeskError(f"could not connect to pipe {args.name}: {reply.get('error') or 'no answer'}")
+        print(f"connected to \\\\.\\pipe\\{args.name}; server pid {reply.get('server_pid', 'unknown')}")
+        if reply.get("sent"):
+            print(f"sent {reply['sent']} bytes")
+        if "received" in reply:
+            print(f"received {len(reply['received'])} bytes: {reply['received']!r}")
+        elif reply.get("read_timed_out"):
+            print(f"nothing received within {args.timeout:g} s")
+        if reply.get("error"):
+            raise DeskError(f"pipe {args.name}: {reply['error']}")
+        return
+    # stop
+    sessions = ([s.id for s in observe.listing(run) if s.state in observe.COLLECTABLE] if args.all
+                else [args.session])
+    if args.all and not sessions:
+        print("nothing to stop")
+        return
+    failed = []
+    for ref, done in zip(sessions, observe.stop_many(run, sessions, force=args.force, keep_guest=args.keep_guest,
+                                                     reason="desk observe stop")):
+        if isinstance(done, BaseException):
+            if len(sessions) == 1:
+                raise done
+            print(f"session {ref}: not stopped: {done}")
+            failed.append(f"{ref}: not stopped ({done})")
+            continue
+        s, problems = done
+        _print_session(run, s)
+        if problems:
+            failed.append(f"{s.name()}: " + "; ".join(problems))
+    if failed:
+        raise DeskError("observation not complete: " + " | ".join(failed))
 
 
 def cmd_display(args) -> None:
@@ -1285,6 +1477,46 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--fps", type=int, default=record.DEFAULT_FPS)
     p.add_argument("--limit", type=float, default=record.MAX_SECONDS / 60, help="minutes before it stops itself")
     p.set_defaults(func=cmd_record)
+
+    p = sub.add_parser("observe", help="capture what happens in a Windows guest with its own tools (Process Monitor, "
+                       "ETW, packet and USB captures, IPC endpoints, debugger servers)")
+    osub = p.add_subparsers(dest="observe_cmd", required=True)
+    op = osub.add_parser("providers", help="the providers and whether the run's guest can use them")
+    op.add_argument("provider", nargs="*")
+    op.add_argument("-v", "--verbose", action="store_true", help="options, notes and what the guest said")
+    op.add_argument("--offline", action="store_true", help="without asking a guest")
+    op = osub.add_parser("setup", help="keep the host's copy of a tool desk does not ship (ProcMon, IDA's server)")
+    op.add_argument("provider")
+    op.add_argument("file", help="the tool, its zip or its folder")
+    op.add_argument("--accept-eula", action="store_true",
+                    help="you have read and accept the tool's licence terms; desk passes that on (ProcMon /AcceptEula)")
+    op = osub.add_parser("start", help="start a capture in the run's guest")
+    op.add_argument("provider")
+    op.add_argument("--label", help="a name for the session (letters, digits, - _ .)")
+    op.add_argument("--duration", type=float, help="seconds after which it stops itself (default 1800)")
+    op.add_argument("--max-mb", type=float, help="MiB its files may grow to (default 4096)")
+    op.add_argument("--process", metavar="IMAGE", help="follow processes of this image (app.exe) and their children")
+    op.add_argument("--pid", type=int, help="follow this process and its children")
+    op.add_argument("--set", action="append", metavar="KEY=VALUE", help="a provider option (desk observe providers -v)")
+    op = osub.add_parser("status", help="a session and how its capture is doing")
+    op.add_argument("session", nargs="?")
+    osub.add_parser("list", help="the run's sessions")
+    op = osub.add_parser("stop", help="stop a capture, copy its files to the host and check them")
+    op.add_argument("session", nargs="?")
+    op.add_argument("--all", action="store_true", help="every open session of the run")
+    op.add_argument("--force", action="store_true", help="end desk's own tool by its PID where its stop command would "
+                    "end another's too")
+    op.add_argument("--keep-guest", action="store_true", help="leave the files in the guest as well")
+    op = osub.add_parser("mark", help="mark this moment in the running captures and the timeline")
+    op.add_argument("text")
+    op.add_argument("--session")
+    op.add_argument("--shot", action="store_true", help="also take a screenshot")
+    op = osub.add_parser("pipe", help="connect to a named pipe of the guest: its server's pid, an answer to what is sent")
+    op.add_argument("name", help="the pipe's name without \\\\.\\pipe\\")
+    op.add_argument("--send", help="text to write after connecting")
+    op.add_argument("--read", type=int, default=0, help="bytes to read back")
+    op.add_argument("--timeout", type=float, default=5.0)
+    p.set_defaults(func=cmd_observe)
 
     p = sub.add_parser("maintain", help="rebuild images that are due, selftest them, switch to the new builds")
     p.add_argument("--only", metavar="IMAGE", help="only the family of this image")

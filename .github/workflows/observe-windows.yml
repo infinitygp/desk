@@ -1,0 +1,50 @@
+name: Observe on Windows
+
+# The guest side of desk observe on a Windows runner: Windows PowerShell 5.1 parses the scripts
+# desk runs in guests, and scripts/observe_windows_ci.py runs the helper's operations and the
+# providers' command lines (logman, WPR, pktmon, netsh, tracerpt) for real, without a VM. Not a
+# desk run, not Windows 11 and neither ProcMon nor USBPcap: docs/observe/validation.md, CI-*.
+# Only by hand (gh workflow run observe-windows.yml --ref BRANCH, once the workflow is on the
+# default branch): pushes start no workflow here.
+on:
+  workflow_dispatch:
+
+# One run per branch: a newer one cancels the run before.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  observe:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Windows PowerShell 5.1 parses the guest scripts
+        shell: powershell
+        run: |
+          $PSVersionTable.PSVersion.ToString()
+          $bad = 0
+          foreach ($f in 'desk/observe/helper.ps1', 'docs/observe/fixtures/workload.ps1') {
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f).Path, [ref]$null, [ref]$errors)
+            foreach ($e in $errors) { "${f}:$($e.Extent.StartLineNumber): $($e.Message)"; $bad++ }
+          }
+          if ($bad) { exit 1 }
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Helper and providers
+        run: python scripts/observe_windows_ci.py --out observe-ci.json
+
+      - name: Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: observe-ci
+          path: observe-ci.json

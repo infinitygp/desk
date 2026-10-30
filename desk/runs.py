@@ -283,8 +283,26 @@ def resolve(run_id: str | None) -> Run:
         run = active[0]
     run.touch()
     run.hold()
-    run.log_event(argv=sys.argv[1:])
+    run.log_event(argv=logged_argv(sys.argv[1:]))
     return run
+
+
+def logged_argv(argv: list[str]) -> list[str]:
+    """A command line for the timeline (and so the report) with the values of secret options
+    (`desk observe start ida --set password=...`) left out."""
+    from .observe import PROVIDERS
+
+    secret = {k for p in PROVIDERS.values() for k, o in p.OPTIONS.items() if o.secret}
+    set_flags = {"--s", "--se", "--set"}  # argparse accepts unambiguous long-option prefixes.
+    out, after_set = [], False
+    for a in argv:
+        flag, eq, value = a.partition("=") if a.partition("=")[0] in set_flags and "=" in a else ("", "", a)
+        key = value.partition("=")[0].strip()
+        if (after_set or flag) and key in secret and "=" in value:
+            value = f"{key}=(hidden)"
+        out.append(f"{flag}={value}" if flag else value)
+        after_set = a in set_flags
+    return out
 
 
 def idle_ttl() -> int:
@@ -455,6 +473,8 @@ def gc_idle(verbose: bool = True) -> list[str]:
             except DeskError:
                 return False  # gone: somebody else took it down
 
+        # Before its own line: a report written after the run's last command stays as it is.
+        reported = evidence.reported(run)
         try:
             # Whoever left it may still want what it showed: the report keeps the screenshots,
             # the timeline and, while the guest runs, its logs.
@@ -462,7 +482,7 @@ def gc_idle(verbose: bool = True) -> list[str]:
         except OSError:
             pass  # a full disk is when this must go on
         try:
-            report, _ = evidence.finish(run, stopped=not evidence.reported(run), unless=lambda: not still_idle())
+            report, _ = evidence.finish(run, stopped=not reported, unless=lambda: not still_idle())
         except DeskError:
             continue  # another command is taking it down already
         if run.dir.exists():

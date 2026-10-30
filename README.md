@@ -49,6 +49,7 @@ scripts/             build.py makes desk.pyz, the release; pyz_main.py is its en
 skill/               agent skill: SKILL.md, and a file per task it points to
 desk/                harness code (guest_a11y.py runs inside the guest)
 tests/               unit tests
+docs/observe/        desk observe: what was checked in a Windows 11 guest, the workload and its checker
 images/              blocks images are made of: distros/, desktops/, addons/; shared/ what desktops share
 <home>/              base/, warm/, runs/, reports/, maintain/, cache/, logs/, keys/, ssh/  (see Host setup)
 ```
@@ -380,6 +381,10 @@ journalctl --user -u desk-maintain  # output of the last runs
   by bus and device number, plugged into the guest's xHCI controller. QEMU runs as the user
   (`qemu:///session`), so `desk usb add` checks that the device node is the user's to open and
   otherwise prints the udev rule that gives it to the kvm group.
+  Host passthrough also needs QEMU's `usb-host` backend, distinct from the guest's controller:
+  `desk doctor` lists it as optional, and `usb add` and `up --usb` check QEMU's advertised devices
+  before attaching or starting a run, with package install hints if absent or the probe fails.
+  Listing, removal and runs without host USB do not need it.
 - `desk clock` (`desk/clock.py`) sets the guest's time through qemu-guest-agent with the guest's
   time sync off and keeps the offset in `run.json`, put back after snapshot restores and reboots
   (tried for 20 s, as the agent may answer a moment late after a restore). A moved clock that
@@ -446,6 +451,74 @@ logs are, memory, swap, other runs), since a full disk that ends QEMU shows in t
   below the picture, and `desk down` copies the videos next to the report. A recording stops by
   itself after 30 minutes (`--limit`) or 4 GiB.
 
+## Observation
+
+`desk observe` (`desk/observe/`, [skill/observe.md](skill/observe.md)) records inside a Windows
+guest with Windows' own tools and the user's: Process Monitor (PML), ETW through WPR or logman
+(ETL), pktmon (ETL, PCAPNG) and netsh trace (ETL), USBPcap (pcap), listings of pipes and sockets, and
+debugger servers forwarded to the host. Providers build command lines and read answers; the
+orchestration (`desk/observe/__init__.py`) keeps the session and its guarantees:
+
+- A session belongs to its run (`runs/<id>/observe/`), with states starting, running, ended,
+  interrupted, stopping, stopped and failed, and a lock per session so two commands never stop
+  one capture twice. Guest folders and trace names carry the run and session
+  (`C:\desk\observe\<run>-<sN>`, `desk_<run>_<sN>`).
+- What runs in the guest goes through one helper, `helper.ps1`, pushed when its SHA-256 differs
+  and run as a script block (no execution policy applies), over the same SSH as `desk exec`, with
+  the time limit kept in the guest. Captures and watchdogs are started through WMI
+  (`Win32_Process.Create`), outside the SSH session: Windows' OpenSSH ends every process of a
+  session when it closes, and one WMI creates holds none of its handles and keeps the elevated
+  token. Never through the in-session agent, which serves one request at a time. Processes are
+  told apart by PID and creation time, as Windows reuses PIDs.
+- Providers (`base.Provider`) say what they need (`probe_request`, `assess`), start, stop and
+  name their files (`artifacts`, `convert`), and keep their guest state in `session.tool`; they
+  never touch the store, the report or the run.
+- desk stops only what it started: a ProcMon or packet capture it did not start makes `start`
+  refuse, `procmon /Terminate` (which ends every instance) runs only while desk's is alone, WPR
+  records under an instance name of desk's own and logman under a session name of desk's own, a
+  packet capture is desk's when its trace session writes the session's folder (its
+  LocalFilePath; netsh's session is named NetTrace-<hex> on Windows 11), and a tool a desk that
+  was killed while starting never recorded is found by the session's folder on its command line.
+- Stopping several sessions (`stop --all`, `observe_stop = true`, `desk down`) goes in two
+  passes: every capture is stopped, then each is converted and copied, so no capture records
+  desk taking the others' files. One that does not stop keeps its state and gets a watchdog for
+  the time it has left, to be stopped again; the others are collected.
+- pktmon writes segments (`--log-mode multi-file`, net1.etl, net2.etl...): its default circular
+  file overwrote what did not fit, and one that went round kept no packet while pktmon said none
+  were lost. Every segment is copied and turned into PCAPNG; one missing from the row makes the
+  capture incomplete.
+- Secrets (IDA's password) are options marked `secret`: never kept with the session, its report
+  or the timeline (`--set password=` shows as hidden), sent to the guest on SSH's standard input
+  (the helper's request is the guest command line every process listing shows) and handed to the
+  tool in its environment. Without one desk makes one, kept in a 0600 file next to the session
+  until the server stops.
+- Every capture has a watchdog in the guest (`helper.ps1 -Watch`) that stops it at its duration
+  (by a stopwatch, so `desk clock` does not move it) or its files' size, also when desk is gone,
+  and writes why; `desk down`, gc and the end of a scenario stop and collect what is open.
+- A capture counts as made only by its file: copied, compared by SHA-256 with the guest's, read
+  as its format (`formats.py`: PML header and tables, pcap and pcapng record by record, ETL only
+  as there and not empty). A file that is not whole stays on the host marked so, one that could
+  not be copied stays in the guest, and the session is not complete; exit 2, desk's failure.
+- Lost events are what the trace session counted before it stopped (ControlTrace's query:
+  EventsLost, LogBuffersLost, RealTimeBuffersLost; the session's CIM class holds only its settings);
+  where Windows does not answer, the report says they were not measured.
+- Clocks: the guest's time is sampled through qemu-guest-agent at start, every mark and stop, so
+  guest times are moved onto the host's, which the timeline, screenshots and video use (the
+  helper's own clock, with its larger uncertainty said, when the agent does not answer). A mark
+  writes a file the guest's file system sees (ProcMon, file I/O traces) and an event of the
+  EventSource `Desk-Observe-Marker`, whose provider GUID follows from its name and which desk's
+  logman sessions enable. Every helper answer says when its work began and how long it took in
+  the guest; an IPC listing keeps when it was made and how long after its mark, and a mark that
+  desk took long over says so, as one desk call took 4-5 s under ProcMon (SSH and PowerShell's
+  start 3-4 s of it) and up to 80 s once.
+- Reboots end captures (Windows' boot counter, BootId, differs: interrupted; the boot time
+  would move with the clock desk sets after a warm restore); snapshots carry the sessions, so a
+  restore says which captures went back to the snapshot's moment, which were never there, and
+  brings a capture that was collected since back as a session of its own.
+
+What was checked in a Windows 11 guest, how, and what is still open:
+[docs/observe/validation.md](docs/observe/validation.md).
+
 ## Exit codes, locks, limits
 
 - 0: done. 1: the check a command stands for failed (a scenario step, `selftest`, `find`,
@@ -480,7 +553,7 @@ libvirt bindings to run.
 |---|---|---|
 | To start runs | `libvirt` `libvirt-python` `qemu-system-x86` `qemu-hw-display-virtio-vga` `qemu-img` `edk2-ovmf` `passt` `openssh` | `libvirt-daemon-driver-qemu` `python3-libvirt` `qemu-system-x86-core` `qemu-device-display-virtio-vga` `qemu-img` `edk2-ovmf` `passt` `openssh-clients` |
 | To build images | `virt-install` `openssh`; cloud images (`arch`, `debian-13`, `ubuntu-26.04`): `curl` `openssl`; `openwrt-*`: `curl` `gzip` `gptfdisk` `parted` `libguestfs`; `windows-11`: `curl` `7zip` `libisoburn` | `virt-install` `openssh`; cloud images (`arch`, `debian-13`, `ubuntu-26.04`): `curl` `openssl`; `openwrt-*`: `curl` `gzip` `gdisk` `parted` `libguestfs`; `windows-11`: `curl` `7zip` `xorriso` |
-| Single features | `python-pillow` (crops, several monitors), `qemu-hw-display-virtio-gpu-pci` (`--resolution`, `--displays`), `guestfs-tools` (`desk diff`), `gstreamer` `gst-plugins-base` `gst-plugins-good` (`desk record`), `github-cli` (installing and `desk update` from a private repository) | `python3-pillow`, `qemu-device-display-virtio-gpu-pci`, `guestfs-tools`, `gstreamer1` `gstreamer1-plugins-base` `gstreamer1-plugins-good`, `gh` |
+| Single features | `python-pillow` (crops, several monitors), `qemu-hw-display-virtio-gpu-pci` (`--resolution`, `--displays`), `qemu-hw-usb-host` (`usb add`, `up --usb`), `guestfs-tools` (`desk diff`), `gstreamer` `gst-plugins-base` `gst-plugins-good` (`desk record`), `github-cli` (installing and `desk update` from a private repository) | `python3-pillow`, `qemu-device-display-virtio-gpu-pci`, `qemu-device-usb-host`, `guestfs-tools`, `gstreamer1` `gstreamer1-plugins-base` `gstreamer1-plugins-good`, `gh` |
 
 The user needs `/dev/kvm` (the `kvm` group where it is not open to everybody); VMs run under
 `qemu:///session`, so nothing runs as root.

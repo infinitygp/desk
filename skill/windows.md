@@ -31,6 +31,9 @@ Part of the desk skill ([SKILL.md](SKILL.md)); the commands and pitfalls there a
   `desk exec -- 'Start-Process msiexec -ArgumentList "/i C:\Users\tester\Downloads\setup.msi /qn" -Wait'`,
   or run the installer UI with `exec --gui` and click through it. UAC prompts do not appear for
   `tester` over SSH, but do for programs started on the desktop: handle them like any dialog.
+- A process `Start-Process` starts in `desk exec` (without `-Wait`) ends when that command ends:
+  Windows' OpenSSH ends every process of its session. Start what must keep running with
+  `exec --gui` (or a `gui` step).
 - Background helpers started with `exec --gui` (a test tone, a mock server) get a console window
   that covers the desktop, since Windows Terminal ignores `-WindowStyle Hidden`: start them as
   `desk exec --gui -- conhost.exe --headless powershell.exe -NoProfile -Command "..."`.
@@ -62,6 +65,8 @@ Part of the desk skill ([SKILL.md](SKILL.md)); the commands and pitfalls there a
   turned off", and file search is unindexed. Say so in the report when the app depends on either.
 - Defender is on but skips `C:\Users`, the program folders, `C:\ProgramData` and Windows' `Temp`
   and `Installer`: a detection or slowdown it would cause users does not show here.
+- What the program does inside (files, registry, processes, ETW, packets, USB, pipes), and
+  debugger servers: `desk observe` ([observe.md](observe.md)).
 - The report reads the event log (service failures, application errors and crashes, MSI
   installs); a "Network List Service terminated" entry comes from restoring the saved state, not
   from the app under test. `desk diff` works on NTFS too.
