@@ -8,6 +8,7 @@ import shutil
 import tempfile
 import unittest
 import zipfile
+from unittest import mock
 from pathlib import Path
 
 from desk import observe
@@ -35,6 +36,8 @@ class Base(unittest.TestCase):
 
     def stop(self, ref=None, **kw):
         return observe.stop(self.run, ref, host=self.host, guest=self.guest, **kw)
+
+
 
 
 class Pktmon(Base):
@@ -360,6 +363,83 @@ def with_server(fake: FakeWindows, exe: str, port: int) -> None:
 
 
 class Debuggers(Base):
+    def restored_endpoint(self, provider, *, stopped):
+        import copy
+
+        self.run = FakeRun(tmpdir(self))
+        self.guest = FakeWindows()
+        self.host = FakeHost(self.run)
+        port = 23946 if provider == "ida" else 5005
+        p = observe.provider(provider)
+        with_server(self.guest, p.exe(p.defaults()), port)
+        s = self.start(provider)
+        snap = tmpdir(self)
+        observe.snapshot_saved(self.run, snap)
+        procs, listening = copy.deepcopy((self.guest.procs, self.guest.listening))
+        if stopped:
+            self.stop(s.id)
+        self.guest.procs, self.guest.listening = procs, listening
+        with mock.patch.object(observe, "Host", return_value=self.host), \
+                mock.patch.object(observe, "guest_for", return_value=self.guest):
+            said = observe.snapshot_restored(self.run, snap, "debugging")
+        restored = Store(self.run).find("s2" if stopped else s.id)
+        self.assertEqual(restored.state, "interrupted")
+        self.assertFalse(restored.complete)
+        self.assertIn("restart required", restored.error)
+        self.assertTrue(any("restart required" in line for line in said))
+        self.assertNotIn("endpoint", restored.stats)
+        self.assertEqual(self.guest.listening, {})
+        self.assertEqual(self.guest.running(Path(p.exe(p.defaults()).replace("\\", "/")).name), [])
+        self.assertEqual(self.host.forwards, {})
+        if provider == "ida":
+            self.assertFalse(Path(s.tool["password_file"]).exists())
+        if stopped:
+            self.assertEqual(Store(self.run).find(s.id).state, "stopped")
+
+    def test_saved_stopped_debugger_is_interrupted_and_cleaned_after_restore(self):
+        for provider in ("ida", "dbgsrv"):
+            with self.subTest(provider=provider):
+                self.restored_endpoint(provider, stopped=True)
+
+    def test_saved_running_debugger_is_interrupted_and_cleaned_after_restore(self):
+        for provider in ("ida", "dbgsrv"):
+            with self.subTest(provider=provider):
+                self.restored_endpoint(provider, stopped=False)
+
+    def test_failed_restored_debugger_cleanup_can_be_retried_with_stop(self):
+        with_server(self.guest, observe.debug.SDK_DEBUGGERS + "\\dbgsrv.exe", 5005)
+        s = self.start("dbgsrv")
+        snap = tmpdir(self)
+        observe.snapshot_saved(self.run, snap)
+        p = observe.provider("dbgsrv")
+        with mock.patch.object(observe, "Host", return_value=self.host), \
+                mock.patch.object(observe, "guest_for", return_value=self.guest), \
+                mock.patch.object(p, "stop", side_effect=observe.ObserveError("temporary server cleanup failure")):
+            with self.assertRaisesRegex(observe.ObserveError, "temporary server cleanup failure"):
+                observe.snapshot_restored(self.run, snap, "debugging")
+        failed = Store(self.run).find(s.id)
+        self.assertEqual(failed.state, "interrupted")
+        self.assertIn("temporary server cleanup failure", failed.error)
+        self.assertTrue(self.guest.running("dbgsrv.exe"))
+        retried, _ = self.stop(s.id)
+        self.assertEqual(self.guest.running("dbgsrv.exe"), [])
+        self.assertEqual(self.guest.listening, {})
+        self.assertEqual(self.host.forwards, {})
+        self.assertFalse(retried.complete)
+
+    def test_restore_before_debugger_start_cleans_only_its_host_resources(self):
+        snap = tmpdir(self)
+        observe.snapshot_saved(self.run, snap)
+        with_server(self.guest, observe.debug.SDK_DEBUGGERS + "\\dbgsrv.exe", 5005)
+        s = self.start("dbgsrv")
+        # The restored guest predates this endpoint. Its host tunnel still needs removal.
+        self.guest.procs.clear()
+        self.guest.listening.clear()
+        with mock.patch.object(observe, "Host", return_value=self.host):
+            observe.snapshot_restored(self.run, snap, "before-debugging")
+        self.assertEqual(Store(self.run).find(s.id).state, "interrupted")
+        self.assertEqual(self.host.forwards, {})
+
     def test_dbgsrv_is_reachable_on_the_hosts_loopback_only_and_taken_down(self):
         with_server(self.guest, observe.debug.SDK_DEBUGGERS + "\\dbgsrv.exe", 5005)
         s = self.start("dbgsrv")
@@ -371,6 +451,87 @@ class Debuggers(Base):
         self.assertEqual(problems, [])
         self.assertEqual(self.host.unforwarded, [5005])
         self.assertEqual(self.guest.listening, {})
+
+    def real_forward_host(self):
+        """Real tunnel records and locks, but no SSH or background process."""
+        self.host = observe.Host(self.run)
+        self.host.reachable = lambda local: True
+        self.enterContext(mock.patch("desk.forward._alive", return_value=True))
+        self.enterContext(mock.patch("desk.forward._free", return_value=True))
+        self.enterContext(mock.patch("desk.forward._listening", return_value=True))
+        self.enterContext(mock.patch("desk.runs.all_runs", return_value=[self.run]))
+        self.spawn = self.enterContext(mock.patch("desk.forward.subprocess.Popen"))
+        self.spawn.return_value.pid = 12345
+        self.kill = self.enterContext(mock.patch("desk.forward.os.killpg"))
+        from desk import forward
+
+        return forward
+
+    def test_manual_forward_is_refused_before_launch_or_secret_creation(self):
+        forward = self.real_forward_host()
+        exe = observe.provider("ida").exe(observe.provider("ida").defaults())
+        with_server(self.guest, exe, 23946)
+        forward.start(self.run, 23946)
+        before = forward.listing(self.run)
+        with self.assertRaisesRegex(observe.Conflict, "live forward already"):
+            self.start("ida")
+        self.assertEqual(forward.listing(self.run), before)
+        self.assertEqual(self.guest.ops("launch"), [])
+        self.assertEqual(list(self.run.dir.rglob("*.secret")), [])
+        self.kill.assert_not_called()
+        self.assertEqual(self.spawn.call_count, 1)
+
+    def test_manual_forward_created_during_launch_survives_start_failure(self):
+        forward = self.real_forward_host()
+        exe = observe.debug.SDK_DEBUGGERS + "\\dbgsrv.exe"
+        with_server(self.guest, exe, 5005)
+        launch = self.guest.launchers["dbgsrv.exe"]
+
+        def raced(fake, argv, proc):
+            launch(fake, argv, proc)
+            forward.start(self.run, 5005)
+
+        self.guest.launchers["dbgsrv.exe"] = raced
+        with self.assertRaisesRegex(observe.Conflict, "live forward already"):
+            self.start("dbgsrv")
+        self.assertTrue(forward.listing(self.run)[0]["alive"])
+        self.assertEqual(self.guest.running("dbgsrv.exe"), [])
+        self.kill.assert_not_called()
+        self.assertEqual(self.spawn.call_count, 1)
+
+    def test_stop_preserves_a_manual_replacement_of_the_owned_forward(self):
+        forward = self.real_forward_host()
+        with_server(self.guest, observe.debug.SDK_DEBUGGERS + "\\dbgsrv.exe", 5005)
+        s = self.start("dbgsrv")
+        forward.stop(self.run, 5005)
+        self.spawn.return_value.pid = 54321
+        forward.start(self.run, 5005)
+        self.kill.reset_mock()
+        before = forward.listing(self.run)
+        _, problems = self.stop(s.id)
+        self.assertEqual(problems, [])
+        self.assertEqual(forward.listing(self.run), before)
+        self.kill.assert_not_called()
+
+    def test_owned_forward_is_removed_when_reachability_fails(self):
+        forward = self.real_forward_host()
+        self.host.reachable = lambda local: False
+        with_server(self.guest, observe.debug.SDK_DEBUGGERS + "\\dbgsrv.exe", 5005)
+        with self.assertRaisesRegex(observe.Missing, "does not answer"):
+            self.start("dbgsrv")
+        self.assertEqual(forward.listing(self.run), [])
+        self.assertEqual(self.guest.running("dbgsrv.exe"), [])
+        self.kill.assert_called_once()
+
+    def test_exclusive_forward_refuses_reuse_but_manual_forward_remains_idempotent(self):
+        forward = self.real_forward_host()
+        local = forward.start(self.run, 5005)
+        self.assertEqual(forward.start(self.run, 5005), local)
+        with self.assertRaisesRegex(DeskError, "live forward already"):
+            forward.start(self.run, 5005, exclusive=True)
+        self.assertEqual(len(forward.listing(self.run)), 1)
+        self.assertEqual(self.spawn.call_count, 1)
+        self.kill.assert_not_called()
 
     def test_a_port_in_use_is_refused_before_starting(self):
         with_server(self.guest, observe.debug.SDK_DEBUGGERS + "\\dbgsrv.exe", 5005)
@@ -455,7 +616,6 @@ class Registry(unittest.TestCase):
                         self.assertNotIn(marker, json.dumps(logged))
                         self.assertIn("port=23946", logged)
                         self.assertEqual(argv, original)
-
 
     def test_every_provider_says_what_it_is(self):
         for p in observe.PROVIDERS.values():

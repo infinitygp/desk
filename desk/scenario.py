@@ -238,10 +238,15 @@ def check_observations(data: dict, spec) -> None:
 def _observe_start(run, label: str, table: dict):
     from . import observe
 
-    return observe.start(run, table["provider"], label=label, options=table.get("options"),
-                         duration=table.get("duration"), max_mb=table.get("max_mb"),
-                         target={"image": table["process"]} if table.get("process") else None,
-                         owner=run.label)
+    try:
+        return observe.start(run, table["provider"], label=label, options=table.get("options"),
+                             duration=table.get("duration"), max_mb=table.get("max_mb"),
+                             target={"image": table["process"]} if table.get("process") else None,
+                             owner=run.label)
+    except observe.ObserveError:
+        raise
+    except Exception as e:
+        raise observe.ObserveError(f"starting observation {label}: {e}") from e
 
 
 def _observe_step(run, steps: Steps, action: str, value) -> str:
@@ -272,8 +277,8 @@ def _observe_step(run, steps: Steps, action: str, value) -> str:
         return "; ".join(done) or "no session open"
     except observe.ObserveError:
         raise
-    except DeskError as e:
-        raise observe.ObserveError(str(e)) from None
+    except Exception as e:
+        raise observe.ObserveError(str(e) or type(e).__name__) from e
 
 
 def _checked(path: Path, where: str, parse, *args) -> None:

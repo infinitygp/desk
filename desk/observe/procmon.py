@@ -137,7 +137,7 @@ class ProcMon(Provider):
             raise Conflict(f"{others[0]['name']} (pid {others[0]['pid']}) runs besides this session's, and "
                            "/Terminate would end it too: close it, or stop with --force, which ends this "
                            "session's ProcMon by its PID (its log may then be incomplete)")
-        if others:
+        if force:
             for p in running:
                 guest.stop_process(p)
             session.notes.append("ended by its PID (--force): ProcMon may not have finished its log")

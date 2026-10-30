@@ -65,6 +65,7 @@ class _Server(Provider):
 
     def start(self, guest, session: Session, host) -> None:
         port = session.options["port"]
+        host.check_forward(port)
         taken = items(guest.call("listening", port=port))
         if taken:
             raise Conflict(f"guest port {port} is in use already (pid {taken[0]['pid']}); choose another with "
@@ -94,8 +95,9 @@ class _Server(Provider):
         if proc["pid"] not in owners:
             raise Conflict(f"port {port} is listened on by pid {sorted(owners)}, not by the server desk started")
         session.tool["listening"] = sorted({x["address"] for x in listening})
-        local = host.forward(port)
-        session.tool.update(local_port=local, forwarded=True)
+        tunnel = host.forward(port)
+        local = tunnel["local"]
+        session.tool.update(local_port=local, forward_pid=tunnel["pid"], forwarded=True)
         if not host.reachable(local):
             raise Missing(f"the forward to guest port {port} (127.0.0.1:{local}) does not answer")
         session.stats["endpoint"] = f"127.0.0.1:{local}"
@@ -107,7 +109,7 @@ class _Server(Provider):
         for p in session.tool.get("procs") or []:
             guest.stop_process(p, tree=True)
         if session.tool.get("forwarded") and host is not None:
-            host.unforward(session.tool["port"])
+            host.unforward(session.tool["port"], pid=session.tool.get("forward_pid"))
             session.tool["forwarded"] = False
         if session.tool.get("password_file"):
             # The server is gone: its password opens nothing any more.

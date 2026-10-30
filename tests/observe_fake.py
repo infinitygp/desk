@@ -77,6 +77,8 @@ class FakeHost(Host):
     def __init__(self, run=None):
         super().__init__(run)
         self.forwards: dict[int, int] = {}
+        self.forward_pids: dict[int, int] = {}
+        self.next_forward_pid = 1000
         self.unforwarded: list[int] = []
         self.usb_devices: list[dict] = []
         self.answers = True
@@ -84,12 +86,25 @@ class FakeHost(Host):
     def usb(self):
         return self.usb_devices
 
-    def forward(self, port):
-        self.forwards[port] = 40000 + port % 1000
-        return self.forwards[port]
+    def check_forward(self, port):
+        from desk.observe.base import Conflict
 
-    def unforward(self, port):
+        if port in self.forwards:
+            raise Conflict(f"guest port {port} has a live forward already; the existing forward is left alone")
+
+    def forward(self, port):
+        self.check_forward(port)
+        self.forwards[port] = 40000 + port % 1000
+        self.next_forward_pid += 1
+        self.forward_pids[port] = self.next_forward_pid
+        return {"local": self.forwards[port], "pid": self.forward_pids[port]}
+
+    def unforward(self, port, pid=None):
+        if pid is not None and self.forward_pids.get(port) != pid:
+            return
         self.unforwarded.append(port)
+        self.forwards.pop(port, None)
+        self.forward_pids.pop(port, None)
 
     def reachable(self, local, timeout=5):
         return self.answers

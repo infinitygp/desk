@@ -43,6 +43,9 @@ desk down                                  # the report has an Observation secti
   records the other's writes.
 - desk stops only what it started. A ProcMon or packet capture already running in the guest
   makes `start` refuse (exit 2): close it, or report it; never stop it by hand unless you started it.
+  `observe stop --force` ends only desk's identified ProcMon process by PID, even when no other
+  ProcMon exists; use it after `/Terminate` refuses or hangs. The resulting PML may be incomplete:
+  desk checks it and reports exit 2 rather than treating forced termination as a successful capture.
 - With ProcMon running each `desk observe` command takes about 5 s (once 80 s), and a mark's
   IPC listing comes after the mark: the report says how long after, and keep what a mark must
   see open longer than that. `stop --all`, `observe_stop = true` and `desk down` stop every
@@ -50,9 +53,23 @@ desk down                                  # the report has an Observation secti
 - `desk observe status` while it runs (file size, lost events); `desk observe list` the sessions.
 - A reboot or a snapshot restore ends or rewinds captures: the session says "interrupted" or
   that what was recorded after the snapshot's moment is gone; `stop` collects what is left.
+  IPC sessions restored after collection have separate host folders and retain the listings made
+  before the save; previously verified files are never overwritten by the new session.
+  IDA/dbgsrv endpoints instead become interrupted: desk stops the restored owned server and
+  removes its host forward/password. Start a new session explicitly; restored memory does not
+  restore usable host credentials or forwarding.
+  If cleanup fails, restore reports exit 2 and keeps the session interrupted with its error;
+  retry `desk observe stop SESSION` to finish owned-server cleanup before starting another.
 - Exit 2 from any `desk observe` command, or a scenario step that observes, is desk's failure:
   the tool was missing, refused, or its file is not whole. It is no finding about the product;
   say what failed and that the capture is missing.
+  This includes automatic collection at scenario end: a missing, corrupt or uncollected capture
+  cannot turn into `scenario passed`. Without `--keep`, desk still stops the VM but retains its
+  run directory and disk when evidence collection fails, including a failed explicit stop.
+  The error names that directory; recover its guest files before removing it. `--keep` retains
+  the manual workflow: open captures and the VM stay running until explicitly stopped.
+  A refused start whose cleanup succeeded does not poison a later `desk down`; if start cleanup
+  fails, its session stays interrupted and can be retried with `desk observe stop SESSION`.
 - Network captures hold packet metadata and only the first bytes of payload; TLS stays
   encrypted, loopback traffic does not pass the adapter. IPC listings show endpoints, never the
   data sent through them; `desk observe pipe NAME --send TEXT --read 64` connects to one pipe as a

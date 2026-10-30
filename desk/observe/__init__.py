@@ -93,15 +93,25 @@ class Host:
         return found + [{"id": f"{b}.{d}", "bus": b, "dev": d, "name": "(gone from the host)"} for b, d in here
                         if (b, d) not in known]
 
-    def forward(self, port: int) -> int:
+    def check_forward(self, port: int) -> None:
         from .. import forward
 
-        return forward.start(self.run, port)
+        if any(f["port"] == port and f["alive"] for f in forward.listing(self.run)):
+            raise Conflict(f"guest port {port} has a live forward already; choose another with --set port=N "
+                           "(the existing forward is left alone)")
 
-    def unforward(self, port: int) -> None:
+    def forward(self, port: int) -> dict:
         from .. import forward
 
-        forward.stop(self.run, port)
+        with forward.lock(self.run):
+            self.check_forward(port)
+            local = forward.start(self.run, port, exclusive=True)
+            return next(f for f in forward.listing(self.run) if f["port"] == port and f["local"] == local)
+
+    def unforward(self, port: int, pid: int | None = None) -> None:
+        from .. import forward
+
+        forward.stop(self.run, port, pid=pid)
 
     def reachable(self, local: int, timeout: float = 5) -> bool:
         import socket
@@ -256,7 +266,10 @@ def start(run, name: str, label: str | None = None, options: dict | None = None,
             if s.guest_dir:
                 # Nothing in it is a capture: a preallocated log at most (ProcMon's 256 MiB).
                 guest.remove(s.guest_dir)
+            s.stats["failed_start_cleaned"] = True
         except Exception as cleanup_error:  # noqa: BLE001 - the error that stopped the start is the one to report
+            s.state = "interrupted"
+            s.error += f"; cleaning up the failed start: {cleanup_error}"
             s.event("cleanup failed", str(cleanup_error))
             print(f"[desk] warning: cleaning up after the failed start: {cleanup_error}", file=sys.stderr)
         s.pid = 0
@@ -505,11 +518,14 @@ def stop_many(run, refs: list[str | None], force: bool = False, keep_guest: bool
                         ": another desk command is stopping it" if s.state == "stopping" else " (desk observe list)"))
                 held.enter_context(store.operation(s.id))
                 ended.append((i, *_end_capture(store, guest, host, s.id, live, force, reason)))
-            except DeskError as e:
-                results[i] = e
+            except Exception as e:  # one session's storage failure must not leave the others capturing
+                results[i] = e if isinstance(e, DeskError) else ObserveError(f"stopping observation: {e}")
         # Pass 2: convert, copy, check, clean up.
         for i, s, before, gone in ended:
-            results[i] = (s, _finish(run, store, guest, host, s, before, gone, live, keep_guest))
+            try:
+                results[i] = (s, _finish(run, store, guest, host, s, before, gone, live, keep_guest))
+            except Exception as e:
+                results[i] = e if isinstance(e, DeskError) else ObserveError(f"collecting observation {s.id}: {e}")
     return [results[i] for i in range(len(refs))]
 
 
@@ -518,8 +534,10 @@ def _end_capture(store: Store, guest: Guest, host: Host, sid: str, live: bool, f
     s = store.load(sid)
     before = s.state
     p = PROVIDERS[s.provider]
-    # The tools of a rebooted or restored guest are gone with it; there is nothing to stop.
-    gone = before == "interrupted" and s.error.startswith(("the guest rebooted", "snapshot", "the VM"))
+    # A restored debugger may still need owned-server cleanup after a transient failure.
+    gone = before == "interrupted" and (
+        s.error.startswith(("the guest rebooted", "the VM")) or
+        s.error.startswith("snapshot") and not s.tool.get("restore_cleanup_pending"))
     s.state, s.pid = "stopping", os.getpid()
     s.event("stopping", reason)
     store.update(s)
@@ -531,6 +549,7 @@ def _end_capture(store: Store, guest: Guest, host: Host, sid: str, live: bool, f
             _end_watchdog(guest, s)
             watchdog_ended = True
             p.stop(guest, s, host, force=force)
+            s.tool.pop("restore_cleanup_pending", None)
     except BaseException as e:
         s.state, s.pid = before, 0
         s.event("stop failed", str(e) or type(e).__name__)
@@ -565,7 +584,7 @@ def _finish(run, store: Store, guest: Guest, host: Host, s: Session, before: str
                 try:
                     arts += p.convert(guest, s, host)
                 except DeskError as e:
-                    s.notes.append(f"conversion failed: {e}")
+                    problems.append(f"conversion failed: {e}")
             problems += _collect(guest, store, s, p, arts)
             try:
                 s.clock.append({**guest.clock(), "at": "stop"})
@@ -578,7 +597,8 @@ def _finish(run, store: Store, guest: Guest, host: Host, s: Session, before: str
                     problems.append(f"cleaning up in the guest: {e}")
             if not s.guest_dir:
                 pass  # it never got as far as a folder in the guest
-            elif not keep_guest and all(a.get("transferred") or not a.get("in_guest") for a in s.artifacts):
+            elif not keep_guest and not problems and all(
+                    a.get("transferred") or not a.get("in_guest") for a in s.artifacts):
                 guest.remove(s.guest_dir)
             elif s.artifacts:
                 s.notes.append(f"the guest keeps {s.guest_dir}")
@@ -648,6 +668,8 @@ def _collect(guest: Guest, store: Store, s: Session, p: Provider, arts: list[Art
             rec.update(path=str(local), bytes=local.stat().st_size, sha256=sha256(local))
             check = p.verify(local, a)
             rec.update(check=check, verified=bool(check.get("ok")), detail=check.get("detail", ""))
+            if not check.get("ok") and a.required:
+                problems.append(f"{a.name}: {check.get('detail')}")
             continue
         if not info.get("exists"):
             rec["detail"] = "not in the guest"
@@ -682,25 +704,28 @@ def _collect(guest: Guest, store: Store, s: Session, p: Provider, arts: list[Art
 
 
 def collect_all(run, reason: str, guest: Guest | None = None, host: Host | None = None) -> list[str]:
-    """Before a run goes down (desk down, gc, the end of a scenario): every session still open is
-    stopped and collected; with the VM gone, they say so. Warnings, never an exception."""
-    store = Store(run)
-    if not (store.dir / "sessions").is_dir():
-        return []
-    warnings = []
-    open_ = [s for s in store.all() if s.state in COLLECTABLE or s.state in ("starting", "stopping")]
-    if not open_:
-        return []
+    """Stop and collect sessions before teardown. Return every integrity/storage failure so the
+    caller can stop the VM, retain its disk and report a desk failure rather than product success."""
     try:
+        store = Store(run)
+        if not (store.dir / "sessions").is_dir():
+            return []
+        sessions = store.all()
+        warnings = [f"observation {s.name()} ({s.provider}): {s.error or 'not complete'}"
+                    for s in sessions if not s.complete and (s.state == "stopped" or
+                        s.state == "failed" and not s.stats.get("failed_start_cleaned"))]
+        open_ = [s for s in sessions if s.state in COLLECTABLE or s.state in ("starting", "stopping")]
+        if not open_:
+            return warnings
         results = stop_many(run, [s.id for s in open_], reason=reason, guest=guest, host=host)
-    except DeskError as e:
-        return [f"observation sessions not collected: {e}"]
-    for s, done in zip(open_, results):
-        if isinstance(done, BaseException):
-            warnings.append(f"observation {s.name()} ({s.provider}) not collected: {done}")
-        elif done[1]:
-            warnings.append(f"observation {done[0].name()} ({done[0].provider}): " + "; ".join(done[1]))
-    return warnings
+        for s, done in zip(open_, results):
+            if isinstance(done, BaseException):
+                warnings.append(f"observation {s.name()} ({s.provider}) not collected: {done}")
+            elif done[1]:
+                warnings.append(f"observation {done[0].name()} ({done[0].provider}): " + "; ".join(done[1]))
+        return warnings
+    except Exception as e:  # includes storage failures while saving the failure itself
+        return [f"observation sessions not collected: {type(e).__name__}: {e}"]
 
 
 # Snapshots.
@@ -709,16 +734,20 @@ def collect_all(run, reason: str, guest: Guest | None = None, host: Host | None 
 def snapshot_saved(run, snapdir: Path) -> None:
     """The sessions as they are when a snapshot is saved: restoring it takes the guest back to
     them, captures running then included."""
-    src = Store(run).dir / "sessions"
+    store = Store(run)
+    src = store.dir / "sessions"
     if src.is_dir():
         shutil.copytree(src, snapdir / "observe-sessions")
+        # Host-made listings are part of the snapshot's prefix, not a pointer into a later session.
+        for s in store.all():
+            files = store.files(s.id)
+            if files.is_dir():
+                shutil.copytree(files, snapdir / "observe-files" / s.id)
 
 
 def snapshot_restored(run, snapdir: Path, name: str) -> list[str]:
-    """After a restore: captures that ran when the snapshot was saved run again in the guest
-    (from the moment of the save; what they recorded after it is gone from their files), and
-    captures started after it are gone with the guest's memory. What the host knows of them
-    follows; nothing in the guest is touched here."""
+    """Reconcile restored captures. New sessions own separate host files; debugger endpoints
+    cannot reuse host forwarding/credentials and must be stopped and explicitly restarted."""
     store = Store(run)
     saved: dict[str, Session] = {}
     d = snapdir / "observe-sessions"
@@ -732,17 +761,25 @@ def snapshot_restored(run, snapdir: Path, name: str) -> list[str]:
             except (OSError, ValueError, KeyError, TypeError):
                 continue
     said = []
+    endpoints = []
+    host_endpoints = []
     with store.lock():
         current = {s.id: s for s in store.all()}
+        host_endpoints = [(s.id, dict(s.tool)) for s in current.values()
+                          if s.provider in ("ida", "dbgsrv") and s.state in (
+                              "starting", "running", "ended", "stopping")]
         for s in current.values():
             old = saved.get(s.id)
             if s.state in ("starting", "running", "ended", "stopping"):
                 if old and old.state in ("running", "ended"):
                     s.state = old.state
+                    s.tool = json.loads(json.dumps(old.tool))
+                    s.tool["host_dir"] = str(store.files(s.id))
                     s.stats.setdefault("restores", []).append({"t": time.time(), "snapshot": name})
                     s.event("snapshot restored", f"{name}: the capture is back at the moment of the save; what it "
                                                  "recorded since is gone from its files")
-                    said.append(f"observation {s.name()} goes on from snapshot {name}'s moment")
+                    if s.provider not in ("ida", "dbgsrv"):
+                        said.append(f"observation {s.name()} goes on from snapshot {name}'s moment")
                 else:
                     s.state, s.error = "interrupted", f"snapshot {name} restored: the guest went back to before this " \
                                                       "capture"
@@ -753,15 +790,67 @@ def snapshot_restored(run, snapdir: Path, name: str) -> list[str]:
             now = current.get(sid)
             if old.state == "running" and now is not None and now.state in ("stopped", "failed"):
                 n = 1 + max((int(x[1:]) for x in current if x[1:].isdigit()), default=0)
-                again = Session(**{**old.__dict__, "id": f"s{n}", "restored_from": sid, "label": "",
-                                   "artifacts": [], "events": list(old.events)})
+                again = Session(**{**json.loads(json.dumps(old.__dict__)), "id": f"s{n}", "restored_from": sid,
+                                   "label": "", "artifacts": [], "complete": False, "error": ""})
+                again.tool["host_dir"] = str(store.files(again.id))
+                prefix = snapdir / "observe-files" / sid
+                if prefix.is_dir():
+                    shutil.copytree(prefix, store.files(again.id))
                 again.event("restored", f"snapshot {name} brought session {sid}'s capture back in the guest")
                 current[again.id] = again
                 store.save(again)
-                said.append(f"snapshot {name} brought the capture of {sid} back: it is session {again.id} now "
-                            f"(desk observe stop {again.id})")
+                if again.provider not in ("ida", "dbgsrv"):
+                    said.append(f"snapshot {name} brought the capture of {sid} back: it is session {again.id} now "
+                                f"(desk observe stop {again.id})")
+        for s in current.values():
+            old = saved.get(s.restored_from or s.id)
+            if s.provider in ("ida", "dbgsrv") and old and old.state in ("running", "ended") and s.state in (
+                    "running", "ended"):
+                s.state, s.complete, s.pid = "interrupted", False, 0
+                s.error = f"snapshot {name} restored a debugger server; restart required with desk observe start " \
+                          f"{s.provider} (forwarding and credentials are not restored)"
+                s.stats.pop("endpoint", None)
+                s.tool["restore_cleanup_pending"] = True
+                s.event("interrupted", s.error)
+                store.save(s)
+                endpoints.append(s)
+                said.append(f"observation {s.name()} is interrupted: {s.error}")
+    cleanup_errors = []
+    if endpoints or host_endpoints:
+        host = Host(run)
+        for sid, tool in host_endpoints:
+            try:
+                if tool.get("forwarded"):
+                    host.unforward(tool["port"], pid=tool.get("forward_pid"))
+            except Exception as e:
+                cleanup_errors.append(f"removing pre-restore forward {sid}: {e}")
+            try:
+                if tool.get("password_file"):
+                    Path(tool["password_file"]).unlink(missing_ok=True)
+            except Exception as e:
+                cleanup_errors.append(f"removing pre-restore password {sid}: {e}")
+        guest = guest_for(run) if endpoints else None
+        for s in endpoints:
+            cleaned = True
+            try:
+                _end_watchdog(guest, s)
+            except Exception as e:
+                cleaned = False
+                s.error += f"; stopping restored watchdog failed: {e}"
+                cleanup_errors.append(s.error)
+            try:
+                PROVIDERS[s.provider].stop(guest, s, host, force=True)
+            except Exception as e:
+                cleaned = False
+                s.error += f"; stopping restored owned server failed: {e}"
+                cleanup_errors.append(s.error)
+            if cleaned:
+                s.tool.pop("restore_cleanup_pending", None)
+            store.update(s)
     if said:
         # "name", not "snapshot": that key is desk's own snapshot events', which the report reads apart.
         run.log_event(observe="restore", name=name, detail="; ".join(said))
+    if cleanup_errors:
+        raise ObserveError("; ".join(cleanup_errors))
     return said
 

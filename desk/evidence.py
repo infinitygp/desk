@@ -576,43 +576,53 @@ def finish(run, keep: bool = False, diff: bool = False, report: bool = True,
     """Stop recording, write the report, keep the videos with it and destroy the run (unless
     `running`: a scenario run kept for testing by hand). `stopped`: report on a run whose VM is
     gone too, from what its directory holds. `unless`: asked just before the run is destroyed;
-    true leaves it as it is (gc, when its owner came back meanwhile)."""
+    true leaves it as it is (gc, when its owner came back meanwhile). Observation failure raises
+    DeskError only after teardown; the stopped run's disk/files are retained for recovery."""
     from . import record, runs
 
     with _teardown(run):
-        if not running:
-            # Captures still open are stopped and their files copied while the guest is there.
-            from . import observe
-
-            for warning in observe.collect_all(run, "the run goes down"):
-                print(f"[desk] warning: {warning}", file=sys.stderr)
-        try:
-            record.stop(run)
-        except Exception as e:  # noqa: BLE001 - a video that cannot be made must not keep the VM running
-            print(f"[desk] warning: no video ({type(e).__name__}: {e})", file=sys.stderr)
-        out = None
+        observation_errors = []
         unreported = False
-        if report and (stopped or run.live_domain() is not None):
-            # A report that cannot be written must not keep the VM running, nor take with it the
-            # files it would have been made of.
-            try:
-                out = collect(run, diff=diff)
-            except Exception as e:  # noqa: BLE001
-                unreported = True
-                print(f"[desk] warning: no report ({type(e).__name__}: {e}); the run's files stay in {run.dir}",
-                      file=sys.stderr)
-        # Videos outlive the run in its report directory, report or not.
+        out, videos = None, []
         try:
-            videos = record.save_videos(run, out or REPORTS / run.id)
-        except OSError as e:
-            videos = []
-            print(f"[desk] warning: videos not kept ({e})", file=sys.stderr)
-        if not running:
-            # Like starting one: no other command picks ports or looks for orphans meanwhile. Only
-            # here, so that nobody waits for a report to be written.
-            with runs.state_lock():
-                if not (unless and unless()):
-                    runs.down(run, keep=keep or unreported)
+            if not running:
+                # Collection can fail even while persisting its own failure (e.g. ENOSPC).
+                from . import observe
+
+                try:
+                    observation_errors = observe.collect_all(run, "the run goes down")
+                except Exception as e:  # noqa: BLE001 - teardown must still stop the VM
+                    observation_errors = [f"observation sessions not collected: {type(e).__name__}: {e}"]
+                for warning in observation_errors:
+                    print(f"[desk] warning: {warning}", file=sys.stderr)
+            try:
+                record.stop(run)
+            except Exception as e:  # noqa: BLE001
+                print(f"[desk] warning: no video ({type(e).__name__}: {e})", file=sys.stderr)
+            if report and (stopped or run.live_domain() is not None):
+                try:
+                    out = collect(run, diff=diff)
+                except Exception as e:  # noqa: BLE001
+                    unreported = True
+                    print(f"[desk] warning: no report ({type(e).__name__}: {e}); the run's files stay in {run.dir}",
+                          file=sys.stderr)
+            try:
+                videos = record.save_videos(run, out or REPORTS / run.id)
+            except OSError as e:
+                unreported = True
+                print(f"[desk] warning: videos not kept ({e})", file=sys.stderr)
+        except BaseException:
+            unreported = True
+            raise
+        finally:
+            if not running:
+                # Stop owned resources, but never delete the only recoverable guest evidence.
+                with runs.state_lock():
+                    if not (unless and unless()):
+                        runs.down(run, keep=keep or unreported or bool(observation_errors))
+        if observation_errors:
+            raise DeskError(f"observation collection failed: {'; '.join(observation_errors)}; "
+                            f"the run's files stay in {run.dir}; recover them before removing the run")
     return out, videos
 
 

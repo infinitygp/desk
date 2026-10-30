@@ -54,14 +54,27 @@ def listing(run) -> list[dict]:
     return out
 
 
-def start(run, port: int, local: int | None = None) -> int:
-    """Forward the guest's `port` to `local` on the host's 127.0.0.1 (the same number when it is
-    free, else any free port); returns the local port."""
+def lock(run):
+    """Serialize tunnel creation and removal, independently of VM state changes."""
+    from .runs import _flock
+
+    return _flock(run.dir / ".forward.lock", f"another command changing forwards of run {run.id}", 60)
+
+
+def start(run, port: int, local: int | None = None, *, exclusive: bool = False) -> int:
+    """Forward the guest's port to the host's loopback; optionally refuse an existing tunnel."""
+    with lock(run):
+        return _start(run, port, local, exclusive=exclusive)
+
+
+def _start(run, port: int, local: int | None, *, exclusive: bool) -> int:
     from . import runs
     from .virt import free_port
 
     for f in listing(run):
         if f["port"] == port and f["alive"]:
+            if exclusive:
+                raise DeskError(f"guest port {port} has a live forward already; the existing forward is left alone")
             if local is not None and local != f["local"]:
                 raise DeskError(f"guest port {port} is forwarded to 127.0.0.1:{f['local']} already "
                                 f"(desk forward --stop {port}, then again with :{local})")
@@ -95,10 +108,18 @@ def start(run, port: int, local: int | None = None) -> int:
     return local
 
 
-def stop(run, port: int | None = None) -> list[int]:
+def stop(run, port: int | None = None, *, pid: int | None = None) -> list[int]:
+    """Stop matching tunnels, optionally only the exact supervisor that a caller owns."""
+    with lock(run):
+        return _stop(run, port, pid=pid)
+
+
+def _stop(run, port: int | None, *, pid: int | None) -> list[int]:
     stopped, held = [], []
     for f in listing(run):
         if port is not None and f["port"] != port:
+            continue
+        if pid is not None and f["pid"] != pid:
             continue
         (_dir(run) / f"{f['port']}.json").unlink(missing_ok=True)
         if f["alive"]:

@@ -445,6 +445,20 @@ class ProcMonLife(unittest.TestCase):
             self.stop()
         self.assertEqual(Store(self.run).find("s1").state, "running")
 
+    def test_force_ends_only_owned_procmon_even_when_no_other_procmon_exists(self):
+        s = self.start()
+        original = self.guest.tools["procmon64.exe"]
+        self.guest.tools["procmon64.exe"] = lambda f, argv: {"rc": 1} if "/Terminate" in argv else original(f, argv)
+        with self.assertRaisesRegex(observe.ObserveError, "exit 1; it still runs"):
+            self.stop(s.id)
+        terminates = self.guest.execs("Procmon64.exe").count(["/AcceptEula", "/Terminate"])
+        stopped, problems = self.stop(s.id, force=True)
+        self.assertFalse(self.guest.running("Procmon64.exe"))
+        self.assertEqual(self.guest.execs("Procmon64.exe").count(["/AcceptEula", "/Terminate"]), terminates)
+        self.assertFalse(stopped.complete)
+        self.assertIn("incomplete", "; ".join(problems))
+        self.assertIn("ended by its PID", " ".join(stopped.notes))
+
     def test_a_second_procmon_session_of_the_run_is_refused(self):
         self.start()
         with self.assertRaisesRegex(observe.Conflict, "holds procmon"):
@@ -632,6 +646,30 @@ class ProcMonLife(unittest.TestCase):
         warnings = observe.collect_all(self.run, "desk down", guest=self.guest, host=self.host)
         self.assertIn("nothing could be collected", warnings[0])
 
+    def test_collection_storage_failure_is_reported_and_keeps_guest_evidence(self):
+        self.start()
+        with mock.patch.object(Store, "update", side_effect=OSError(28, "No space left on device")):
+            warnings = observe.collect_all(self.run, "down", guest=self.guest, host=self.host)
+        self.assertIn("No space left", "; ".join(warnings))
+        self.assertIn("C:\\desk\\observe\\r1-s1\\procmon.pml", self.guest.disk)
+
+    def test_an_explicit_failed_stop_is_not_forgotten_at_teardown(self):
+        self.start()
+        self.guest.fail["pull"] = guestops.ObserveError("scp exit 1")
+        self.stop()
+        warnings = observe.collect_all(self.run, "down", guest=self.guest, host=self.host)
+        self.assertIn("was not copied", "; ".join(warnings))
+
+    def test_collection_exception_does_not_prevent_other_sessions_collecting(self):
+        self.start()
+        observe.start(self.run, "ipc", host=self.host, guest=self.guest)
+        with mock.patch.object(self.guest, "pull", side_effect=OSError(28, "No space left")):
+            warnings = observe.collect_all(self.run, "down", guest=self.guest, host=self.host)
+        self.assertIn("No space left", "; ".join(warnings))
+        ipc = Store(self.run).find("s2")
+        self.assertTrue(ipc.complete)
+        self.assertTrue(all(a["verified"] for a in ipc.artifacts))
+
 
 class Marks(unittest.TestCase):
     def setUp(self):
@@ -721,6 +759,24 @@ class Snapshots(unittest.TestCase):
         self.assertEqual((s1.state, s2.state, s2.restored_from), ("stopped", "running", "s1"))
         self.assertEqual(s2.tool["pml"], s1.tool["pml"])
         self.assertIn("session s2", said[0])
+
+    def test_restored_ipc_has_its_saved_prefix_without_mutating_verified_history(self):
+        observe.start(self.run, "ipc", host=self.host, guest=self.guest)
+        observe.snapshot_saved(self.run, self.snap)
+        first, problems = observe.stop(self.run, "s1", host=self.host, guest=self.guest)
+        self.assertEqual(problems, [])
+        original = {a["path"]: Path(a["path"]).read_bytes() for a in first.artifacts}
+        prefix = original[first.artifacts[0]["path"]]
+        observe.snapshot_restored(self.run, self.snap, "mid")
+        second, problems = observe.stop(self.run, "s2", host=self.host, guest=self.guest)
+        self.assertEqual(problems, [])
+        self.assertNotEqual(first.tool["host_dir"], second.tool["host_dir"])
+        self.assertEqual(Path(second.artifacts[0]["path"]).read_bytes(), prefix)
+        for a in first.artifacts:
+            self.assertEqual(Path(a["path"]).read_bytes(), original[a["path"]])
+            self.assertEqual(base.sha256(Path(a["path"])), a["sha256"])
+        self.assertTrue(second.complete)
+        self.assertTrue(all(a["verified"] for a in second.artifacts))
 
     def test_without_sessions_nothing_is_saved(self):
         observe.snapshot_saved(self.run, self.snap)

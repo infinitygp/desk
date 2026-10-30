@@ -1,11 +1,12 @@
 """Observation in scenarios, reports, `desk down` and snapshots, with the guest in memory."""
 
+import io
 import json
 import shutil
 import tempfile
 import time
 import unittest
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -155,6 +156,38 @@ class Steps(unittest.TestCase):
             scenario._run_steps(run, mock.Mock(), {"step": [{"mark": "x", "soft": True}, {"exec": "true"}]})
         self.assertEqual(len([c for c in run.log_event.call_args_list if c.kwargs.get("ok") is False]), 1)
 
+    def test_storage_failure_in_an_observation_step_is_exit_2_even_when_soft(self):
+        with mock.patch("desk.observe.mark", side_effect=OSError(28, "No space left")), \
+                mock.patch("desk.scenario.display"), self.assertRaisesRegex(observe.ObserveError, "No space left"):
+            scenario._run_steps(mock.Mock(), load_image("windows-11"),
+                                {"step": [{"mark": "x", "soft": True}]})
+
+    def test_automatic_collection_failure_cannot_print_scenario_passed(self):
+        path = write(f'''image = "windows-11"
+[[observe]]
+provider = "procmon"
+options = {{exe = '{PROCMON}'}}
+[[step]]
+exec = "true"
+''')
+        self.guest.fail["pull"] = observe.ObserveError("scp exit 1")
+        output = io.StringIO()
+        with mock.patch("desk.scenario._base", return_value=path.parent), \
+                mock.patch("desk.scenario._build", return_value=[]), \
+                mock.patch("desk.scenario.runs.agent_process", return_value=("", 0)), \
+                mock.patch("desk.scenario.runs.up", return_value=self.run), \
+                mock.patch("desk.scenario.runs.spec_for", return_value=load_image("windows-11")), \
+                mock.patch("desk.scenario._run_steps", return_value=True), \
+                mock.patch("desk.record.stop"), mock.patch("desk.record.save_videos", return_value=[]), \
+                mock.patch("desk.evidence.collect", return_value=tmpdir(self)), \
+                mock.patch("desk.runs.state_lock", return_value=nullcontext()), \
+                mock.patch("desk.runs.down") as down, redirect_stdout(output), \
+                self.assertRaisesRegex(DeskError, "observation collection failed"):
+            scenario.run_scenario(path)
+        self.assertNotIn("scenario passed", output.getvalue())
+        down.assert_called_once_with(self.run, keep=True)
+        self.assertIn("C:\\desk\\observe\\r1-s1\\procmon.pml", self.guest.disk)
+
 
 class Report(unittest.TestCase):
     def setUp(self):
@@ -248,7 +281,11 @@ class Teardown(unittest.TestCase):
                 mock.patch("desk.record.stop"), mock.patch("desk.record.save_videos", return_value=[]), \
                 mock.patch("desk.evidence.collect", return_value=None), mock.patch("desk.runs.state_lock", lock), \
                 mock.patch("desk.runs.down"), mock.patch("sys.stderr") as err:
-            evidence.finish(run, **kw)
+            if kw.get("running"):
+                evidence.finish(run, **kw)
+            else:
+                with self.assertRaisesRegex(DeskError, "observation collection failed"):
+                    evidence.finish(run, **kw)
         return collect, err
 
     def test_open_sessions_are_collected_before_the_run_goes(self):
@@ -259,6 +296,68 @@ class Teardown(unittest.TestCase):
     def test_a_kept_scenario_run_keeps_its_captures_running(self):
         collect, _ = self.finish(running=True)
         collect.assert_not_called()
+
+    def test_unexpected_collection_exception_still_stops_vm_and_retains_disk(self):
+        run = FakeRun(tmpdir(self))
+        with mock.patch("desk.observe.collect_all", side_effect=OSError(28, "No space left")), \
+                mock.patch("desk.record.stop") as record_stop, \
+                mock.patch("desk.record.save_videos", return_value=[]), \
+                mock.patch("desk.runs.state_lock", return_value=nullcontext()), \
+                mock.patch("desk.runs.down") as down, \
+                self.assertRaisesRegex(DeskError, "No space left"):
+            evidence.finish(run, report=False)
+        record_stop.assert_called_once_with(run)
+        down.assert_called_once_with(run, keep=True)
+
+    def test_successful_collection_allows_normal_run_removal(self):
+        run = FakeRun(tmpdir(self))
+        guest = guest_with_procmon()
+        host = FakeHost(run)
+        observe.start(run, "procmon", options={"exe": PROCMON}, guest=guest, host=host)
+        with mock.patch("desk.observe.guest_for", return_value=guest), mock.patch("desk.observe.Host", return_value=host), \
+                mock.patch("desk.record.stop"), mock.patch("desk.record.save_videos", return_value=[]), \
+                mock.patch("desk.runs.state_lock", return_value=nullcontext()), \
+                mock.patch("desk.runs.down") as down:
+            evidence.finish(run, report=False)
+        down.assert_called_once_with(run, keep=False)
+        self.assertTrue(Store(run).find("s1").complete)
+
+    def test_cleaned_preflight_refusal_does_not_poison_normal_teardown(self):
+        run = FakeRun(tmpdir(self))
+        guest = guest_with_procmon()
+        guest.admin = False
+        host = FakeHost(run)
+        with self.assertRaises(observe.Privileges):
+            observe.start(run, "procmon", options={"exe": PROCMON}, guest=guest, host=host)
+        self.assertEqual(Store(run).find("s1").state, "failed")
+        with mock.patch("desk.observe.guest_for", return_value=guest), mock.patch("desk.observe.Host", return_value=host), \
+                mock.patch("desk.record.stop"), mock.patch("desk.record.save_videos", return_value=[]), \
+                mock.patch("desk.runs.state_lock", return_value=nullcontext()), \
+                mock.patch("desk.runs.down") as down:
+            evidence.finish(run, report=False)
+        down.assert_called_once_with(run, keep=False)
+
+    def test_failed_start_cleanup_remains_retryable_and_evidence_is_retained(self):
+        run = FakeRun(tmpdir(self))
+        guest = guest_with_procmon()
+        host = FakeHost(run)
+        original = guest.tools["procmon64.exe"]
+        guest.tools["procmon64.exe"] = lambda f, argv: (
+            {"timed_out": True, "rc": None} if "/WaitForIdle" in argv else original(f, argv))
+        with mock.patch.object(observe.provider("procmon"), "cleanup",
+                               side_effect=observe.ObserveError("temporary cleanup failure")), \
+                self.assertRaisesRegex(observe.ObserveError, "still running after 90s"):
+            observe.start(run, "procmon", options={"exe": PROCMON}, guest=guest, host=host)
+        self.assertEqual(Store(run).find("s1").state, "interrupted")
+        self.assertTrue(guest.running("Procmon64.exe"))
+        with mock.patch("desk.observe.guest_for", return_value=guest), mock.patch("desk.observe.Host", return_value=host), \
+                mock.patch("desk.record.stop"), mock.patch("desk.record.save_videos", return_value=[]), \
+                mock.patch("desk.runs.state_lock", return_value=nullcontext()), \
+                mock.patch("desk.runs.down") as down, \
+                self.assertRaisesRegex(DeskError, "temporary cleanup failure"):
+            evidence.finish(run, report=False)
+        down.assert_called_once_with(run, keep=True)
+        self.assertFalse(guest.running("Procmon64.exe"))
 
 
 class SnapshotHooks(unittest.TestCase):
