@@ -81,6 +81,16 @@ function Invoke-Tool($exe, $arguments, $timeout, $cwd, $encoding) {
     }
 }
 
+# SHA-256 by .NET itself: Get-FileHash, a function of a script module, was not found from this
+# script block on Windows Server 2025 (Windows CI).
+function Sha256($path) {
+    $stream = [IO.File]::OpenRead($path)
+    try {
+        $sha = [Security.Cryptography.SHA256]::Create()
+        -join ($sha.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') })
+    } finally { $stream.Dispose() }
+}
+
 function Size-Of($path) {
     if (-not (Test-Path -LiteralPath $path)) { return 0 }
     $item = Get-Item -LiteralPath $path -Force
@@ -132,7 +142,7 @@ function Op-Probe($req) {
             $info.size = $item.Length
             $info.version = $item.VersionInfo.FileVersion
             $info.product = $item.VersionInfo.ProductName
-            if ($req.hash) { $info.sha256 = (Get-FileHash -LiteralPath $f -Algorithm SHA256).Hash.ToLower() }
+            if ($req.hash) { $info.sha256 = Sha256 $f }
         }
         $out.files[$f] = $info
     }
@@ -235,7 +245,7 @@ function Op-Files($req) {
         }
         $info = @{ exists = $true; dir = $false; size = $item.Length; modified = Micro $item.LastWriteTime }
         if ($req.hash) {
-            try { $info.sha256 = (Get-FileHash -LiteralPath $f -Algorithm SHA256).Hash.ToLower() }
+            try { $info.sha256 = Sha256 $f }
             catch { $info.hash_error = $_.Exception.Message }
         }
         $out[$f] = $info
