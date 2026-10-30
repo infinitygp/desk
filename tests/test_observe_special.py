@@ -85,6 +85,14 @@ class Pktmon(Base):
         with self.assertRaisesRegex(observe.Conflict, "holds packet-capture"):
             self.start("netsh")
 
+    def test_a_pcapng_whose_copy_differs_is_not_said_to_be_missing(self):
+        self.start("pktmon")
+        self.guest.pull_hook = lambda remote, data: data[:10]
+        s, problems = self.stop()
+        self.assertIn("net.pcapng: the copy differs", " ".join(problems))
+        self.assertIn("PCAPNG made in the guest, not read on the host: the copy differs",
+                      " ".join(observe.provider("pktmon").summary(s)))
+
     def test_a_failed_conversion_is_said_and_the_etl_stays(self):
         self.start("pktmon")
         tool = self.guest.tools["pktmon.exe"]

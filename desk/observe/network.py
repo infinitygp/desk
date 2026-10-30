@@ -108,6 +108,8 @@ class _Capture(Provider):
         pcap = next((a for a in session.artifacts if a["name"] == "net.pcapng"), None)
         if pcap and pcap.get("check"):
             lines.append(f"PCAPNG: {pcap['check'].get('detail')}")
+        elif pcap and pcap.get("in_guest"):
+            lines.append(f"PCAPNG made in the guest, not read on the host: {pcap.get('detail')}")
         elif session.stats.get("etl2pcap"):
             lines.append(f"no PCAPNG: pktmon etl2pcap exit {session.stats['etl2pcap'].get('rc')}: "
                          f"{session.stats['etl2pcap'].get('said')}")
