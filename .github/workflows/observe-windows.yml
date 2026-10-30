@@ -13,6 +13,11 @@ on:
       - ".github/workflows/observe-windows.yml"
   workflow_dispatch:
 
+# One run per branch: a newer push cancels the run of the one before.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   observe:
     runs-on: windows-latest
