@@ -37,16 +37,16 @@ desk down                                  # the report has an Observation secti
   every process of it: `--process powershell.exe` also follows desk's own PowerShell.
 - Every capture stops itself (30 min, 4 GiB unless `--duration`/`--max-mb`), also when desk is
   gone; `desk down` stops and collects whatever is still open. One ProcMon, one packet capture
-  and one WPR at a time per run. Sizes seen on a Windows 11 guest: ProcMon unfiltered about
-  5 MiB/s (4 GiB in about 12 minutes), in 256 MiB steps, so `--max-mb` below 256 ends it at once;
+  and one WPR at a time per run. Sizes seen on a Windows 11 guest: ProcMon unfiltered 5-13
+  MiB/s (4 GiB in 5-12 minutes), in 256 MiB steps, so `--max-mb` below 256 ends it at once;
   WPR GeneralProfile 150 MiB in 47 s; WPR FileIO next to ProcMon 1.6 GiB in 2 minutes, as each
   records the other's writes.
 - desk stops only what it started. A ProcMon or packet capture already running in the guest
   makes `start` refuse (exit 2): close it, or report it; never stop it by hand unless you started it.
-- With several captures (ProcMon with others) each `desk observe` command took 30-80 s on a
-  Windows 11 guest, and a mark's listing comes that much later: keep what a mark must see open
-  long enough. Sessions are stopped and copied one by one, so a packet capture still running
-  records desk copying the others' files: stop it first (`desk observe stop LABEL`).
+- With ProcMon running each `desk observe` command takes about 5 s (once 80 s), and a mark's
+  IPC listing comes after the mark: the report says how long after, and keep what a mark must
+  see open longer than that. `stop --all`, `observe_stop = true` and `desk down` stop every
+  capture before copying any, so captures do not record desk's own copies.
 - `desk observe status` while it runs (file size, lost events); `desk observe list` the sessions.
 - A reboot or a snapshot restore ends or rewinds captures: the session says "interrupted" or
   that what was recorded after the snapshot's moment is gone; `stop` collects what is left.
@@ -57,8 +57,8 @@ desk down                                  # the report has an Observation secti
   encrypted, loopback traffic does not pass the adapter. IPC listings show endpoints, never the
   data sent through them; `desk observe pipe NAME --send TEXT --read 64` connects to one pipe as a
   client, which the server sees like any client: use it only on the product's own pipes.
-- `ida` asks IDA for a password: desk makes one unless `--set password=` gives it, prints it at
-  start and keeps it in a file only you can read (`desk observe status` names it) until the
+- `ida` asks IDA for a password: desk makes one unless `--set password=` gives it (which then
+  stands on the host's command line: leave it to desk), prints it at start and keeps it in a file only you can read (`desk observe status` names it) until the
   server stops. It reaches the server through its environment, never a command line, the
   session or the report; a ProcMon running when the server starts records that environment.
 - Open the files with the user's tools (ProcMon for PML, WPA for ETL, Wireshark for PCAPNG and
