@@ -66,6 +66,10 @@ def save(run, name: str, force: bool = False) -> float:
             (new / "disks").mkdir(exist_ok=True)
             reflink_copy(f, new / "disks" / f.name)
         took = time.monotonic() - t0
+        # Captures running now run again when this is restored: what desk knows of them goes along.
+        from . import observe
+
+        observe.snapshot_saved(run, new)
         # Written last: a snapshot without it is not one (listing, restore).
         (new / "meta.json").write_text(json.dumps({"created": time.time(), "seconds": round(took, 1),
                                                    "clock_offset": run.clock_offset}))
@@ -119,6 +123,10 @@ def restore(run, name: str) -> float:
             (disks.directory(run) / f.name).chmod(0o644)
     _resume(run, d / "memory.save")
     run.log_event(snapshot="restore", name=name, offset=run.clock_offset)
+    from . import observe
+
+    for line in observe.snapshot_restored(run, d, name):
+        print(f"[desk] {line}", file=sys.stderr)
     return time.monotonic() - t0
 
 

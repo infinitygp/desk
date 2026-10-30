@@ -665,6 +665,15 @@ def cmd_reboot(args) -> None:
         clock.apply(run)
     for line in inhibitors:
         print(f"note: shutdown was blocked by: {line}")
+    from .observe.session import Store
+
+    if any(s.state == "running" for s in Store(run).all()):
+        from . import observe
+
+        for s in observe.listing(run):
+            if s.state == "interrupted" and s.error.startswith("the guest rebooted"):
+                print(f"note: observation {s.name()} ended with the reboot; desk observe stop {s.id} collects what it "
+                      "left")
     dom = run.dom()
     png, _ = display.wait_stable(dom, timeout=30)
     print(f"rebooted in {took:.0f}s")
@@ -727,6 +736,10 @@ def cmd_scenario(args) -> None:
         for i, step in enumerate(data.get("step", []), 1):
             action, arg = scenario.describe(step)
             print(f"  {i:>2}. {step.get('name') or (action + ' ' + arg).strip()}")
+        scenario.check_observations(data, load_image(image))
+        for label, t in scenario.observations(path, data).items():
+            print(f"  observe {label}: {t['provider']}, "
+                  + ("before the first step" if t.get("start", "before") == "before" else "at its observe_start step"))
         for w in scenario.fixed_waits(data):
             print(f"warning: {w}")
         return

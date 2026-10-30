@@ -494,7 +494,15 @@ def collect(run, diff: bool = False) -> Path:
         md += ["", "## Files changed since the image", "", "```", format_changes(changes, limit=100), "```",
                "", "Full list in files.txt, raw virt-diff output in virt-diff.txt."]
 
-    md += ["", "## Timeline", ""]
+    from .observe import report as observed
+    from .clock import zone
+
+    try:
+        tz = zone(run)
+    except Exception:  # noqa: BLE001 - an image whose definition is gone still gets its report
+        tz = None
+    md += [""] + observed.section(run, out, events, tz)
+    md += ["## Timeline", ""]
     if not events:
         md.append("(no desk commands were recorded)")
     for ev in events:
@@ -517,6 +525,8 @@ def collect(run, diff: bool = False) -> Path:
             md.append(f"- {stamp} snapshot {ev['snapshot']}d: {ev['name']}")
         elif "gc" in ev:
             md.append(f"- {stamp} {ev['gc']}")
+        elif "observe" in ev:
+            md.append(f"- {stamp} {observed.timeline(ev)}")
         elif ev.get("record") == "start":
             md.append(f"- {stamp} recording started ({ev.get('fps')} fps)")
         elif ev.get("record") == "stop" and ev.get("video"):
@@ -564,6 +574,12 @@ def finish(run, keep: bool = False, diff: bool = False, report: bool = True,
     from . import record, runs
 
     with _teardown(run):
+        if not running:
+            # Captures still open are stopped and their files copied while the guest is there.
+            from . import observe
+
+            for warning in observe.collect_all(run, "the run goes down"):
+                print(f"[desk] warning: {warning}", file=sys.stderr)
         try:
             record.stop(run)
         except Exception as e:  # noqa: BLE001 - a video that cannot be made must not keep the VM running

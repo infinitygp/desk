@@ -17,7 +17,8 @@ from .steps import Steps
 
 # Exactly one per step; the value is the action's argument.
 ACTIONS = {"root", "exec", "gui", "focus", "click", "type", "key", "expect", "expect_absent", "shot",
-           "reboot", "wait", "clock", "disk_add", "disk_rm", "console_errors", "prepare", "open", "viewport"}
+           "reboot", "wait", "clock", "disk_add", "disk_rm", "console_errors", "prepare", "open", "viewport",
+           "observe_start", "observe_stop", "mark"}
 OPTIONS = {"role", "exact", "timeout", "output", "rc", "name", "soft", "env", "step", "until", "anywhere", "browser",
            "button", "window"}
 # The options each action reads, besides name and soft; any other would be ignored without a word.
@@ -45,7 +46,9 @@ def _texts(v) -> bool:
 # What each action and option takes, as (check, description).
 VALUES = {
     **{a: (_text, "a text") for a in ("root", "exec", "focus", "click", "type", "expect", "expect_absent", "shot",
-                                      "clock", "disk_add", "disk_rm")},
+                                      "clock", "disk_add", "disk_rm", "mark")},
+    "observe_start": (_text, "the label of an [[observe]] table"),
+    "observe_stop": (lambda v: v is True or _text(v), "true (every open session) or an [[observe]] label"),
     "gui": (_texts, "a command line or a list of arguments"),
     "key": (_texts, "a key combo or a list of them"),
     "reboot": (lambda v: v is True or _text(v), "true or the command that reboots"),
@@ -64,6 +67,9 @@ VALUES = {
     "env": (lambda v: isinstance(v, dict) and all(isinstance(x, (str, int, float)) for x in v.values()),
             "a table like {NAME = \"value\"}"),
 }
+# What an [[observe]] table takes: a session started before the first step (start = "before") or
+# by an observe_start step (start = "step"), stopped by an observe_stop step or when the run ends.
+OBSERVE_KEYS = {"provider", "label", "start", "duration", "max_mb", "process", "options"}
 # Where build artifacts land in the guest.
 GUEST_IN = {"linux": "/tmp/desk", "openwrt": "/tmp/desk", "windows": "C:/Users/tester/desk"}
 
@@ -115,7 +121,7 @@ def load(path: Path) -> dict:
         raise DeskError(f"{path}: {e.strerror}") from None
     except tomllib.TOMLDecodeError as e:
         raise DeskError(f"{path}: not valid TOML: {e}") from None
-    unknown = set(data) - {"image", "record", "build", "disks", "usb", "step"}
+    unknown = set(data) - {"image", "record", "build", "disks", "usb", "step", "observe"}
     if unknown:
         raise DeskError(f"{path}: unknown keys {sorted(unknown)}")
     if not _text(data.get("image")):
@@ -165,7 +171,104 @@ def load(path: Path) -> dict:
             _checked(path, f"step {i}", clock.parse, step[action], 0.0, UTC)  # whether it reads, in any zone
         if "step" in step:
             _checked(path, f"step {i}", clock.duration, step["step"])
+    observations(path, data)
     return data
+
+
+def observations(path: Path, data: dict) -> dict[str, dict]:
+    """The [[observe]] tables by label, checked as far as can be without a guest: the provider,
+    its options, limits, and steps naming labels there are."""
+    from . import observe
+
+    tables = data.get("observe", [])
+    if not isinstance(tables, list) or not all(isinstance(t, dict) for t in tables):
+        raise DeskError(f"{path}: observations are [[observe]] tables")
+    out: dict[str, dict] = {}
+    for i, t in enumerate(tables, 1):
+        where = f"{path}: [[observe]] {i}"
+        unknown = set(t) - OBSERVE_KEYS
+        if unknown:
+            raise DeskError(f"{where}: unknown keys {sorted(unknown)} (it takes {', '.join(sorted(OBSERVE_KEYS))})")
+        if t.get("provider") not in observe.PROVIDERS:
+            raise DeskError(f"{where}: provider is one of {', '.join(observe.PROVIDERS)} (got {t.get('provider')!r})")
+        label = t.get("label", t["provider"])
+        if not (_text(label) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,39}", label)):
+            raise DeskError(f"{where}: label is letters, digits, - _ . (got {label!r})")
+        if label in out:
+            raise DeskError(f"{where}: label {label!r} twice (give each a label of its own)")
+        if t.get("start", "before") not in ("before", "step"):
+            raise DeskError(f"{where}: start is \"before\" (the first step) or \"step\" (an observe_start step)")
+        for key in ("duration", "max_mb"):
+            if key in t and not (_number(t[key]) and t[key] > 0):
+                raise DeskError(f"{where}: {key} takes a number above 0 (got {t[key]!r})")
+        if "process" in t and not _text(t["process"]):
+            raise DeskError(f"{where}: process is an image name, e.g. \"app.exe\"")
+        if not isinstance(t.get("options", {}), dict):
+            raise DeskError(f"{where}: options is a table like {{csv = true}}")
+        _checked(path, f"[[observe]] {i}", observe.provider(t["provider"]).options, t.get("options", {}))
+        out[label] = t
+    started = set()
+    for i, step in enumerate(data.get("step", []), 1):
+        for key in ("observe_start", "observe_stop", "mark"):
+            value = step.get(key)
+            if key != "mark" and isinstance(value, str) and value not in out:
+                raise DeskError(f"{path}: step {i}: {key} names no [[observe]] label (there are: "
+                                f"{', '.join(out) or 'none'})")
+            if key == "mark" and key in step and not out:
+                raise DeskError(f"{path}: step {i}: mark needs an [[observe]] session to mark")
+        if "observe_start" in step:
+            started.add(step["observe_start"])
+    for label, t in out.items():
+        if t.get("start") == "step" and label not in started:
+            raise DeskError(f"{path}: [[observe]] {label!r} starts at a step, and no observe_start step names it")
+    return out
+
+
+def check_observations(data: dict, spec) -> None:
+    """What only the image tells: whether its guests are of a family the providers observe."""
+    from . import observe
+
+    for t in data.get("observe", []):
+        p = observe.provider(t["provider"])
+        if spec.family not in p.families:
+            raise DeskError(f"[[observe]] {t['provider']}: observes {', '.join(p.families)} guests, and {spec.name} "
+                            f"is a {spec.family} one")
+
+
+def _observe_start(run, label: str, table: dict):
+    from . import observe
+
+    return observe.start(run, table["provider"], label=label, options=table.get("options"),
+                         duration=table.get("duration"), max_mb=table.get("max_mb"),
+                         target={"image": table["process"]} if table.get("process") else None,
+                         owner=run.label)
+
+
+def _observe_step(run, steps: Steps, action: str, value) -> str:
+    """observe_start, observe_stop and mark. Whatever goes wrong is desk's (exit 2): a capture
+    that could not be made says nothing about the product."""
+    from . import observe
+
+    try:
+        if action == "observe_start":
+            s = _observe_start(run, value, steps.observations[value])
+            return f"session {s.id} ({s.provider})"
+        if action == "mark":
+            m = observe.mark(run, value)
+            return f"mark {m['seq']} in {', '.join(m['sessions'])}"
+        refs = ([s.id for s in observe.listing(run) if s.state in observe.COLLECTABLE] if value is True else [value])
+        done = []
+        for ref in refs:
+            s, problems = observe.stop(run, ref, reason="scenario step")
+            if problems:
+                raise observe.ObserveError(f"observation {s.name()} is not complete: " + "; ".join(problems))
+            done.append(f"{s.name()}: " + ", ".join(a["name"] for a in s.artifacts
+                                                    if a.get("verified") and a["kind"] != "text"))
+        return "; ".join(done) or "no session open"
+    except observe.ObserveError:
+        raise
+    except DeskError as e:
+        raise observe.ObserveError(str(e)) from None
 
 
 def _checked(path: Path, where: str, parse, *args) -> None:
@@ -273,6 +376,8 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
     value, role, timeout = step[action], step.get("role"), step.get("timeout")
     if action in ("root", "exec"):
         return _shell(run, spec, step, action == "root")
+    if action in ("observe_start", "observe_stop", "mark"):
+        return _observe_step(run, steps, action, value)
     if action == "gui":
         if isinstance(value, list):
             argv = value
@@ -360,6 +465,7 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
 def run_scenario(path: Path, keep: bool = False, image: str | None = None) -> bool:
     data = load(path)
     spec = load_image(image or data["image"])
+    check_observations(data, spec)
     _warn(data)
     base = _base(path, data)
     artifacts = _build(data, base)
@@ -382,7 +488,13 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None) -> bo
             disks.add(run, *disks.parse(d))
         for device in data.get("usb", []):
             usb.add(run, device)
-        ok = _run_steps(run, runs.spec_for(run), data)
+        # Started before the first step, so they see the product from its start; the run's end
+        # (evidence.finish) stops and collects whatever is still open, failure or not.
+        for label, table in observations(path, data).items():
+            if table.get("start", "before") == "before":
+                s = _observe_start(run, label, table)
+                print(f"observing: {label} (session {s.id}, {s.provider})", flush=True)
+        ok = _run_steps(run, runs.spec_for(run), data, observed=observations(path, data))
     finally:
         # Also when the VM is gone: the steps and why the guest was lost are in its directory.
         report, videos = evidence.finish(run, keep=keep, running=keep, stopped=True)
@@ -403,6 +515,7 @@ def continue_scenario(path: Path, run, first: int, image: str | None = None) -> 
     it; the run stays, and its report (desk down) counts each step's last attempt."""
     data = load(path)
     spec = load_image(image or data["image"])
+    check_observations(data, spec)
     if run.image != spec.name:
         raise DeskError(f"run {run.id} is of {run.image}, the scenario of {spec.name}")
     total = len(data.get("step", []))
@@ -410,7 +523,7 @@ def continue_scenario(path: Path, run, first: int, image: str | None = None) -> 
         raise DeskError(f"--from {first}: the scenario has steps 1 to {total}")
     _warn(data)
     run.log_event(scenario=str(path.resolve()), steps=total, first=first)
-    ok = _run_steps(run, runs.spec_for(run), data, first)
+    ok = _run_steps(run, runs.spec_for(run), data, first, observed=observations(path, data))
     print(f"steps {first}-{total} passed" if ok else "scenario FAILED")
     print(f"run {run.id} still running: desk down {run.id} writes the report")
     return ok
@@ -421,10 +534,13 @@ def _warn(data: dict) -> None:
         print(f"warning: {w}", flush=True)
 
 
-def _run_steps(run, spec, data: dict, first: int = 1) -> bool:
+def _run_steps(run, spec, data: dict, first: int = 1, observed: dict | None = None) -> bool:
     """Steps `first`.. in order, stopping at the first failure that is not soft; whether all passed."""
+    from .observe import ObserveError
+
     ok = True
     steps = Steps(spec, run)
+    steps.observations = observed or {}
     for i, step in enumerate(data.get("step", []), 1):
         if i < first:
             continue
@@ -441,7 +557,7 @@ def _run_steps(run, spec, data: dict, first: int = 1) -> bool:
             if isinstance(e, guest.NoConnection):
                 lost = guest.NoConnection(f"{e}; {runs.host_state(run)}")
                 detail = str(lost)
-            elif isinstance(e, browser.Unchecked):
+            elif isinstance(e, (browser.Unchecked, ObserveError)):
                 lost = e  # a check desk could not make says nothing about the product either
         run.log_event(step=i, action=label, ok=passed, detail=detail, seconds=round(time.monotonic() - t0, 1))
         head, *rest = detail.splitlines() or [""]

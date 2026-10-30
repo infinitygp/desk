@@ -644,6 +644,8 @@ def snapshot_restored(run, snapdir: Path, name: str) -> list[str]:
     store = Store(run)
     saved: dict[str, Session] = {}
     d = snapdir / "observe-sessions"
+    if not d.is_dir() and not (store.dir / "sessions").is_dir():
+        return []
     if d.is_dir():
         for f in d.glob("*.json"):
             try:
