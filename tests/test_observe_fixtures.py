@@ -120,7 +120,7 @@ class Expect(unittest.TestCase):
 class Scenarios(unittest.TestCase):
     def test_every_fixture_scenario_loads_for_windows(self):
         files = sorted((FIXTURES / "scenarios").glob("*.toml"))
-        self.assertEqual(len(files), 5)
+        self.assertEqual(len(files), 6)
         for f in files:
             with self.subTest(f=f.name):
                 data = scenario.load(f)

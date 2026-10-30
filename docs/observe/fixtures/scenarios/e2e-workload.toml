@@ -1,0 +1,60 @@
+# WIN-E2E-01: every provider that can run together, while the screen is recorded: Process Monitor
+# (with CSV), a logman session of Kernel-Process (with tracerpt), pktmon and the IPC listings; the
+# workload's every step in the desktop session, holding a pipe and a listener for a mark (900 s:
+# under these four captures one desk observe call took up to 80 s); Notepad typed into.
+# Afterwards, with the run kept (--keep):
+#   desk -r RUN pull C:/desk/observe/workload/e2e1/manifest.json manifest.json
+#   expect.py manifest.json --procmon-csv REPORT/observe/s1/procmon.csv
+#   expect.py manifest.json --tracerpt-csv REPORT/observe/s2/events.csv
+#   expect.py manifest.json --pcapng REPORT/observe/s3/net.pcapng
+#   expect.py manifest.json --ipc-dir REPORT/observe/s4
+image = "windows-11"
+record = true
+[build]
+artifacts = ["docs/observe/fixtures/workload.ps1"]
+[[observe]]
+provider = "procmon"
+label = "pm"
+duration = 900
+options = {csv = true}
+[[observe]]
+provider = "etw"
+label = "kp"
+duration = 900
+options = {providers = ["Microsoft-Windows-Kernel-Process:0x10:4"], tracerpt = true}
+[[observe]]
+provider = "pktmon"
+label = "net"
+duration = 900
+max_mb = 256
+[[observe]]
+provider = "ipc"
+label = "ipc"
+options = {udp = true}
+[[step]]
+mark = "workload starts"
+[[step]]
+# A manifest of an earlier run of it would pass the wait for this one's.
+exec = "Remove-Item -Recurse -Force C:/desk/observe/workload/e2e1 -ErrorAction SilentlyContinue"
+[[step]]
+# In the desktop session: a process Start-Process starts over SSH ends with the SSH session.
+gui = ["conhost.exe", "--headless", "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "C:/Users/tester/desk/workload.ps1", "-Token", "e2e1", "-HoldSeconds", "900"]
+[[step]]
+exec = "Test-Path C:/desk/observe/workload/e2e1/manifest.json"
+output = "True"
+until = true
+timeout = 240
+[[step]]
+mark = "endpoints held"
+[[step]]
+gui = "notepad.exe"
+[[step]]
+focus = "Notepad"
+[[step]]
+type = "desk e2e1 typed while observed"
+[[step]]
+shot = "notepad typed"
+[[step]]
+mark = "typed into Notepad"
+[[step]]
+observe_stop = true
