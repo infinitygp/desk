@@ -347,7 +347,7 @@ def reconcile(run, guest: Guest | None = None, store: Store | None = None) -> li
                 said = (state.get("watch") or {}).get((s.watchdog or {}).get("out"))
                 if said:
                     try:
-                        verdict = json.loads(said.lstrip("﻿"))
+                        verdict = json.loads(said.lstrip("\ufeff"))
                     except ValueError:
                         verdict = {"state": "stopping", "reason": "unknown"}
                     s.stats["watchdog"] = verdict
@@ -544,7 +544,7 @@ def _end_watchdog(guest: Guest, s: Session) -> None:
             said = guest.call("read", path=w["out"])
             if said.get("exists"):
                 try:
-                    verdict = json.loads(said["text"].lstrip("﻿"))
+                    verdict = json.loads(said["text"].lstrip("\ufeff"))
                 except ValueError:
                     verdict = {}
                 if verdict.get("state") == "done":
