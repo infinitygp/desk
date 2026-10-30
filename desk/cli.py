@@ -815,7 +815,8 @@ def _print_session(run: runs.Run, s, live: dict | None = None) -> None:
               + (", ".join(f"{x['name']} pid {x['pid']}" for x in list(s.processes.values())[:10]) or "not seen yet"))
     for k, v in (live or {}).items():
         print(f"  {k}: {_mib(v) if k == 'bytes' else v}")
-    for e in [e for e in s.events if e["event"] in ("ended", "interrupted", "snapshot restored", "stop failed")][-3:]:
+    shown = ("ended", "interrupted", "snapshot restored", "stop failed", "watchdog gone")
+    for e in [e for e in s.events if e["event"] in shown][-3:]:
         print(f"  {e['event']}: {e.get('detail', '')}")
     if s.stats.get("endpoint"):
         print(f"  endpoint: {s.stats['endpoint']} on the host ({p.connect_hint(s) if hasattr(p, 'connect_hint') else ''})")

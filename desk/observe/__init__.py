@@ -333,7 +333,7 @@ def reconcile(run, guest: Guest | None = None, store: Store | None = None) -> li
                 changed.append(s)
         else:
             guest = guest or guest_for(run)
-            procs = [pr for s in watching for pr in s.tool.get("procs") or []]
+            procs = [pr for s in watching for pr in [*(s.tool.get("procs") or []), *([s.watchdog] if s.watchdog else [])]]
             state = guest.call("state", procs=procs, watch=[s.watchdog["out"] for s in watching if s.watchdog],
                                etw=any(PROVIDERS[s.provider].name in ("wpr", "etw", "pktmon", "netsh")
                                        for s in watching))
@@ -355,6 +355,13 @@ def reconcile(run, guest: Guest | None = None, store: Store | None = None) -> li
                         s.event("ended", _ended_why(verdict))
                         changed.append(s)
                         continue
+                elif s.watchdog and not s.stats.get("watchdog_gone") and any(
+                        a["pid"] == s.watchdog["pid"] and a["created"] == s.watchdog["created"] and not a.get("alive")
+                        for a in state.get("alive") or []):
+                    s.stats["watchdog_gone"] = True
+                    s.event("watchdog gone", "the watchdog ended without a verdict: the capture's time and size limits "
+                                             "are no longer kept in the guest")
+                    changed.append(s)
                 capturing = PROVIDERS[s.provider].capturing(state, s)
                 if capturing is False:
                     s.state = "ended"
@@ -522,6 +529,8 @@ def stop(run, ref: str | None = None, force: bool = False, keep_guest: bool = Fa
             verdict = s.stats.get("watchdog") or {}
             if verdict.get("reason") in ("duration", "size"):
                 s.notes.append(_ended_why(verdict))
+            if s.stats.get("watchdog_gone"):
+                s.notes.append("its watchdog ended early: the time and size limits were not kept from then on")
             s.complete = not problems
             s.error = "; ".join(problems)
             s.event("stopped", "complete" if s.complete else s.error)

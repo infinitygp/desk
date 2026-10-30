@@ -481,6 +481,23 @@ class ProcMonLife(unittest.TestCase):
         self.assertTrue(s.complete)
         self.assertIn("size limit", " ".join(s.notes))
 
+    def test_a_watchdog_that_ended_without_a_verdict_is_said_not_taken_for_a_guard(self):
+        s = self.start(duration=600)
+        self.guest.procs[s.watchdog["pid"]]["alive"] = False
+        listed = observe.listing(self.run, guest=self.guest)
+        self.assertEqual(listed[0].state, "running")
+        self.assertEqual(listed[0].events[-1]["event"], "watchdog gone")
+        observe.listing(self.run, guest=self.guest)
+        self.assertEqual([e["event"] for e in self.run_store().all()[0].events].count("watchdog gone"), 1)
+        s, problems = self.stop()
+        self.assertEqual(problems, [])
+        self.assertIn("limits were not kept", " ".join(s.notes))
+
+    def run_store(self):
+        from desk.observe.session import Store
+
+        return Store(self.run)
+
     def test_a_reboot_interrupts_the_capture_and_what_is_left_is_collected(self):
         self.start()
         self.guest.boot_id = "133000000000009999"
