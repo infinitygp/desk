@@ -139,6 +139,15 @@ class Steps(unittest.TestCase):
         with self.assertRaisesRegex(observe.ObserveError, "no running observation session"):
             self.step(2)
 
+    def test_going_on_in_a_run_from_step_1_starts_what_starts_before_it_and_from_later_does_not(self):
+        self.run.image = "windows-11"
+        with mock.patch("desk.scenario._run_steps", return_value=True) as steps:
+            scenario.continue_scenario(self.path, self.run, 3)
+            self.assertEqual(Store(self.run).all(), [])
+            scenario.continue_scenario(self.path, self.run, 1)
+        self.assertEqual([(s.label, s.state) for s in Store(self.run).all()], [("app", "running")])
+        self.assertEqual(steps.call_count, 2)
+
     def test_the_steps_stop_at_it_with_exit_2(self):
         run = mock.Mock()
         with mock.patch("desk.scenario._step", side_effect=observe.ObserveError("trace not complete")), \

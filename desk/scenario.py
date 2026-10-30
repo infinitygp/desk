@@ -488,12 +488,8 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None) -> bo
             disks.add(run, *disks.parse(d))
         for device in data.get("usb", []):
             usb.add(run, device)
-        # Started before the first step, so they see the product from its start; the run's end
-        # (evidence.finish) stops and collects whatever is still open, failure or not.
-        for label, table in observations(path, data).items():
-            if table.get("start", "before") == "before":
-                s = _observe_start(run, label, table)
-                print(f"observing: {label} (session {s.id}, {s.provider})", flush=True)
+        # The run's end (evidence.finish) stops and collects whatever is still open, failure or not.
+        _observe_before(run, path, data)
         ok = _run_steps(run, runs.spec_for(run), data, observed=observations(path, data))
     finally:
         # Also when the VM is gone: the steps and why the guest was lost are in its directory.
@@ -523,10 +519,20 @@ def continue_scenario(path: Path, run, first: int, image: str | None = None) -> 
         raise DeskError(f"--from {first}: the scenario has steps 1 to {total}")
     _warn(data)
     run.log_event(scenario=str(path.resolve()), steps=total, first=first)
+    if first == 1:
+        _observe_before(run, path, data)
     ok = _run_steps(run, runs.spec_for(run), data, first, observed=observations(path, data))
     print(f"steps {first}-{total} passed" if ok else "scenario FAILED")
     print(f"run {run.id} still running: desk down {run.id} writes the report")
     return ok
+
+
+def _observe_before(run, path: Path, data: dict) -> None:
+    """The [[observe]] sessions that start before the first step, so they see the product from its start."""
+    for label, table in observations(path, data).items():
+        if table.get("start", "before") == "before":
+            s = _observe_start(run, label, table)
+            print(f"observing: {label} (session {s.id}, {s.provider})", flush=True)
 
 
 def _warn(data: dict) -> None:
