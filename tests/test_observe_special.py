@@ -67,8 +67,9 @@ class Pktmon(Base):
 
     def test_a_capture_that_is_not_desks_file_is_not_stopped(self):
         self.start("pktmon")
-        del self.guest.disk["C:\\desk\\observe\\r1-s1\\net.etl"]
-        with self.assertRaisesRegex(observe.Conflict, "somebody else's capture"):
+        # Ours ended and somebody started another one meanwhile.
+        self.guest.etw["PktMon"]["LocalFilePath"] = "C:\\Users\\tester\\theirs.etl"
+        with self.assertRaisesRegex(observe.Conflict, "PktMon writes C:.*theirs.etl.*somebody else's capture"):
             self.stop()
         self.assertNotIn(["stop"], self.guest.execs("pktmon.exe"))
         self.assertEqual(Store(self.run).find("s1").state, "running")
@@ -98,8 +99,9 @@ class SessionNames(unittest.TestCase):
     def test_a_numbered_session_of_the_tool_counts(self):
         from desk.observe.network import NETSH_SESSION, PKTMON_SESSION, _capturing
 
-        # As Windows Server 2025 named them (Windows CI).
+        # As Windows Server 2025 (Windows CI) and Windows 11 26H2 named them.
         self.assertEqual(_capturing(["NetCfgTrace", "NetTrace-2"], (NETSH_SESSION,)), "NetTrace-2")
+        self.assertEqual(_capturing(["NetTrace-08c1723f"], (NETSH_SESSION,)), "NetTrace-08c1723f")
         self.assertEqual(_capturing(["PktMon"], (PKTMON_SESSION,)), "PktMon")
         self.assertIsNone(_capturing(["NetCfgTrace", "PktMonitor"]))
 
@@ -115,6 +117,15 @@ class Netsh(Base):
         self.assertEqual(problems, [])
         self.assertEqual(self.guest.execs("netsh.exe")[-1], ["trace", "stop"])
         self.assertEqual([a["name"] for a in s.artifacts], ["net.etl"])
+
+    def test_its_session_of_a_name_of_its_own_runs_on_and_is_stopped_and_blocks_pktmon(self):
+        self.start("netsh")
+        self.assertEqual(observe.listing(self.run, guest=self.guest)[0].state, "running")
+        with self.assertRaisesRegex(observe.Conflict, r"s1 \(netsh, running\) holds packet-capture"):
+            observe.start(self.run, "pktmon", host=self.host, guest=self.guest, label="other")
+        self.stop("s1")
+        self.assertEqual(self.guest.execs("netsh.exe")[-1], ["trace", "stop"])
+        self.assertEqual(self.guest.etw.get("NetTrace-08c1723f"), None)
 
 
 class Ipc(Base):

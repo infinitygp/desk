@@ -401,7 +401,7 @@ def with_windows_tools(fake: FakeWindows) -> None:
         if argv[0] == "start":
             if "PktMon" in f.etw:
                 return {"rc": 1, "stdout": "Packet Monitor is already running."}
-            f.etw["PktMon"] = {"EventsLost": 0}
+            f.etw["PktMon"] = {"EventsLost": 0, "LocalFilePath": argv[argv.index("--file-name") + 1]}
             f.disk[argv[argv.index("--file-name") + 1]] = b"\x16" * 2048
             f.pktmon = argv
             return {"rc": 0}
@@ -413,17 +413,20 @@ def with_windows_tools(fake: FakeWindows) -> None:
             return {"rc": 0, "stdout": "Processed 5 packets"}
         return {"rc": 87}
 
+    # As Windows 11 26H2 names netsh's trace session.
+    NETSH_AS = "NetTrace-08c1723f"
+
     def netsh(f, argv):
         if argv[:2] == ["trace", "start"]:
-            if "NetTrace" in f.etw:
+            if NETSH_AS in f.etw:
                 return {"rc": 1, "stdout": "There is already a session in progress."}
-            f.etw["NetTrace"] = {"EventsLost": 0}
             out = next(a.split("=", 1)[1] for a in argv if a.startswith("tracefile="))
+            f.etw[NETSH_AS] = {"EventsLost": 0, "LocalFilePath": out}
             f.disk[out] = b"\x17" * 2048
             f.netsh = argv
             return {"rc": 0}
         if argv[:2] == ["trace", "stop"]:
-            f.etw.pop("NetTrace", None)
+            f.etw.pop(NETSH_AS, None)
             return {"rc": 0}
         return {"rc": 1}
 

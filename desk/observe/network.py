@@ -21,8 +21,9 @@ from .base import ArtifactSpec, Capability, Conflict, Option, Provider, command,
 from .guestops import ObserveError, win
 from .session import Session
 
-# The ETW session names the tools record under, to tell whether a capture runs: seen on Windows
-# Server 2025 (Windows CI) as PktMon and NetTrace-2; a name with a -N suffix counts as the same.
+# The ETW session names the tools record under, to tell whether a capture runs: PktMon, and
+# NetTrace with a suffix of its own (NetTrace-2 on Windows Server 2025, NetTrace-08c1723f on
+# Windows 11 26H2), which counts as the same. Whose capture one is, the file it writes says.
 PKTMON_SESSION = "PktMon"
 NETSH_SESSION = "NetTrace"
 _FILTER = re.compile(r"[A-Za-z][A-Za-z0-9.]*=[^\s=]+")
@@ -34,7 +35,7 @@ def _filter(v: str) -> str | None:
 
 def _capturing(etw_names, names=(PKTMON_SESSION, NETSH_SESSION)) -> str | None:
     """The first trace session of these tools' names (NetTrace, NetTrace-2) among `etw_names`."""
-    pattern = re.compile("|".join(re.escape(x) for x in names) + r"(-\d+)?", re.I)
+    pattern = re.compile("|".join(re.escape(x) for x in names) + r"(-[0-9A-Za-z]+)?", re.I)
     return next((n for n in etw_names or [] if pattern.fullmatch(n)), None)
 
 
@@ -66,11 +67,30 @@ class _Capture(Provider):
     def etl(self, session: Session) -> str:
         return win(session.guest_dir, "net.etl")
 
+    def capturing(self, state: dict, session: Session) -> bool | None:
+        names = state.get("etw_sessions")
+        return None if names is None else bool(_capturing(names, self.session_names))
+
     def watch_files(self, session: Session) -> list[str]:
         return [self.etl(session)]
 
-    def _ours(self, guest, session: Session) -> bool:
-        return bool((guest.files([self.etl(session)]).get(self.etl(session)) or {}).get("exists"))
+    def _running(self, guest, session: Session) -> bool:
+        """Whether this session's capture still runs: a trace session of the tool that writes its
+        file. None of the tool's runs: False; one writing another file: Conflict. Where Windows does
+        not list trace sessions, it is taken to run, so that its stop is tried."""
+        names = guest.call("etw", names=[]).get("names")
+        if names is None:
+            return True
+        running = [n for n in names if _capturing([n], self.session_names)]
+        if not running:
+            return False
+        sessions = guest.call("etw", names=running).get("sessions") or {}
+        files = {n: (p or {}).get("LocalFilePath") for n, p in sessions.items()}
+        if any(f and f.lower() == self.etl(session).lower() for f in files.values()):
+            return True
+        raise Conflict(f"{self.title} runs, but not into this session's file (trace session "
+                       + ", ".join(f"{n} writes {f or 'no file it says'}" for n, f in files.items())
+                       + "): it is somebody else's capture")
 
     def pcapng(self, guest, session: Session) -> list[ArtifactSpec]:
         out = win(session.guest_dir, "net.pcapng")
@@ -98,6 +118,7 @@ class Pktmon(_Capture):
     name = "pktmon"
     title = "Packet Monitor"
     tool_exe = "pktmon.exe"
+    session_names = (PKTMON_SESSION,)
     OPTIONS = {
         "components": Option(str, "nics", "pktmon --comp: nics (the network adapters), all, or component ids"),
         "pkt_size": Option(int, 128, "bytes kept of each packet (pktmon --pkt-size; 0: whole packets)"),
@@ -127,17 +148,9 @@ class Pktmon(_Capture):
     def stop_commands(self, session: Session) -> list[dict]:
         return [command("pktmon.exe", ["stop"], 300)]
 
-    def capturing(self, state: dict, session: Session) -> bool | None:
-        names = state.get("etw_sessions")
-        return None if names is None else bool(_capturing(names, (PKTMON_SESSION,)))
-
     def stop(self, guest, session: Session, host, force: bool = False) -> None:
-        names = guest.call("etw", names=[]).get("names")
-        if names is not None and not _capturing(names, (PKTMON_SESSION,)):
-            return
-        if not self._ours(guest, session):
-            raise Conflict("Packet Monitor runs, but not into this session's file: it is somebody else's capture")
-        tool_run(guest, "pktmon.exe", ["stop"], 300, "stopping Packet Monitor")
+        if self._running(guest, session):
+            tool_run(guest, "pktmon.exe", ["stop"], 300, "stopping Packet Monitor")
 
     def convert(self, guest, session: Session, host) -> list[ArtifactSpec]:
         return self.pcapng(guest, session) if session.options.get("pcapng") else []
@@ -155,6 +168,7 @@ class NetshTrace(_Capture):
     name = "netsh"
     title = "netsh trace"
     tool_exe = "netsh.exe"
+    session_names = (NETSH_SESSION,)
     OPTIONS = {
         "filters": Option(list, [], "netsh capture filters KEY=VALUE (IPv4.Address=10.0.2.2, Protocol=TCP; "
                           "netsh trace show capturefilterhelp)", check=_filter),
@@ -180,17 +194,9 @@ class NetshTrace(_Capture):
     def stop_commands(self, session: Session) -> list[dict]:
         return [command("netsh.exe", ["trace", "stop"], 600)]
 
-    def capturing(self, state: dict, session: Session) -> bool | None:
-        names = state.get("etw_sessions")
-        return None if names is None else bool(_capturing(names, (NETSH_SESSION,)))
-
     def stop(self, guest, session: Session, host, force: bool = False) -> None:
-        names = guest.call("etw", names=[]).get("names")
-        if names is not None and not _capturing(names, (NETSH_SESSION,)):
-            return
-        if not self._ours(guest, session):
-            raise Conflict("netsh trace runs, but not into this session's file: it is somebody else's capture")
-        tool_run(guest, "netsh.exe", ["trace", "stop"], 600, "stopping netsh trace")
+        if self._running(guest, session):
+            tool_run(guest, "netsh.exe", ["trace", "stop"], 600, "stopping netsh trace")
 
     def convert(self, guest, session: Session, host) -> list[ArtifactSpec]:
         return self.pcapng(guest, session) if session.options.get("pcapng") else []
