@@ -70,7 +70,9 @@ def parse_reply(op: str, rc: int, out: str, err: str):
                 raise ObserveError(f"in the guest: {reply.get('error') or 'failed without a reason'}")
             result = reply.get("result")
             if isinstance(result, dict):
-                result.setdefault("_now_ms", reply.get("now_ms"))
+                for k in ("now_ms", "start_ms", "op_ms"):
+                    if reply.get(k) is not None:
+                        result.setdefault(f"_{k}", reply[k])
             return result
     said = (err.strip() or out.strip())[-400:]
     raise ObserveError(f"the observation helper gave no answer to {op} (exit {rc})" + (f": {said}" if said else ""))

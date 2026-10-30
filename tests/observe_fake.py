@@ -122,6 +122,8 @@ class FakeWindows(Guest):
         self.pull_hook = None
         self.fail: dict[str, Exception] = {}
         self.clock_offset = 2.5
+        # Seconds a listing of endpoints takes in the guest (op ipc), ending when it is answered.
+        self.ipc_takes = 0.0
         self.arch = "AMD64"
         self._pid = 1000
         self._created = 133_700_000_000_000_000 // 10
@@ -276,9 +278,12 @@ class FakeWindows(Guest):
     def op_etw(self, names):
         return {"available": True, "names": list(self.etw), "sessions": {n: self.etw.get(n) for n in names}}
 
-    def op_ipc(self, pipes=True, tcp=True, udp=False):
+    def op_ipc(self, pipes=True, tcp=True, udp=False, names=False):
+        now = (time.time() + self.clock_offset) * 1000
         return {**({"pipes": list(self.pipes)} if pipes else {}), **({"tcp": list(self.tcp)} if tcp else {}),
-                **({"udp": []} if udp else {})}
+                **({"udp": []} if udp else {}),
+                **({"names": {str(p["pid"]): p["name"] for p in self.procs.values() if p["alive"]}} if names else {}),
+                "_start_ms": now - self.ipc_takes * 1000, "_now_ms": now}
 
     def op_pipeprobe(self, name, timeout_ms, send_b64=None, read_bytes=0):
         return dict(self.pipe_reply)

@@ -230,10 +230,32 @@ class Ipc(Base):
         self.assertEqual(last["tcp"][0]["process"], "app.exe")
         lines = observe.provider("ipc").summary(s)
         self.assertIn("pipes from start to stop: +app-control", lines)
+        listed = json.loads(Path(s.artifacts[1]["path"]).read_text())
+        self.assertLess(abs(listed["after_mark_s"]), 1)
+        self.assertAlmostEqual(listed["guest_to"] - listed["host_to"], 2.5, delta=0.5)
+        self.assertNotIn("listings made well after", " ".join(lines))
         self.assertIn("new TCP listeners: 127.0.0.1:8123 (app.exe)", lines)
         self.assertIn("TCP endpoints of the processes followed: 127.0.0.1:8123->0.0.0.0:0 Listen (app.exe)", lines)
         # Listings need no elevation and no tool: nothing was launched in the guest.
         self.assertEqual(self.guest.ops("launch"), [])
+
+    def test_a_listing_made_long_after_its_mark_says_so(self):
+        self.start("ipc")
+        self.guest.ipc_takes = 0.0
+        real = self.guest.op_ipc
+
+        def late(**kw):
+            r = real(**kw)
+            r["_start_ms"] += 40_000  # the guest got to it 40 s after the mark
+            r["_now_ms"] += 45_000
+            return r
+
+        self.guest.op_ipc = late
+        observe.mark(self.run, "clicked", guest=self.guest)
+        self.guest.op_ipc = real
+        s, _ = self.stop()
+        self.assertIn("listings made well after their mark (what they show is of then): mark-1 40 s after it",
+                      observe.provider("ipc").summary(s))
 
     def test_only_pipes_matching(self):
         self.guest.pipes = ["mojo.1", "Other"]

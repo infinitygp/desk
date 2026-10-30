@@ -187,6 +187,11 @@ class Report(unittest.TestCase):
         self.assertEqual(s["artifacts"][0]["report_path"], "observe/s1/procmon.pml")
         self.assertEqual(s["markers"][0]["video"], "video-1.webm")
         self.assertEqual(s["markers"][0]["shot_before"], "0001.png")
+        self.assertNotIn("desk's mark took", md)
+        # A mark the guest was slow to take says how long desk waited around it.
+        with Store(self.run).edit("s1") as cur:
+            cur.markers[0]["host_window"] = [cur.markers[0]["host"] - 16, cur.markers[0]["host"] + 16]
+        self.assertIn("desk's mark took 32 s", "\n".join(report.section(self.run, tmpdir(self), self.run.events)))
 
     def test_no_sessions_no_section(self):
         self.assertEqual(report.section(self.run, tmpdir(self), []), [])

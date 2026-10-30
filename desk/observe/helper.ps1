@@ -264,7 +264,9 @@ function Op-WaitGone($req) {
 }
 
 function Op-Procs($req) {
-    @{ items = @(Get-CimInstance Win32_Process | ForEach-Object {
+    # Only these properties: all of them took five times as long under Process Monitor.
+    @{ items = @(Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId, Name, ExecutablePath, CommandLine,
+            CreationDate | ForEach-Object {
         $cmd = $_.CommandLine
         if ($cmd -and $cmd.Length -gt 1000) { $cmd = $cmd.Substring(0, 1000) }
         @{ pid = [int]$_.ProcessId; ppid = [int]$_.ParentProcessId; name = $_.Name; path = $_.ExecutablePath
@@ -361,19 +363,34 @@ function Op-Ipc($req) {
             $out.pipes_note = $_.Exception.Message
         }
     }
+    # The classes behind Get-NetTCPConnection, asked directly: importing that module took 7 s of a
+    # PowerShell started under Process Monitor, the query 0.7 s.
     if ($req.tcp) {
-        $out.tcp = @(Get-NetTCPConnection -ErrorAction SilentlyContinue | ForEach-Object {
+        $out.tcp = @(Get-CimInstance -Namespace root/StandardCimv2 -ClassName MSFT_NetTCPConnection -ErrorAction SilentlyContinue `
+                -Property LocalAddress, LocalPort, RemoteAddress, RemotePort, State, OwningProcess | ForEach-Object {
             @{ local = $_.LocalAddress; lport = [int]$_.LocalPort; remote = $_.RemoteAddress; rport = [int]$_.RemotePort
-               state = [string]$_.State; pid = [int]$_.OwningProcess }
+               state = TcpState $_.State; pid = [int]$_.OwningProcess }
         })
     }
     if ($req.udp) {
-        $out.udp = @(Get-NetUDPEndpoint -ErrorAction SilentlyContinue | ForEach-Object {
+        $out.udp = @(Get-CimInstance -Namespace root/StandardCimv2 -ClassName MSFT_NetUDPEndpoint -ErrorAction SilentlyContinue `
+                -Property LocalAddress, LocalPort, OwningProcess | ForEach-Object {
             @{ local = $_.LocalAddress; lport = [int]$_.LocalPort; pid = [int]$_.OwningProcess }
         })
     }
+    if ($req.names) {
+        # Process names in the same look, not another round trip.
+        $out.names = @{}
+        foreach ($p in Get-Process) { $out.names["$($p.Id)"] = "$($p.ProcessName).exe" }
+    }
     $out
 }
+
+# MSFT_NetTCPConnection's State as Get-NetTCPConnection names it.
+$TcpStates = @{ 1 = 'Closed'; 2 = 'Listen'; 3 = 'SynSent'; 4 = 'SynReceived'; 5 = 'Established'; 6 = 'FinWait1'
+                7 = 'FinWait2'; 8 = 'CloseWait'; 9 = 'Closing'; 10 = 'LastAck'; 11 = 'TimeWait'; 12 = 'DeleteTCB'
+                100 = 'Bound' }
+function TcpState($v) { $n = 0; if ([int]::TryParse("$v", [ref]$n) -and $TcpStates.ContainsKey($n)) { $TcpStates[$n] } else { "$v" } }
 
 function Op-PipeProbe($req) {
     Add-Type -Namespace DeskObserve -Name Pipe -MemberDefinition @'
@@ -434,7 +451,8 @@ function Op-State($req) {
 }
 
 function Op-Listening($req) {
-    @{ items = @(Get-NetTCPConnection -State Listen -LocalPort ([int]$req.port) -ErrorAction SilentlyContinue | ForEach-Object {
+    @{ items = @(Get-CimInstance -Namespace root/StandardCimv2 -ClassName MSFT_NetTCPConnection -ErrorAction SilentlyContinue `
+            -Filter "State = 2 AND LocalPort = $([int]$req.port)" -Property LocalAddress, OwningProcess | ForEach-Object {
         @{ address = $_.LocalAddress; pid = [int]$_.OwningProcess }
     }) }
 }
@@ -482,6 +500,9 @@ function Run-Watch($w) {
 }
 
 if ($Watch) { Run-Watch (Decode $Watch); return }
+# What the operation itself took, apart from SSH and starting PowerShell, and when it began.
+$opClock = [Diagnostics.Stopwatch]::StartNew()
+$opStart = NowMs
 try {
     $req = Decode $Request
     $answer = switch ($req.op) {
@@ -505,7 +526,7 @@ try {
         'state' { Op-State $req }
         default { throw "unknown operation $($req.op)" }
     }
-    Reply @{ ok = $true; result = $answer; now_ms = (NowMs) }
+    Reply @{ ok = $true; result = $answer; now_ms = (NowMs); start_ms = $opStart; op_ms = $opClock.ElapsedMilliseconds }
 } catch {
     Reply @{ ok = $false; error = "$($req.op): $($_.Exception.Message)"; now_ms = (NowMs) }
 }

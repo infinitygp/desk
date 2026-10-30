@@ -109,6 +109,10 @@ def section(run, out: Path, events: list[dict], tz=None) -> list[str]:
                             f"{seen['video_at'] % 60:04.1f}")
             if seen.get("shot_before"):
                 also.append(f"after shots/{seen['shot_before']}")
+            took = (m.get("host_window") or [0, 0])[1] - (m.get("host_window") or [0, 0])[0]
+            if took > 2:
+                # The guest wrote the marker at its guest time; around it desk waited this long.
+                also.append(f"desk's mark took {took:.0f} s")
             guest = datetime.fromtimestamp(m["guest"], tz).strftime("%H:%M:%S.%f")[:-3]
             md.append(f"- {_stamp(run.created, m['host'])} mark {m['seq']} {m['text']!r}: guest {guest}"
                       + (f"; {', '.join(also)}" if also else "")
