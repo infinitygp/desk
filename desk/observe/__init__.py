@@ -39,10 +39,15 @@ MARKER_SOURCE = "Desk-Observe-Marker"
 
 
 def _providers() -> dict[str, Provider]:
+    from .debug import DbgSrv, IdaServer
     from .etw import Logman, Wpr
+    from .ipc import Ipc
+    from .network import NetshTrace, Pktmon
     from .procmon import ProcMon
+    from .usbpcap import UsbPcap
 
-    return {p.name: p for p in (ProcMon(), Wpr(), Logman())}
+    return {p.name: p for p in (ProcMon(), Wpr(), Logman(), Pktmon(), NetshTrace(), Ipc(), UsbPcap(), DbgSrv(),
+                                IdaServer())}
 
 
 PROVIDERS = _providers()
