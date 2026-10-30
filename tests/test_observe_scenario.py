@@ -211,7 +211,11 @@ class Report(unittest.TestCase):
     def test_the_whole_report_has_the_section_and_the_timeline_entries(self):
         observe.start(self.run, "procmon", options={"exe": PROCMON}, host=self.host, guest=self.guest)
         observe.mark(self.run, "here", guest=self.guest)
+        snap = tmpdir(self)
+        observe.snapshot_saved(self.run, snap)
         observe.stop(self.run, host=self.host, guest=self.guest)
+        observe.snapshot_restored(self.run, snap, "mid")
+        observe.stop(self.run, "s2", host=self.host, guest=self.guest)
         (self.run.dir / "log.jsonl").write_text("".join(json.dumps(e) + "\n" for e in self.run.events))
         self.run.ready = 0.0
         self.run.live = False
@@ -221,6 +225,7 @@ class Report(unittest.TestCase):
         self.assertLess(md.index("## Observation"), md.index("## Timeline"))
         self.assertIn("observation s1 started (procmon)", md)
         self.assertIn("mark 1: here", md)
+        self.assertIn("snapshot mid: snapshot mid brought the capture of s1 back", md)
         self.assertTrue((out / "observe.json").exists())
 
 

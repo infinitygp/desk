@@ -709,6 +709,7 @@ def snapshot_restored(run, snapdir: Path, name: str) -> list[str]:
                 said.append(f"snapshot {name} brought the capture of {sid} back: it is session {again.id} now "
                             f"(desk observe stop {again.id})")
     if said:
-        run.log_event(observe="restore", snapshot=name, detail="; ".join(said))
+        # "name", not "snapshot": that key is desk's own snapshot events', which the report reads apart.
+        run.log_event(observe="restore", name=name, detail="; ".join(said))
     return said
 

@@ -152,5 +152,5 @@ def timeline(ev: dict) -> str | None:
         return (f"observation {ev['session']} stopped ({ev.get('provider')}): "
                 + ("complete" if ev.get("complete") else "NOT complete"))
     if what == "restore":
-        return f"snapshot {ev.get('snapshot')}: {ev.get('detail')}"
+        return f"snapshot {ev.get('name')}: {ev.get('detail')}"
     return f"observation {ev.get('session')} {what}" + (f": {ev['detail']}" if ev.get("detail") else "")
