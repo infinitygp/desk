@@ -1,0 +1,22 @@
+# WIN-PM-03: Process Monitor sees what workload.ps1 does (processes, files, registry, pipe, TCP)
+# and desk's marks. Needs `desk observe setup procmon ProcessMonitor.zip --accept-eula` first.
+# Afterwards: expect.py MANIFEST --procmon-csv REPORT/observe/s1/procmon.csv (validation.md).
+image = "windows-11"
+[build]
+artifacts = ["docs/observe/fixtures/workload.ps1"]
+[[observe]]
+provider = "procmon"
+label = "pm"
+duration = 600
+process = "powershell.exe"
+options = {csv = true}
+[[step]]
+mark = "workload starts"
+[[step]]
+exec = "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/tester/desk/workload.ps1 -Token pm01"
+output = "workload pm01 done"
+timeout = 300
+[[step]]
+mark = "workload done"
+[[step]]
+observe_stop = "pm"

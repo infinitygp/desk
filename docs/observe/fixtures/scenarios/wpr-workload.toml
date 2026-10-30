@@ -1,0 +1,17 @@
+# WIN-ETW-02: WPR's GeneralProfile under desk's instance name, stopped into one ETL, with tracerpt's
+# summary. Checks the WPR flags desk uses (-filemode, -recordtempto, -instancename) on this build.
+image = "windows-11"
+[build]
+artifacts = ["docs/observe/fixtures/workload.ps1"]
+[[observe]]
+provider = "wpr"
+label = "gp"
+duration = 600
+max_mb = 1024
+options = {profile = ["GeneralProfile"], pdbgen = false, tracerpt = true}
+[[step]]
+exec = "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/tester/desk/workload.ps1 -Token wpr1 -Steps cpu,io"
+output = "workload wpr1 done"
+timeout = 300
+[[step]]
+observe_stop = "gp"

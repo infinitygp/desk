@@ -1,0 +1,17 @@
+# WIN-NET-02: Packet Monitor captures the workload's DNS query (it leaves through the adapter) and
+# its PCAPNG holds it. Afterwards: expect.py MANIFEST --pcapng REPORT/observe/s1/net.pcapng
+image = "windows-11"
+[build]
+artifacts = ["docs/observe/fixtures/workload.ps1"]
+[[observe]]
+provider = "pktmon"
+label = "net"
+duration = 300
+max_mb = 64
+options = {pkt_size = 256}
+[[step]]
+exec = "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/tester/desk/workload.ps1 -Token net1 -Steps dns"
+output = "workload net1 done"
+timeout = 120
+[[step]]
+observe_stop = "net"
