@@ -340,7 +340,8 @@ def wpr_instance():
 
 @case("CI-P-04")
 def pktmon_capture():
-    if not g.probe(commands=["pktmon.exe"])["commands"].get("pktmon.exe"):
+    tools = g.probe(commands=["pktmon.exe"])["commands"]
+    if not tools.get("pktmon.exe"):
         return "SKIP", "pktmon.exe is not on this Windows"
     p = PROVIDERS["pktmon"]
     s = session("pktmon", "s4", pkt_size=256)
@@ -352,15 +353,30 @@ def pktmon_capture():
     p.stop(g, s, CiHost())
     left = [n for n in g.call("etw", names=[]).get("names") or [] if "pktmon" in n.lower()]
     assert not left, f"still capturing after stop: {left}"
-    arts = p.artifacts(s) + p.convert(g, s, CiHost())
+    # Production collection discovers multi-file captures before listing or converting them.
+    p.found(g, s)
+    listing = g.files([s.guest_dir]).get(s.guest_dir)
+    diagnostic = (f"pktmon: {tools['pktmon.exe']}; stop: {s.stats.get('pktmon_stop')}; "
+                  f"files after stop: {listing}; segments: {s.tool.get('segments')}")
+    etls = p.artifacts(s)
+    info = g.files([a.guest_path for a in etls])
+    for a in etls:
+        found = info.get(a.guest_path) or {}
+        assert found.get("exists") and found.get("size"), f"{a.name} missing or empty: {found}; {diagnostic}"
+    pcaps = p.convert(g, s, CiHost())
+    diagnostic += f"; etl2pcap: {s.stats.get('etl2pcap')}"
+    assert len(pcaps) == len(etls), f"not every segment has a PCAPNG; {diagnostic}"
+    assert all(r.get("rc") == 0 for r in s.stats["etl2pcap"].values()), diagnostic
     local = Path(os.environ["DESK_HOME"]) / "s4"
-    for a in arts:
+    checks = []
+    for a in etls + pcaps:
         g.pull(a.guest_path, local / a.name)
-    check = p.verify(local / "net.pcapng", arts[-1])
-    assert check["ok"], check
+        check = p.verify(local / a.name, a)
+        assert check["ok"], f"{a.name}: {check}; {diagnostic}"
+        checks.append(f"{a.name}: {check['detail']}")
     sessions = [n for n in names if "pkt" in n.lower()]
-    said = expect(manifest, "--pcapng", str(local / "net.pcapng"))
-    return "PASS", f"{check['detail']}; ETW sessions while capturing: {sessions}; {said}"
+    said = expect(manifest, "--pcapng", *(str(local / a.name) for a in pcaps))
+    return "PASS", f"{'; '.join(checks)}; ETW sessions while capturing: {sessions}; {said}; {diagnostic}"
 
 
 @case("CI-P-05")

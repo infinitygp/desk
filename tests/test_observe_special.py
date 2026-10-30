@@ -38,6 +38,79 @@ class Base(unittest.TestCase):
         return observe.stop(self.run, ref, host=self.host, guest=self.guest, **kw)
 
 
+class PktmonCi(Base):
+    def run_ci(self, workload=None):
+        # Import with the test's home: the runner otherwise allocates its own temporary home.
+        with mock.patch.dict("os.environ", {"DESK_HOME": str(self.run.dir)}):
+            from scripts import observe_windows_ci as ci
+
+            with mock.patch.object(ci, "g", self.guest), \
+                    mock.patch.object(ci, "results", []), \
+                    mock.patch.object(ci, "run_workload", side_effect=workload or (lambda *a: {"token": "ci04"})), \
+                    mock.patch.object(ci, "expect", return_value="DNS query found") as expected, \
+                    mock.patch("builtins.print"):
+                ci.pktmon_capture()
+                return ci.results[0], expected.call_args
+
+    def add_segment(self, *args):
+        first = self.guest.pktmon_segments[0]
+        for n in (2, 3):
+            segment = first.replace("net1.etl", f"net{n}.etl")
+            self.guest.disk[segment] = b"\x16" * 4096
+            self.guest.pktmon_segments.append(segment)
+        return {"token": "ci04"}
+
+    def test_ci_discovers_converts_and_checks_every_segment(self):
+        result, expected = self.run_ci(self.add_segment)
+        self.assertEqual(result["status"], "PASS", result["detail"])
+        self.assertEqual([Path(p.replace("\\", "/")).name for p in self.guest.pulled],
+                         ["net1.etl", "net2.etl", "net3.etl", "net1.pcapng", "net2.pcapng", "net3.pcapng"])
+        self.assertEqual(expected.args[1:], ("--pcapng", str(self.run.dir / "s4/net1.pcapng"),
+                                           str(self.run.dir / "s4/net2.pcapng"),
+                                           str(self.run.dir / "s4/net3.pcapng")))
+        self.assertIn("10.0.26100.1", result["detail"])
+        self.assertIn("No events lost", result["detail"])
+
+    def test_ci_missing_segment_fails_before_conversion(self):
+        def missing(*args):
+            manifest = self.add_segment()
+            del self.guest.disk[self.guest.pktmon_segments[0]]
+            return manifest
+
+        result, expected = self.run_ci(missing)
+        self.assertEqual(result["status"], "FAIL")
+        self.assertIn("net1.etl missing or empty", result["detail"])
+        self.assertIn("files after stop", result["detail"])
+        self.assertFalse(any(a[0] == "etl2pcap" for a in self.guest.execs("pktmon.exe")))
+        self.assertIsNone(expected)
+
+    def test_ci_conversion_exit_failure_is_not_hidden_by_readable_output(self):
+        tool = self.guest.tools["pktmon.exe"]
+
+        def failed(guest, args):
+            result = tool(guest, args)
+            return {**result, "rc": 1} if args[0] == "etl2pcap" else result
+
+        self.guest.tools["pktmon.exe"] = failed
+        result, expected = self.run_ci()
+        self.assertEqual(result["status"], "FAIL")
+        self.assertIn("'rc': 1", result["detail"])
+        self.assertIsNone(expected)
+
+    def test_ci_checks_second_pcapng_not_only_the_last_or_first(self):
+        tool = self.guest.tools["pktmon.exe"]
+
+        def corrupt(guest, args):
+            result = tool(guest, args)
+            if args[0] == "etl2pcap" and args[1].endswith("net2.etl"):
+                guest.disk[args[args.index("--out") + 1]] = b"bad"
+            return result
+
+        self.guest.tools["pktmon.exe"] = corrupt
+        result, expected = self.run_ci(self.add_segment)
+        self.assertEqual(result["status"], "FAIL")
+        self.assertIn("net2.pcapng:", result["detail"])
+        self.assertIsNone(expected)
 
 
 class Pktmon(Base):
