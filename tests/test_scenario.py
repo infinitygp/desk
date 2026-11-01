@@ -274,6 +274,16 @@ class LostConnection(unittest.TestCase):
                 self.assertRaisesRegex(guest.NoConnection, "no SSH connection.*kex_exchange_identification"):
             scenario._shell(self.RUN, self.SPEC, {"exec": "true"}, as_root=False)
 
+    def test_an_agent_that_does_not_answer_stops_the_steps_as_desks_failure(self):
+        from desk import winagent
+
+        run = mock.Mock()
+        gone = winagent.AgentGone("in-session agent not reachable ([Errno 104] Connection reset by peer)")
+        with mock.patch("desk.scenario._step", side_effect=gone), mock.patch("desk.scenario.Steps"), \
+                mock.patch("desk.scenario.display"), self.assertRaises(winagent.AgentGone):
+            scenario._run_steps(run, self.SPEC, {"step": [{"click": "Configure", "soft": True}, {"exec": "true"}]})
+        self.assertEqual(len([c for c in run.log_event.call_args_list if c.kwargs.get("ok") is False]), 1)
+
     def test_until_tries_again_while_the_guest_comes_back(self):
         self.assertEqual(self.shell({"exec": "true", "until": True}, 255, 255, 0), "")
 

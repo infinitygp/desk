@@ -11,7 +11,7 @@ import tomllib
 from datetime import UTC
 from pathlib import Path
 
-from . import a11y, browser, clock, disks, display, evidence, guest, record, runs, usb
+from . import a11y, browser, clock, disks, display, evidence, guest, record, runs, usb, winagent
 from .config import DeskError, load_image
 from .steps import Steps
 
@@ -573,8 +573,8 @@ def _run_steps(run, spec, data: dict, first: int = 1, observed: dict | None = No
             if isinstance(e, guest.NoConnection):
                 lost = guest.NoConnection(f"{e}; {runs.host_state(run)}")
                 detail = str(lost)
-            elif isinstance(e, (browser.Unchecked, ObserveError)):
-                lost = e  # a check desk could not make says nothing about the product either
+            elif isinstance(e, (browser.Unchecked, ObserveError, winagent.AgentGone)):
+                lost = e  # a check desk could not make (or ask the session) says nothing about the product either
         run.log_event(step=i, action=label, ok=passed, detail=detail, seconds=round(time.monotonic() - t0, 1))
         head, *rest = detail.splitlines() or [""]
         print(f"{'PASS' if passed else 'FAIL'}  {i:>2}. {label[:60]:<60} {time.monotonic() - t0:5.1f}s  "
