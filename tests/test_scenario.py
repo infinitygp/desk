@@ -266,6 +266,14 @@ class LostConnection(unittest.TestCase):
         with self.assertRaisesRegex(scenario.StepFailed, "exit 255"):
             self.shell({"exec": "myprog --selfcheck"}, 255, 0)
 
+    def test_a_reset_handshake_is_not_a_failed_step(self):
+        # 331002: the guest answered `exit 0` right after; only ssh's line says whose 255 it was.
+        reset = b"kex_exchange_identification: read: Connection reset by peer\r\n"
+        answers = [subprocess.CompletedProcess([], 255, b"", reset), subprocess.CompletedProcess([], 0, b"", b"")]
+        with mock.patch("desk.scenario.guest.ssh_run", side_effect=answers), mock.patch("desk.scenario.time.sleep"), \
+                self.assertRaisesRegex(guest.NoConnection, "no SSH connection.*kex_exchange_identification"):
+            scenario._shell(self.RUN, self.SPEC, {"exec": "true"}, as_root=False)
+
     def test_until_tries_again_while_the_guest_comes_back(self):
         self.assertEqual(self.shell({"exec": "true", "until": True}, 255, 255, 0), "")
 

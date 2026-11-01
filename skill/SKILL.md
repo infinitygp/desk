@@ -216,9 +216,10 @@ or in `dir`, relative to the scenario file: `dir = "../.."` for one project of a
 several), copies the newest file matching each `artifacts` pattern (relative to the same place)
 to `/tmp/desk/` in the guest, starts a run of `image`, executes the steps in order and stops at
 the first failure with a screenshot. Exit code 0 or 1, and 2 when a step lost SSH to the guest (a
-step that reboots it with a command says `rc = 255`): then the message says whether the VM still
-runs and what the host had (free disk, memory, swap, other runs), as a full disk ends a VM; the
-report (and the video with `record = true`) shows every step in its timeline.
+step that reboots it with a command says `rc = 255`; a connection the guest resets in the
+handshake is tried again first): then the message says whether the VM still runs and what the
+host had (free disk, memory, swap, other runs), as a full disk ends a VM; the report (and the
+video with `record = true`) shows every step in its timeline.
 
 ```toml
 image = "fedora-44-gnome-cockpit"

@@ -2,6 +2,7 @@
 
 import base64
 import json
+import re
 import shlex
 import subprocess
 import time
@@ -91,11 +92,33 @@ def command(spec, argv: list[str], env: dict[str, str] | None = None, limit: flo
     return spec.cmd(script)
 
 
+def _ssh_said(r: subprocess.CompletedProcess, port: int, before: bool = False) -> bool:
+    """Whether the last line of stderr is ssh's own (at LogLevel=ERROR) saying that it did not reach
+    the guest or lost it; `before`: in a way that leaves no command started (the handshake), so it
+    can be tried again. Errors that ssh logs at INFO (a connection closed) leave no line at all."""
+    lines = (r.stderr or b"").decode(errors="replace").strip().splitlines()
+    if r.returncode != 255 or not lines:
+        return False
+    host = rf"127\.0\.0\.1 port {port}"
+    started = (r"kex_exchange_identification: ", rf"ssh: connect to host {host}: ",
+               rf"banner exchange: Connection to {host}: ")
+    during = (rf"\S+: Connection to {host}: ", r"client_loop: ", r"\S+@127\.0\.0\.1: Permission denied \(",
+              r"mux_client_")
+    if before:
+        # A command that printed nothing yet: one that runs ssh itself and fails so is not run thrice.
+        return not r.stdout and re.match("|".join(started), lines[-1]) is not None
+    return re.match("|".join(started + during), lines[-1]) is not None
+
+
 def ssh_run(port: int, user: str, command: str, *, capture: bool = False, input: bytes | None = None,
             timeout: float | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [*ssh_argv(port, user), command], input=input, capture_output=capture, timeout=timeout
-    )
+    # A guest's sshd now and then resets a new connection in the handshake (Windows under load):
+    # nothing was started, so the command is sent again rather than reported as failed.
+    for pause in (1, 2, None):
+        r = subprocess.run([*ssh_argv(port, user), command], input=input, capture_output=capture, timeout=timeout)
+        if pause is None or not capture or not _ssh_said(r, port, before=True):
+            return r
+        time.sleep(pause)
 
 
 class NoConnection(DeskError):
@@ -112,9 +135,11 @@ def connected(r: subprocess.CompletedProcess, what: str) -> subprocess.Completed
 
 
 def lost(r: subprocess.CompletedProcess, port: int, user: str, what: str) -> None:
-    """NoConnection when a command's 255 was ssh's own: the guest does not answer `exit 0` either.
-    A program may exit 255 itself (`return -1`), and that is its result, not desk's failure."""
-    if r.returncode == 255 and ssh_run(port, user, "exit 0", capture=True, timeout=30).returncode == 255:
+    """NoConnection when a command's 255 was ssh's own: ssh said so last, or the guest does not
+    answer `exit 0` either. A program may exit 255 itself (`return -1`), and that is its result,
+    not desk's failure; a connection lost for a moment answers the `exit 0` and only ssh's line tells."""
+    if r.returncode == 255 and (_ssh_said(r, port)
+                                or ssh_run(port, user, "exit 0", capture=True, timeout=30).returncode == 255):
         connected(r, what)
 
 
