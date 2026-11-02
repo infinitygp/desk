@@ -86,6 +86,9 @@ reboot = true
             'image = "a"\n[[step]]\nclick = "x"\nwindow = ""',
             'image = "a"\n[[step]]\nexpect = "x"\nbutton = "right"',
             'image = "a"\n[[step]]\ngui = "app"\ntimeout = 30',              # waits only with rc or output
+            'image = "a"\n[[step]]\nset_text = "Repository URL"',           # what it gets is missing
+            'image = "a"\n[[step]]\nset_text = "URL"\ntext = 5',
+            'image = "a"\n[[step]]\nclick = "URL"\ntext = "x"',
             'image = "a"\n[[step]]\ngui = "app"\nuntil = true',
             'image = "a"\n[[step]]\nclick = "x"\nuntil = true',
             'image = "a"\n[[step]]\nexpect = "x"\nstate = "visible"',        # no listing gives it
@@ -489,6 +492,42 @@ class GuiWaited(unittest.TestCase):
             scenario._step(self.run_(), self.SPEC, steps, {"gui": "gnome-calculator"})
         steps.gui.assert_called_once_with("gnome-calculator", env={})
         ssh.assert_not_called()
+
+
+class SetText(unittest.TestCase):
+    """set_text: a field found as click finds it, its text replaced as desk set-text does, then read back."""
+
+    NODE = {"pid": 1, "path": [0, 4], "role": "entry", "name": "Repository URL", "states": ["editable"],
+            "value": "https://example.org/x.git", "bbox": [0, 0, 200, 30]}
+
+    def steps(self):
+        from desk import steps
+
+        target = SimpleNamespace(agent_port=0, dom=lambda: "dom")
+        return steps.Steps(SimpleNamespace(family="linux", layout="us", need_desktop=lambda what: None), target)
+
+    def test_loads(self):
+        data = scenario.load(write('image = "a"\n[[step]]\nset_text = "Repository URL"\nrole = "entry"\n'
+                                   'text = "/srv/repo.git"\n[[step]]\nset_text = "Filter"\ntext = ""'))
+        self.assertEqual(data["step"][1]["text"], "")
+
+    def test_the_field_holds_the_text(self):
+        s = self.steps()
+        with mock.patch.object(s, "wait_for", return_value=self.NODE) as found, \
+                mock.patch("desk.a11y.replace_text", return_value="") as replaced:
+            self.assertEqual(s.set_text("Repository URL", "/srv/repo.git", role="entry"), "")
+        found.assert_called_once_with("Repository URL", "entry", True, 60, None)
+        spec = replaced.call_args.args[1]
+        self.assertNotIn("value", spec)  # an editable field is found again by its name, not its old text
+        self.assertEqual(replaced.call_args.args[2], "/srv/repo.git")
+
+    def test_a_field_that_did_not_take_it_fails_with_what_it_shows(self):
+        s = self.steps()
+        with mock.patch.object(s, "wait_for", return_value=self.NODE), \
+                mock.patch("desk.a11y.replace_text", return_value="the field shows 'read only' afterwards"), \
+                self.assertRaisesRegex(DeskError, "entry 'Repository URL' did not take '/srv/x': "
+                                                  "the field shows 'read only' afterwards"):
+            s.set_text("Repository URL", "/srv/x")
 
 
 class SplitWindows(unittest.TestCase):

@@ -18,14 +18,15 @@ from .steps import Steps
 # Exactly one per step; the value is the action's argument.
 ACTIONS = {"root", "exec", "gui", "focus", "click", "type", "key", "expect", "expect_absent", "shot",
            "reboot", "wait", "clock", "disk_add", "disk_rm", "console_errors", "prepare", "open", "viewport",
-           "observe_start", "observe_stop", "mark"}
+           "observe_start", "observe_stop", "mark", "set_text"}
 OPTIONS = {"role", "exact", "timeout", "output", "rc", "name", "soft", "env", "step", "until", "anywhere", "browser",
-           "button", "window", "state"}
+           "button", "window", "state", "text"}
 # The options each action reads, besides name and soft; any other would be ignored without a word.
 READS = {
     "root": {"timeout", "output", "rc", "until"}, "exec": {"timeout", "output", "rc", "until"},
     "gui": {"env", "rc", "output", "timeout", "until"}, "type": {"anywhere"},
     "click": {"role", "exact", "timeout", "button", "window"},
+    "set_text": {"text", "role", "exact", "timeout", "window"},
     "expect": {"role", "exact", "timeout", "window", "state"}, "expect_absent": {"role", "exact", "timeout", "window"},
     "reboot": {"timeout"}, "wait": {"timeout"}, "clock": {"step", "timeout"}, "disk_rm": {"timeout"},
     "open": {"timeout", "browser"}, "viewport": {"browser"},
@@ -47,7 +48,8 @@ def _texts(v) -> bool:
 # What each action and option takes, as (check, description).
 VALUES = {
     **{a: (_text, "a text") for a in ("root", "exec", "focus", "click", "type", "expect", "expect_absent", "shot",
-                                      "clock", "disk_add", "disk_rm", "mark")},
+                                      "clock", "disk_add", "disk_rm", "mark", "set_text")},
+    "text": (lambda v: isinstance(v, str), "a text (\"\" empties the field)"),
     "observe_start": (_text, "the label of an [[observe]] table"),
     "observe_stop": (lambda v: v is True or _text(v), "true (every open session) or an [[observe]] label"),
     "gui": (_texts, "a command line or a list of arguments"),
@@ -161,6 +163,8 @@ def load(path: Path) -> dict:
         action = actions.pop()
         if "until" in step and action not in ("exec", "root", "gui"):
             raise DeskError(f"{path}: step {i}: until goes with exec, root or gui")
+        if action == "set_text" and "text" not in step:
+            raise DeskError(f"{path}: step {i}: set_text names the field; text = \"...\" is what it gets")
         if action == "gui" and not {"rc", "output"} & set(step) and {"timeout", "until"} & set(step):
             raise DeskError(f"{path}: step {i}: a gui step waits for the program only with rc or output, "
                             "and timeout and until go with them")
@@ -445,6 +449,8 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
         return steps.focus(value)
     elif action == "click":
         steps.click(value, role, step.get("exact", True), timeout or 60, step.get("button", "left"), step.get("window"))
+    elif action == "set_text":
+        return steps.set_text(value, step["text"], role, step.get("exact", True), timeout or 60, step.get("window"))
     elif action == "type":
         steps.type(value, anywhere=step.get("anywhere", False))
     elif action == "key":

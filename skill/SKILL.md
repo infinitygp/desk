@@ -244,7 +244,11 @@ expect = "Nothing here yet"  # waits until shown (name, value or text); role, ex
 shot = "empty-state"
 ```
 
-Other steps: `type`, `gui = "firefox https://..."` (with `env = {NAME = "value"}`; on Windows the
+Other steps: `type`, `set_text = "Repository URL"` with `text = "/srv/repo"` (`role`, `exact`,
+`timeout`, `window` as on a `click`; `text = ""` empties it: the field's text replaced as `desk
+set-text` does, in a web page, a GTK/Qt application or a Windows one, and read back: a field that
+shows something else afterwards, a read-only one, fails the step and says what it shows),
+`gui = "firefox https://..."` (with `env = {NAME = "value"}`; on Windows the
 string splits like a Windows command line, so `C:\path` stays as it is and paths with spaces
 need quotes, or give a list; it starts the program in the desktop session and waits until the
 screen changes; with `rc` or `output` it waits for the program to end instead and checks it like an
