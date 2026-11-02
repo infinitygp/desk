@@ -9,6 +9,10 @@ $ErrorActionPreference = 'Stop'
 trap { Add-Content (Join-Path $PSScriptRoot 'agent.log') ('{0:s} the in-session agent failed: {1}' -f (Get-Date), $_); break }
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 . (Join-Path $PSScriptRoot 'uia.ps1')
+# This process runs with -ExecutionPolicy Bypass, which PowerShell keeps in the environment, where
+# every program the agent starts would inherit it: a product would run its own scripts that a
+# user's Windows (Restricted by default) refuses. Its own scripts are loaded by now.
+Remove-Item Env:PSExecutionPolicyPreference -ErrorAction Ignore
 # Per-monitor DPI aware, so UI Automation reports physical pixels, the same as the screenshots,
 # at any scaling (a DPI-unaware process gets coordinates scaled down at 125 % and up).
 Add-Type -Namespace Desk -Name Dpi -MemberDefinition @'

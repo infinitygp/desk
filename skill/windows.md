@@ -8,6 +8,11 @@ Part of the desk skill ([SKILL.md](SKILL.md)); the commands and pitfalls there a
   `--root` changes nothing; `desk exec --agent -- CMD` runs as SYSTEM (session 0, no desktop).
   Quoting is safe: commands reach PowerShell encoded. An exit code outside 0-255 (-196608 from
   `powershell -File` with a missing script, 0xC0000135) is printed in full and desk exits 1.
+- Script files run under Windows' default execution policy, Restricted, in `desk exec` and in the
+  programs `exec --gui` and `gui` steps start, so a product's own `.ps1` meets the refusal its users
+  would. Run a helper script with `powershell.exe -NoProfile -ExecutionPolicy Bypass -File X.ps1`,
+  or `Set-ExecutionPolicy -Scope Process Bypass -Force; & X.ps1` in one `exec`; a command typed
+  into `desk exec` itself is no script file and needs neither.
 - Windows PowerShell 5.1 then passes arguments to programs its own way: it splits an unquoted
   `-name.x=1` at the dot (`./pkg.test.exe -test.count=1` gets `-test .count=1`; write
   `'-test.count=1'`), and drops the double quotes inside one (`curl.exe -d '{"a":1}'` sends
