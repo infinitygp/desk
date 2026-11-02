@@ -721,12 +721,31 @@ def node_at(spec: dict):
     return app, acc
 
 
+def same(acc, spec: dict) -> bool:
+    """Whether `acc` is the node a snapshot listed: its role and name, and for one without a name the
+    text it was found by, which tells apart the items of a menu whose names are all empty (GNOME
+    Shell's indicator menus)."""
+    if acc.get_role_name() != spec["role"] or (acc.get_name() or "").strip() != spec["name"]:
+        return False
+    if "text" in spec:
+        return text_of(acc, TEXT_CHARS) == spec["text"]
+    if "value" in spec:
+        return text_of(acc)[:120] == spec["value"]
+    return True
+
+
+def called(spec: dict) -> str:
+    """A node as messages name it: by the text it was found by when it has no name."""
+    what = spec["name"] or spec.get("text") or spec.get("value") or ""
+    return f"{spec['role']} {what[:60]!r}"
+
+
 def find_node(spec: dict):
-    """Re-find a node from a snapshot: same path if role and name still match, else the only node
-    of the window with them (of two "Delete" buttons, the first is not necessarily the one meant)."""
+    """Re-find a node from a snapshot: same path if it is still the same node, else the only node
+    of the window like it (of two "Delete" buttons, the first is not necessarily the one meant)."""
     app, acc = node_at(spec)
     path = spec["path"]
-    if acc is not None and acc.get_role_name() == spec["role"] and (acc.get_name() or "").strip() == spec["name"]:
+    if acc is not None and same(acc, spec):
         return app, path, acc
 
     # The tree changed (a web page builds it lazily and re-renders): search the window for it.
@@ -743,7 +762,7 @@ def find_node(spec: dict):
             ch = a.get_child_at_index(i)
             if ch is None:
                 continue
-            if ch.get_role_name() == spec["role"] and (ch.get_name() or "").strip() == spec["name"]:
+            if same(ch, spec):
                 hits.append((at + [i], ch))
             else:
                 search(ch, at + [i], depth + 1)
@@ -752,13 +771,13 @@ def find_node(spec: dict):
     if top is not None:
         search(top, [path[0]])
     if len(hits) > 1:
-        raise LookupError(f"{spec['role']} {spec['name']!r} moved, and the window has more than one; look again "
+        raise LookupError(f"{called(spec)} moved, and the window has more than one; look again "
                           "(desk a11y) for the @ref of the one meant")
     if not hits:
         if time.monotonic() > deadline:
-            raise LookupError(f"{spec['role']} {spec['name']!r} not found again within {SEARCH_SECONDS}s "
+            raise LookupError(f"{called(spec)} not found again within {SEARCH_SECONDS}s "
                               "(the page changed); look again")
-        raise LookupError(f"{spec['role']} {spec['name']!r} no longer exists")
+        raise LookupError(f"{called(spec)} no longer exists")
     return app, hits[0][0], hits[0][1]
 
 

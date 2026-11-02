@@ -137,7 +137,25 @@ def _spec(run, ref: str) -> dict:
     node = next((n for n in json.loads(f.read_text())["nodes"] if n["ref"] == ref), None)
     if node is None:
         raise DeskError(f"no {ref} in the last snapshot")
-    return {k: node[k] for k in ("pid", "path", "role", "name")}
+    return ref_spec(node)
+
+
+def ref_spec(node: dict) -> dict:
+    """What finds a listed node again in the guest: one without a name by the text it was found by
+    as well, as all the items of a menu may have the same empty name. Not the text of a field that
+    takes input, which typing changes."""
+    spec = {k: node[k] for k in ("pid", "path", "role", "name")}
+    if not node["name"] and node.get("text"):
+        spec["text"] = node["text"]
+    elif not node["name"] and node.get("value") and "editable" not in node.get("states", []):
+        spec["value"] = node["value"]
+    return spec
+
+
+def called(spec: dict) -> str:
+    """A node as messages name it: by the text it was found by when it has no name."""
+    what = spec["name"] or spec.get("text") or spec.get("value") or ""
+    return f"{spec['role']} {short(what, 60)!r}"
 
 
 def _point(run, spec: dict, size: tuple[int, int]) -> tuple[tuple[int, int] | None, str | None, bool]:
@@ -171,9 +189,9 @@ def _visible_point(run, spec: dict) -> tuple[int, int]:
     if point:
         return point
     if covered:
-        raise DeskError(f"{spec['role']} {spec['name']!r} is covered by {covered}, also after scrolling; "
+        raise DeskError(f"{called(spec)} is covered by {covered}, also after scrolling; "
                         "close or move what is in the way, or click by pixels from a screenshot")
-    raise DeskError(f"{spec['role']} {spec['name']!r} is outside the visible area and could not be "
+    raise DeskError(f"{called(spec)} is outside the visible area and could not be "
                     "scrolled into view; scroll with `desk scroll` and look again")
 
 
@@ -328,7 +346,7 @@ def locate_name(run, query: str, role: str | None = None, exact: bool = False,
         cut = " (the listing was cut short: the application answers slowly)" if snap["truncated"] == "time" else ""
         raise DeskError(f"nothing named {query!r}{role_hint(snap, query, role, exact)} on screen{cut}")
     best = pick(snap, hits, query)
-    return _visible_point(run, {k: best[k] for k in ("pid", "path", "role", "name")})
+    return _visible_point(run, ref_spec(best))
 
 
 def focus(run, query: str) -> str:

@@ -191,13 +191,35 @@ class Tree:
 class FindAgain(unittest.TestCase):
     """A node from a listing whose path no longer leads to it (the page re-rendered)."""
 
-    def find(self, *rows):
+    def find(self, *rows, spec=None):
         app = Tree("application", "Firefox", children=[Tree("frame", children=[Tree("panel", children=list(rows))])])
         app.get_process_id = lambda: 7
-        spec = {"pid": 7, "path": [0, 0, 5], "role": "push button", "name": "Delete"}
+        spec = spec or {"pid": 7, "path": [0, 0, 5], "role": "push button", "name": "Delete"}
         with mock.patch.object(guest_a11y.Atspi, "get_desktop"), \
-                mock.patch.object(guest_a11y, "app_children", return_value=[(0, app)]):
+                mock.patch.object(guest_a11y, "app_children", return_value=[(0, app)]), \
+                mock.patch.object(guest_a11y, "text_of", side_effect=lambda acc, limit=400: acc.attrs.get("text", "")):
             return guest_a11y.find_node(spec)
+
+    def menu(self):
+        """GNOME Shell's indicator menu: items without names, told apart by their text only."""
+        return [Tree("menu item", attrs={"text": t}) for t in ("Open", "Settings", "Quit")]
+
+    def test_one_without_a_name_by_the_text_it_was_found_by(self):
+        items = self.menu()
+        for spec in ({"pid": 7, "path": [0, 0, 1], "role": "menu item", "name": "", "value": "Quit"},  # path moved
+                     {"pid": 7, "path": [0, 0, 9], "role": "menu item", "name": "", "text": "Quit"}):  # path gone
+            with self.subTest(spec=spec):
+                self.assertEqual(self.find(*items, spec=spec)[1:], ([0, 0, 2], items[2]))
+
+    def test_a_path_that_leads_to_another_item_without_a_name_is_not_taken(self):
+        items = self.menu()
+        spec = {"pid": 7, "path": [0, 0, 0], "role": "menu item", "name": "", "value": "Settings"}
+        self.assertEqual(self.find(*items, spec=spec)[1:], ([0, 0, 1], items[1]))
+
+    def test_one_that_is_gone_is_named_by_its_text(self):
+        spec = {"pid": 7, "path": [0, 0, 0], "role": "menu item", "name": "", "value": "Disconnect"}
+        with self.assertRaisesRegex(LookupError, "menu item 'Disconnect' no longer exists"):
+            self.find(*self.menu(), spec=spec)
 
     def test_the_only_one_of_its_role_and_name(self):
         delete = Tree("push button", "Delete")

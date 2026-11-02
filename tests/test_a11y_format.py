@@ -2,6 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
+from desk import a11y
 from desk.a11y import (
     _matches,
     _on_screen,
@@ -233,3 +234,21 @@ class ExplainMissing(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FoundAgain(unittest.TestCase):
+    """What the guest gets to find a listed node again."""
+
+    def node(self, **kw):
+        return {"pid": 7, "path": [0, 3], "role": "menu item", "name": "", "states": [], **kw}
+
+    def test_one_without_a_name_goes_with_the_text_it_was_found_by(self):
+        self.assertEqual(a11y.ref_spec(self.node(value="Quit"))["value"], "Quit")
+        self.assertEqual(a11y.ref_spec(self.node(role="label", text="3 items"))["text"], "3 items")
+
+    def test_not_the_text_of_a_field_that_typing_changes_nor_of_a_named_node(self):
+        self.assertNotIn("value", a11y.ref_spec(self.node(role="entry", value="abc", states=["editable"])))
+        self.assertEqual(set(a11y.ref_spec(self.node(name="Quit", value="Quit now"))), {"pid", "path", "role", "name"})
+
+    def test_messages_name_it_by_that_text(self):
+        self.assertEqual(a11y.called(a11y.ref_spec(self.node(value="Quit"))), "menu item 'Quit'")
