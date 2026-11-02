@@ -164,14 +164,12 @@ def load(path: Path) -> dict:
                                                 for d in devices):
         raise DeskError(f"{path}: usb is a list like [\"0fd9:0084\"] (VENDOR:PRODUCT or BUS.DEVICE)")
     build = data.get("build", {})
-    if not isinstance(build, dict) or set(build) - {"run", "artifacts", "dir"}:
-        raise DeskError(f"{path}: [build] takes run, artifacts and dir")
-    if "run" in build and not _text(build["run"]):
-        raise DeskError(f"{path}: [build] run is a command line")
-    if "dir" in build and not (_text(build["dir"]) and (path.parent / build["dir"]).is_dir()):
-        raise DeskError(f"{path}: [build] dir is a directory, relative to the scenario file (got {build['dir']!r})")
-    if not isinstance(build.get("artifacts", []), list) or not all(_text(a) for a in build.get("artifacts", [])):
-        raise DeskError(f"{path}: [build] artifacts is a list of file patterns")
+    _check_build(path, build, "[build]")
+    variants = build.get("image", {})
+    if not isinstance(variants, dict) or not all(isinstance(v, dict) for v in variants.values()):
+        raise DeskError(f"{path}: [build.image.NAME] tables give the build of another image")
+    for name, variant in variants.items():
+        _check_build(path, variant, f"[build.image.{name}]")
     if not isinstance(data.get("step", []), list) or not all(isinstance(s, dict) for s in data.get("step", [])):
         raise DeskError(f"{path}: steps are [[step]] tables")
     held = 0  # the step whose press is not released yet
@@ -223,6 +221,32 @@ def load(path: Path) -> dict:
             _checked(path, f"step {i}", clock.duration, step["step"])
     observations(path, data)
     return data
+
+
+def _check_build(path: Path, build, where: str) -> None:
+    keys = {"run", "artifacts", "dir"} | ({"image"} if where == "[build]" else set())
+    if not isinstance(build, dict) or set(build) - keys:
+        raise DeskError(f"{path}: {where} takes {', '.join(sorted(keys))}")
+    if "run" in build and not _text(build["run"]):
+        raise DeskError(f"{path}: {where} run is a command line")
+    if "dir" in build and not (_text(build["dir"]) and (path.parent / build["dir"]).is_dir()):
+        raise DeskError(f"{path}: {where} dir is a directory, relative to the scenario file (got {build['dir']!r})")
+    if not isinstance(build.get("artifacts", []), list) or not all(_text(a) for a in build.get("artifacts", [])):
+        raise DeskError(f"{path}: {where} artifacts is a list of file patterns")
+
+
+def for_image(data: dict, image: str) -> dict:
+    """The scenario with the build of `image`: [build] for the file's own image, or its
+    [build.image.NAME] table over it (a package for each distribution). A file that has such tables
+    has none for an image it does not name, rather than the artifacts of another."""
+    build = dict(data.get("build", {}))
+    variants = build.pop("image", {})
+    if variants and image != data["image"]:
+        if image not in variants:
+            raise DeskError(f"[build] is for {data['image']} and {', '.join(sorted(variants))}, not {image}: "
+                            f"add a [build.image.{image}] table")
+        build.update(variants[image])
+    return {**data, "build": build}
 
 
 def observations(path: Path, data: dict) -> dict[str, dict]:
@@ -602,6 +626,7 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
 def run_scenario(path: Path, keep: bool = False, image: str | None = None, no_build: bool = False) -> bool:
     data = load(path)
     spec = load_image(image or data["image"])
+    data = for_image(data, spec.name)
     check_observations(data, spec)
     _warn(data)
     base = _base(path, data)

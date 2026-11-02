@@ -732,7 +732,9 @@ def cmd_scenario(args) -> None:
     if args.action == "check":
         data = scenario.load(path)
         image = load_image(args.image or data["image"]).name
-        print(f"{path}: image {image}, {len(data.get('step', []))} steps")
+        build = scenario.for_image(data, image)["build"]
+        print(f"{path}: image {image}, {len(data.get('step', []))} steps"
+              + (f"; build: {build['run']}" if build.get("run") else ""))
         for i, step in enumerate(data.get("step", []), 1):
             action, arg = scenario.describe(step)
             print(f"  {i:>2}. {step.get('name') or (action + ' ' + arg).strip()}")

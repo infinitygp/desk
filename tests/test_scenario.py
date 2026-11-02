@@ -145,6 +145,28 @@ reboot = true
                 scenario._build(data, repo, skip=True)
             self.assertEqual(scenario._build({"build": {"run": "touch x", "artifacts": []}}, repo)[1], "")
 
+    def test_a_build_for_each_image(self):
+        text = ('image = "fedora-44-gnome"\n[build]\nrun = "make"\nartifacts = ["plugin/a.so", "test/p0.sh"]\n'
+                '[build.image.arch-gnome]\nrun = "make DISTRO=arch"\n'
+                'artifacts = ["plugin/build/arch/a.so", "test/p0.sh"]\n'
+                '[build.image.debian-13-gnome]\nrun = "make DISTRO=debian13"\n')
+        data = scenario.load(write(text))
+        self.assertEqual(scenario.for_image(data, "fedora-44-gnome")["build"],
+                         {"run": "make", "artifacts": ["plugin/a.so", "test/p0.sh"]})
+        self.assertEqual(scenario.for_image(data, "arch-gnome")["build"]["artifacts"][0], "plugin/build/arch/a.so")
+        # What a variant leaves out comes from [build].
+        self.assertEqual(scenario.for_image(data, "debian-13-gnome")["build"],
+                         {"run": "make DISTRO=debian13", "artifacts": ["plugin/a.so", "test/p0.sh"]})
+        with self.assertRaisesRegex(DeskError, r"\[build\] is for fedora-44-gnome and arch-gnome, debian-13-gnome, "
+                                               r"not windows-11: add a \[build.image.windows-11\] table"):
+            scenario.for_image(data, "windows-11")
+        plain = scenario.load(write('image = "a"\n[build]\nrun = "make"\nartifacts = ["x"]'))
+        self.assertEqual(scenario.for_image(plain, "b")["build"], {"run": "make", "artifacts": ["x"]})  # as before
+        for bad in ('image = "a"\n[build.image.b]\nrun = 3', 'image = "a"\n[build.image.b]\nimage = "c"',
+                    'image = "a"\n[build]\nimage = "b"'):
+            with self.subTest(bad=bad), self.assertRaises(DeskError):
+                scenario.load(write(bad))
+
     def test_what_each_action_takes(self):
         data = scenario.load(write('''
 image = "a"

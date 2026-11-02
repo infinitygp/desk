@@ -221,7 +221,10 @@ handshake is tried again first), could not reach a Windows guest's in-session ag
 read the accessibility tree for as long as it waited (`expect`, `expect_absent`, `click`); after a
 lost SSH the message says whether the VM still runs and what the host had (free disk, memory, swap, other
 runs), as a full disk ends a VM; the report (and the video with `record = true`) shows every step
-in its timeline.
+in its timeline. The same steps on other images (`--image`) with a build of their own: a
+`[build.image.NAME]` table (`run`, `artifacts`, `dir`) over `[build]` for that image, e.g.
+`[build.image.arch-gnome]` with `artifacts = ["dist/foo-*.pkg.tar.zst"]`; a file with such tables
+refuses an image it has none for (exit 2) rather than copy another's packages.
 
 ```toml
 image = "fedora-44-gnome-cockpit"
