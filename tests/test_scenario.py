@@ -590,6 +590,23 @@ class SetText(unittest.TestCase):
         self.assertNotIn("value", spec)  # an editable field is found again by its name, not its old text
         self.assertEqual(replaced.call_args.args[2], "/srv/repo.git")
 
+    def test_the_field_rather_than_its_label_and_a_text_set_behind_the_page_is_desks_failure(self):
+        from desk.config import NotDone
+
+        s = self.steps()
+        label = {**self.NODE, "role": "label", "states": [], "path": [0, 3]}
+        s.snap = {"nodes": [label, self.NODE]}
+        with mock.patch.object(s, "wait_for", return_value=label), \
+                mock.patch("desk.a11y._matches", return_value=[label, self.NODE]), \
+                mock.patch("desk.a11y.replace_text", return_value="") as replaced:
+            s.set_text("Repository URL", "/srv/x")
+        self.assertEqual(replaced.call_args.args[1]["path"], [0, 4])
+        with mock.patch.object(s, "wait_for", return_value=self.NODE), \
+                mock.patch("desk.a11y.replace_text", return_value="the field did not take the keyboard focus, so "
+                                                                  "its text was replaced through AT-SPI only"), \
+                self.assertRaisesRegex(NotDone, "replaced through AT-SPI only"):
+            s.set_text("Repository URL", "/srv/x")
+
     def test_a_field_that_did_not_take_it_fails_with_what_it_shows(self):
         s = self.steps()
         with mock.patch.object(s, "wait_for", return_value=self.NODE), \

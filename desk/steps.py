@@ -10,7 +10,7 @@ from pathlib import Path
 import libvirt
 
 from . import a11y, display, guest
-from .config import DeskError, ImageSpec
+from .config import DeskError, ImageSpec, NotDone
 
 
 @dataclass
@@ -207,9 +207,15 @@ class Steps:
         """Replace the text of the field with this name as a user would (desk set-text), and see that
         it holds it afterwards; a note when only the accessibility interface could set it."""
         node = self.wait_for(name, role, exact, timeout, window)
+        if "editable" not in node["states"]:
+            # The field rather than its label of the same name.
+            node = next((n for n in a11y._matches(self.snap, name, role, exact) if "editable" in n["states"]), node)
         note = a11y.replace_text(self.target, a11y.ref_spec(node), text, layout=self.spec.layout)
         if note.startswith("the field shows"):
             raise DeskError(f"{node['role']} {name!r} did not take {text!r}: {note}")
+        if note:
+            # Set behind the page's back: what follows would fail as if the product had.
+            raise NotDone(f"{node['role']} {name!r}: {note}")
         return note
 
     def type(self, text: str, anywhere: bool = False) -> None:
