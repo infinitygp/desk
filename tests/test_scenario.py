@@ -99,6 +99,8 @@ reboot = true
             'image = "a"\n[[step]]\nclick = [1, true]',
             'image = "a"\n[[step]]\nrelease = true',                         # nothing pressed
             'image = "a"\n[[step]]\npull = "/home/tester/a.tar"',            # to where
+            'image = "a"\nbrowser = 3',
+            'image = "a"\n[[step]]\nopen = "http://{guest:70000}/"',
             'image = "a"\n[[step]]\nexec = "x"\nto = "out/"',
             'image = "a"\n[[step]]\npress = "A"\n[[step]]\npress = "B"',   # still held
             'image = "a"\n[[step]]\npress = [1, 2]\nrole = "button"',
@@ -777,6 +779,49 @@ class Pull(unittest.TestCase):
                 self.pull(Path(top), {"pull": "/home/tester/x", "to": "out/"}, content=b"truncat")
             with self.assertRaisesRegex(NotDone, r"copying /home/tester/x to .* failed \(scp exit 1\)"):
                 self.pull(Path(top), {"pull": "/home/tester/x", "to": "out/"}, scp_rc=1)
+
+
+class BrowserMachine(unittest.TestCase):
+    """browser = IMAGE: a desktop machine whose browser opens the pages of a guest without one."""
+
+    def test_guest_ports_in_an_address(self):
+        self.assertEqual(scenario._guest_url("http://{guest:8080}/cgi-bin/luci", None, None),
+                         "http://localhost:8080/cgi-bin/luci")
+        machine = scenario._Browser(SimpleNamespace(id="b1", ssh_port=2, user="tester"), mock.Mock())
+        route = subprocess.CompletedProcess([], 0, b"default via 192.168.69.1 dev enp1s0 proto dhcp\n", b"")
+        with mock.patch("desk.scenario.guest.ssh_run", return_value=route), mock.patch("desk.scenario.guest.lost"), \
+                mock.patch("desk.forward.start", return_value=53311) as forwarded:
+            self.assertEqual(scenario._guest_url("http://{guest:80}/", "run", machine), "http://192.168.69.1:53311/")
+        forwarded.assert_called_once_with("run", 80)
+
+    def test_its_steps_log_into_the_scenarios_run(self):
+        owner = mock.Mock()
+        machine = scenario._Browser(SimpleNamespace(id="b1", dom=lambda: "browser-dom"), owner)
+        machine.log_event(step=1)
+        machine.next_shot_path("x")
+        owner.log_event.assert_called_once_with(step=1)
+        owner.next_shot_path.assert_called_once_with("x")
+        self.assertEqual(machine.dom(), "browser-dom")
+
+    def test_commands_go_to_the_guest_and_the_rest_to_the_browser_machine(self):
+        run = mock.Mock()
+        machine = scenario._Browser(mock.Mock(), run)
+        went = []
+        with mock.patch("desk.scenario._step", side_effect=lambda target, spec, steps, step: went.append(
+                (scenario.describe(step)[0], target is machine)) or ""), \
+                mock.patch("desk.scenario.runs.spec_for"), mock.patch("desk.scenario.Steps"), \
+                mock.patch("desk.scenario._guest_url", side_effect=lambda value, run, machine: value):
+            scenario._run_steps(run, LostConnection.SPEC, {"step": [{"root": "x"}, {"open": "http://{guest:80}/"},
+                                                                    {"click": "Save"}, {"reboot": True}]},
+                                machine=machine)
+        self.assertEqual(went, [("root", False), ("open", True), ("click", True), ("reboot", False)])
+
+    def test_it_must_be_a_linux_desktop(self):
+        with mock.patch("desk.scenario.load_image", return_value=SimpleNamespace(
+                name="windows-11", family="windows", need_desktop=lambda what: None)), \
+                self.assertRaisesRegex(DeskError, "Linux desktops only"):
+            scenario.browser_machine({"browser": "windows-11"})
+        self.assertIsNone(scenario.browser_machine({"image": "a"}))
 
 
 class SplitWindows(unittest.TestCase):

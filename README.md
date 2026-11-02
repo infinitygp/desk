@@ -446,6 +446,15 @@ told from a command's by what ssh prints last at `LogLevel=ERROR` and, when it p
 closed connection is logged at INFO), by `exit 0` failing too; a connection the guest resets in
 the handshake started nothing, so it is sent again.
 
+A guest without a desktop gets a browser machine (`browser = IMAGE`): a second run, of a Linux
+desktop image, whose Firefox opens the guest's pages, so a11y, console errors, screenshots and the
+report work there as they do on any desktop, with no browser to install on the host and no second
+way of finding elements. `{guest:PORT}` in an address becomes a `desk forward` tunnel of the guest
+under test, which the browser machine reaches at its default gateway, the address passt maps to
+the host. Commands go to the guest under test, the rest to the browser machine, whose events and
+screenshots are logged into the scenario's run (`scenario._Browser`); it is started after and
+destroyed with that run, and its id in the run's log lets `--from` find it again.
+
 `desk offline` and the offline step cut a guest off with its own firewall. passt, which connects
 the guest, cannot filter what goes out (`--no-tcp` would take SSH along, and the `--outbound`
 address that would keep only the host is not something libvirt passes on), and unplugging the

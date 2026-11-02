@@ -739,6 +739,8 @@ def cmd_scenario(args) -> None:
             action, arg = scenario.describe(step)
             print(f"  {i:>2}. {step.get('name') or (action + ' ' + arg).strip()}")
         scenario.check_observations(data, load_image(image))
+        if scenario.browser_machine(data):
+            print(f"  browser machine: {data['browser']} (the steps that are not commands go to it)")
         for label, t in scenario.observations(path, data).items():
             print(f"  observe {label}: {t['provider']}, "
                   + ("before the first step" if t.get("start", "before") == "before" else "at its observe_start step"))

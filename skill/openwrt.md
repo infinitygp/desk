@@ -25,8 +25,12 @@ desk forward 80                               # LuCI: http://127.0.0.1:PORT/, lo
   ["bin/packages/x86_64/*/luci-app-foo-*.apk"]` (copied to `/tmp/desk/`), then
   `root = "apk update && apk add --allow-untrusted /tmp/desk/luci-app-foo-*.apk"` and
   `root = "/etc/init.d/foo running"` with `until = true`.
-- LuCI pages are tested with a browser on the host (agent-browser) at the address `desk forward 80`
-  prints. A page that embeds another guest port (luci-app-ttyd's terminal on 7681) needs that port
+- LuCI pages in a scenario: `browser = "fedora-44-gnome"` at the top starts a desktop machine
+  next to the router, and `open = "http://{guest:80}/cgi-bin/luci"` opens the router's port 80 in
+  its Firefox; `click`, `set_text`, `expect`, `console_errors` and `shot` then work on LuCI as on
+  any page (SKILL.md, "Scenarios"). Log in as root / root (`set_text = "Password"`, `role =
+  "password text"`, then `click = "Log in"`). By hand, use a browser on the host (agent-browser)
+  at the address `desk forward 80` prints. A page that embeds another guest port (luci-app-ttyd's terminal on 7681) needs that port
   forwarded too, under the same number (`desk forward 7681`, which takes it when it is free);
   forwards lead to the router's LAN address, where such services listen.
 - The report lists services procd keeps that are not running, crash loops (before reboots too),

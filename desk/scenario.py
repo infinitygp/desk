@@ -4,6 +4,7 @@ The result is an exit code and the usual report, with the steps in its timeline.
 
 import glob
 import hashlib
+import json
 import re
 import shlex
 import subprocess
@@ -154,11 +155,13 @@ def load(path: Path) -> dict:
         raise DeskError(f"{path}: {e.strerror}") from None
     except tomllib.TOMLDecodeError as e:
         raise DeskError(f"{path}: not valid TOML: {e}") from None
-    unknown = set(data) - {"image", "record", "build", "disks", "usb", "step", "observe"}
+    unknown = set(data) - {"image", "record", "build", "disks", "usb", "step", "observe", "browser"}
     if unknown:
         raise DeskError(f"{path}: unknown keys {sorted(unknown)}")
     if not _text(data.get("image")):
         raise DeskError(f"{path}: no image")
+    if "browser" in data and not _text(data["browser"]):
+        raise DeskError(f"{path}: browser is the image of the machine whose browser opens the guest's pages")
     if not isinstance(data.get("record", False), bool):
         raise DeskError(f"{path}: record is true or false")
     if not isinstance(data.get("disks", []), list) or not all(isinstance(d, str) for d in data.get("disks", [])):
@@ -206,6 +209,8 @@ def load(path: Path) -> dict:
                 winsettings.parse(split_windows(step["win"]))
             except DeskError as e:
                 raise DeskError(f"{path}: step {i}: {e}") from None
+        if action == "open" and any(not 0 < int(p) < 65536 for p in GUEST_PORT.findall(step["open"])):
+            raise DeskError(f"{path}: step {i}: {{guest:PORT}} takes a port 1-65535")
         if action == "pull" and "to" not in step:
             raise DeskError(f"{path}: step {i}: pull names the file in the guest; to = \"dir/\" is where it goes")
         if action == "set_text" and "text" not in step:
@@ -514,6 +519,61 @@ def _checked_command(step: dict, once, lost) -> str:
     raise StepFailed("\n".join(shown))
 
 
+# With a browser machine (browser = IMAGE) these steps go to the guest under test, and the rest (its
+# screen, the browser, clicks, keys) to the browser machine.
+GUEST_ACTIONS = {"root", "exec", "reboot", "pull", "clock", "disk_add", "disk_rm", "prepare", "offline",
+                 "observe_start", "observe_stop", "mark"}
+# A port of the guest under test in an address to open: {guest:80}.
+GUEST_PORT = re.compile(r"\{guest:(\d{1,5})\}")
+
+
+class _Browser:
+    """The browser machine as the steps see it (its screen, guest and browser), while what they log,
+    events and screenshots, goes into the scenario's run and its one report."""
+
+    def __init__(self, run, owner):
+        self._run, self._owner, self.gateway = run, owner, None
+
+    def __getattr__(self, name):
+        return getattr(self._run, name)
+
+    def log_event(self, **event) -> None:
+        self._owner.log_event(**event)
+
+    def next_shot_path(self, label: str) -> Path:
+        return self._owner.next_shot_path(label)
+
+
+def browser_machine(data: dict):
+    """The image of the scenario's browser machine, if it has one: a Linux desktop, whose browser
+    desk drives."""
+    if not data.get("browser"):
+        return None
+    spec = load_image(data["browser"])
+    spec.need_desktop("the browser machine of a scenario (browser = ...)")
+    if spec.family != "linux":
+        raise DeskError(f"browser = {spec.name!r}: desk drives the browsers of Linux desktops only")
+    return spec
+
+
+def _guest_url(value: str, run, machine) -> str:
+    """{guest:PORT} as the browser reaches that port of the guest under test: a tunnel to the host
+    (desk forward), which the browser machine reaches at its gateway (passt maps it to the host); in
+    the guest itself, localhost."""
+    if machine is None or not GUEST_PORT.search(value):
+        return GUEST_PORT.sub(lambda m: f"localhost:{m.group(1)}", value)
+    from . import forward
+
+    if machine.gateway is None:
+        r = guest.ssh_run(machine.ssh_port, machine.user, "ip -4 route show default", capture=True, timeout=30)
+        guest.lost(r, machine.ssh_port, machine.user, "reading the browser machine's gateway")
+        found = re.search(r"default via (\S+)", r.stdout.decode(errors="replace"))
+        if not found:
+            raise NotDone(f"the browser machine {machine.id} has no default route to reach the host through")
+        machine.gateway = found.group(1)
+    return GUEST_PORT.sub(lambda m: f"{machine.gateway}:{forward.start(run, int(m.group(1)))}", value)
+
+
 def _pull(run, spec, base: Path, step: dict) -> str:
     """A file of the guest copied to the host for a later scenario to take as an artifact, with the
     SHA-256 the guest computes checked against the copy's."""
@@ -679,14 +739,19 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None, no_bu
     spec = load_image(image or data["image"])
     data = for_image(data, spec.name)
     check_observations(data, spec)
+    bspec = browser_machine(data)
     _warn(data)
     base = _base(path, data)
     artifacts, built = _build(data, base, skip=no_build)
     agent, _ = runs.agent_process()
     run = runs.up(spec, label=f"scenario {base.name}/{path.name}" + (f" ({agent})" if agent else ""))
     print(f"run {run.id} ({spec.name})", flush=True)
-    ok = True
+    ok, brun = True, None
     try:
+        if bspec:
+            brun = runs.up(bspec, label=f"scenario {base.name}/{path.name}: browser for {run.id}")
+            run.log_event(browser_run=brun.id)
+            print(f"browser run {brun.id} ({bspec.name})", flush=True)
         if data.get("record"):
             record.start(run)
         run.log_event(scenario=str(path.resolve()), steps=len(data.get("step", [])),
@@ -704,8 +769,12 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None, no_bu
             usb.add(run, device)
         # The run's end (evidence.finish) stops and collects whatever is still open, failure or not.
         _observe_before(run, path, data)
-        ok = _run_steps(run, runs.spec_for(run), data, observed=observations(path, data), base=base)
+        ok = _run_steps(run, runs.spec_for(run), data, observed=observations(path, data), base=base,
+                        machine=_Browser(brun, run) if brun else None)
     finally:
+        if brun:
+            # Its screenshots and steps are in the scenario's report.
+            evidence.finish(brun, keep=keep, report=False, running=keep, stopped=True)
         # Also when the VM is gone: the steps and why the guest was lost are in its directory.
         report, videos = evidence.finish(run, keep=keep, running=keep, stopped=True)
         if report:
@@ -716,6 +785,8 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None, no_bu
     if keep and run.live_domain() is not None:
         print(f"run {run.id} left running: desk -r {run.id} COMMAND; desk down {run.id} when done; "
               f"desk -r {run.id} scenario run FILE --from N goes on in it")
+        if brun:
+            print(f"its browser machine {brun.id} too: desk down {brun.id} when done")
     return ok
 
 
@@ -732,11 +803,18 @@ def continue_scenario(path: Path, run, first: int, image: str | None = None) -> 
     if not 1 <= first <= total:
         raise DeskError(f"--from {first}: the scenario has steps 1 to {total}")
     _warn(data)
+    machine = None
+    if browser_machine(data):
+        events = [json.loads(line) for line in (run.dir / "log.jsonl").read_text().splitlines() if line.strip()]
+        bid = next((ev["browser_run"] for ev in reversed(events) if "browser_run" in ev), None)
+        if bid is None:
+            raise DeskError(f"run {run.id} has no browser machine; run the scenario whole (it starts one)")
+        machine = _Browser(runs.resolve(bid), run)
     run.log_event(scenario=str(path.resolve()), steps=total, first=first)
     if first == 1:
         _observe_before(run, path, data)
     ok = _run_steps(run, runs.spec_for(run), data, first, observed=observations(path, data),
-                    base=_base(path, for_image(data, spec.name)))
+                    base=_base(path, for_image(data, spec.name)), machine=machine)
     print(f"steps {first}-{total} passed" if ok else "scenario FAILED")
     print(f"run {run.id} still running: desk down {run.id} writes the report")
     return ok
@@ -756,14 +834,19 @@ def _warn(data: dict) -> None:
 
 
 def _run_steps(run, spec, data: dict, first: int = 1, observed: dict | None = None,
-               base: Path | None = None) -> bool:
-    """Steps `first`.. in order, stopping at the first failure that is not soft; whether all passed."""
+               base: Path | None = None, machine: _Browser | None = None) -> bool:
+    """Steps `first`.. in order, stopping at the first failure that is not soft; whether all passed.
+    With a browser machine, the steps that are not GUEST_ACTIONS go to it."""
     from .observe import ObserveError
 
     ok = True
     steps = Steps(spec, run)
     steps.observations = observed or {}
     steps.base = base or Path.cwd()  # where pull's `to` is, as [build]'s artifacts are
+    on_browser = None
+    if machine is not None:
+        on_browser = (machine, runs.spec_for(machine._run))
+        on_browser += (Steps(on_browser[1], machine),)
     try:
         for i, step in enumerate(data.get("step", []), 1):
             if i < first:
@@ -772,8 +855,11 @@ def _run_steps(run, spec, data: dict, first: int = 1, observed: dict | None = No
             label = step.get("name") or f"{action} {arg}".strip()
             t0 = time.monotonic()
             lost = None
+            target, tspec, tsteps = on_browser if on_browser and action not in GUEST_ACTIONS else (run, spec, steps)
             try:
-                detail = _step(run, spec, steps, step)
+                if action == "open":
+                    step = {**step, "open": _guest_url(step["open"], run, machine)}
+                detail = _step(target, tspec, tsteps, step)
                 passed = True
             except (StepFailed, DeskError, subprocess.TimeoutExpired) as e:
                 detail, passed = str(e), False
@@ -794,7 +880,7 @@ def _run_steps(run, spec, data: dict, first: int = 1, observed: dict | None = No
                 ok = False
                 try:
                     shot = run.next_shot_path(f"failed-step-{i}")
-                    shot.write_bytes(display.screenshot(run.dom()))
+                    shot.write_bytes(display.screenshot(target.dom()))
                     run.log_event(shot=str(shot))
                 except DeskError:
                     pass  # the VM itself is gone; the report says so
@@ -804,11 +890,13 @@ def _run_steps(run, spec, data: dict, first: int = 1, observed: dict | None = No
                 if not step.get("soft"):
                     break
     finally:
-        if steps.held:
+        for each in (steps, on_browser[2] if on_browser else None):
+            if each is None or not each.held:
+                continue
             # A button left down would turn every later pointer move in the guest into a drag.
-            held = steps.held
+            held = each.held
             try:
-                steps.release()
+                each.release()
                 print(f"[desk] the {held} mouse button, held since a press step, was let go", flush=True)
             except DeskError as e:
                 print(f"[desk] warning: the mouse button held since a press step could not be let go: {e}",

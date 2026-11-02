@@ -225,7 +225,15 @@ runs), as a full disk ends a VM; the report (and the video with `record = true`)
 in its timeline. The same steps on other images (`--image`) with a build of their own: a
 `[build.image.NAME]` table (`run`, `artifacts`, `dir`) over `[build]` for that image, e.g.
 `[build.image.arch-gnome]` with `artifacts = ["dist/foo-*.pkg.tar.zst"]`; a file with such tables
-refuses an image it has none for (exit 2) rather than copy another's packages.
+refuses an image it has none for (exit 2) rather than copy another's packages. A guest without a
+desktop whose web pages need checking (an OpenWrt router's LuCI) gets a browser machine:
+`browser = "fedora-44-gnome"` at the top starts that desktop next to it, and every step that is not
+a command of the guest (`exec`, `root`, `reboot`, `pull`, `offline`, `clock`, `disk_*`, `prepare`,
+observations) goes to the browser machine: `open`, clicks, keys, `set_text`, `expect`,
+`console_errors`, `shot`. In `open`, `{guest:80}` is that port of the guest as the browser reaches
+it (a tunnel through the host; without a browser machine, `localhost:80`). One report has the
+steps and the screenshots of both; `--keep` leaves both machines running and `--from N` finds the
+browser machine again.
 
 ```toml
 image = "fedora-44-gnome-cockpit"
