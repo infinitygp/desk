@@ -36,6 +36,9 @@ class Steps:
         self.console_seen = self.console_unlevelled = 0
         # The latest listing in which wait_for found what it waited for.
         self.snap: dict | None = None
+        # The mouse button press() holds down, and where the pointer was sent last.
+        self.held: str | None = None
+        self.at: tuple[int, int] | None = None
 
     def gui(self, *argv: str, env: dict[str, str] | None = None) -> None:
         """Start a program in the desktop session and wait until the screen has changed."""
@@ -146,20 +149,52 @@ class Steps:
         x, y = a11y.locate_name(self.target, name, role, exact, snap=self.snap)
         display.click(self.target.dom(), x, y, button=button, count=count, run=self.target)
 
-    def pointer(self, action: str, values: list[int], button: str = "left", count: int = 1) -> None:
-        """The machine's mouse at screen pixels: click [x, y], move [x, y] (hover), drag
-        [x1, y1, x2, y2] with the left button, scroll [x, y, notches] (positive: down)."""
+    def point(self, where, role: str | None = None, exact: bool = True, timeout: float = 60,
+              window: str | None = None) -> tuple[int, int]:
+        """[x, y] as it is, or where the element with this name is now (found as click finds it)."""
+        if isinstance(where, list):
+            display.check_points(self.target.dom(), [tuple(where)])
+            return where[0], where[1]
+        self.wait_for(where, role, exact, timeout, window)
+        return a11y.locate_name(self.target, where, role, exact, snap=self.snap)
+
+    def pointer(self, action: str, values: list, button: str = "left", count: int = 1, **find) -> None:
+        """The machine's mouse: click [x, y]; move to [x, y] or an element (hover; with a button
+        held it glides there as a hand would, for drag-and-drop); drag [x1, y1, x2, y2] or [from,
+        to] by name with the left button; scroll [x, y, notches] (positive: down)."""
         dom = self.target.dom()
+        if action == "drag" and isinstance(values[0], str):
+            values = [*self.point(values[0], **find), *self.point(values[1], **find)]
+        elif action == "move" and isinstance(values, str):
+            values = list(self.point(values, **find))
         points = [tuple(values[i:i + 2]) for i in range(0, 4 if action == "drag" else 2, 2)]
         display.check_points(dom, points)
         if action == "click":
             display.click(dom, *values, button=button, count=count, run=self.target)
+        elif action == "move" and self.held:
+            display.glide(dom, *self.at, *values, run=self.target)
         elif action == "move":
             display.move(dom, *values, run=self.target)
         elif action == "drag":
             display.drag(dom, *values, run=self.target)
         else:
-            display.scroll(dom, *values, run=self.target)
+            display.scroll(dom, *values[:2], values[2], run=self.target)
+        self.at = tuple(values[-2:]) if action == "drag" else tuple(values[:2])
+
+    def press(self, where, button: str = "left", **find) -> None:
+        """Press a button at [x, y] or on an element and keep it down: steps in between see the
+        drag in progress; release() or the end of the steps lets go."""
+        x, y = self.point(where, **find)
+        self.held = button
+        display.press(self.target.dom(), x, y, button=button, run=self.target)
+        self.at = (x, y)
+
+    def release(self, where=True, **find) -> None:
+        """Let go of the held button where the pointer is, or after gliding to [x, y] or an element."""
+        if where is not True:
+            self.pointer("move", where, **find)
+        button, self.held = self.held, None
+        display.release(self.target.dom(), *self.at, button=button, run=self.target)
 
     def focus(self, query: str) -> str:
         """Bring a window to the front by application or title, as clicking it would."""

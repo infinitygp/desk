@@ -97,6 +97,11 @@ reboot = true
             'image = "a"\n[[step]]\nclick = [1, 2]\nrole = "button"',       # role finds by name
             'image = "a"\n[[step]]\nmove = [1, 2]\nbutton = "right"',
             'image = "a"\n[[step]]\nclick = [1, true]',
+            'image = "a"\n[[step]]\nrelease = true',                         # nothing pressed
+            'image = "a"\n[[step]]\npress = "A"\n[[step]]\npress = "B"',   # still held
+            'image = "a"\n[[step]]\npress = [1, 2]\nrole = "button"',
+            'image = "a"\n[[step]]\ndrag = ["A"]',
+            'image = "a"\n[[step]]\nrelease = false',
             'image = "a"\n[[step]]\nset_text = "URL"\ntext = 5',
             'image = "a"\n[[step]]\nclick = "URL"\ntext = "x"',
             'image = "a"\n[[step]]\ngui = "app"\nuntil = true',
@@ -586,6 +591,66 @@ class PointerSteps(unittest.TestCase):
                 mock.patch("desk.scenario.Steps"), mock.patch("desk.scenario.display.screenshot"), \
                 self.assertRaises(display.OffScreen):
             scenario._run_steps(run, LostConnection.SPEC, {"step": [{"move": [9999, 1], "soft": True}, {"exec": "x"}]})
+
+
+class HoldAndRelease(unittest.TestCase):
+    """press keeps a button down for the steps that follow; move glides with it; release lets go."""
+
+    def steps(self):
+        from desk import steps
+
+        target = SimpleNamespace(agent_port=0, dom=lambda: "dom")
+        s = steps.Steps(SimpleNamespace(family="linux", need_desktop=lambda what: None), target)
+        places = {"Key 1 of 15 keys": (400, 200), "Media control": (120, 240), "Key 6 of 15 keys": (600, 300)}
+        s.point = lambda where, **find: tuple(where) if isinstance(where, list) else places[where]
+        return s, target
+
+    def test_loads(self):
+        data = scenario.load(write('image = "a"\n[[step]]\npress = "Media control"\nrole = "button"\n'
+                                   '[[step]]\nmove = "Key 1 of 15 keys"\n[[step]]\nkey = "escape"\n'
+                                   '[[step]]\nrelease = true\n[[step]]\ndrag = ["Media control", "Key 1"]\n'
+                                   '[[step]]\npress = [10, 20]\nbutton = "right"\n[[step]]\nrelease = [30, 40]'))
+        self.assertEqual(len(data["step"]), 7)
+
+    def test_press_glide_and_release_by_name(self):
+        s, target = self.steps()
+        with mock.patch("desk.steps.display") as display:
+            s.press("Media control")
+            s.pointer("move", "Key 1 of 15 keys")
+            self.assertEqual(s.held, "left")
+            s.release("Key 6 of 15 keys")
+        display.press.assert_called_once_with("dom", 120, 240, button="left", run=target)
+        self.assertEqual([c.args for c in display.glide.call_args_list],
+                         [("dom", 120, 240, 400, 200), ("dom", 400, 200, 600, 300)])
+        display.move.assert_not_called()  # with the button down a move glides, for drag-and-drop
+        display.release.assert_called_once_with("dom", 600, 300, button="left", run=target)
+        self.assertIsNone(s.held)
+
+    def test_a_drag_from_name_to_name(self):
+        s, target = self.steps()
+        with mock.patch("desk.steps.display") as display:
+            s.pointer("drag", ["Media control", "Key 1 of 15 keys"])
+        display.drag.assert_called_once_with("dom", 120, 240, 400, 200, run=target)
+
+    def test_a_button_held_when_a_step_fails_or_the_steps_end_is_let_go(self):
+        from desk import steps as steps_module
+
+        for later in ({"expect": "x"}, None):
+            run = mock.Mock(agent_port=0)
+            data = {"step": [{"press": [10, 20]}] + ([later] if later else [])}
+            with self.subTest(later=later), mock.patch("desk.steps.display") as display, \
+                    mock.patch("desk.scenario.display.screenshot"), \
+                    mock.patch.object(steps_module.Steps, "wait_for", side_effect=DeskError("did not appear")):
+                scenario._run_steps(run, SimpleNamespace(family="linux", need_desktop=lambda w: None), data)
+            display.release.assert_called_once_with(run.dom(), 10, 20, button="left", run=run)
+
+    def test_a_drag_lets_go_also_when_its_way_fails(self):
+        from desk import display
+
+        with mock.patch("desk.display.press"), mock.patch("desk.display.glide", side_effect=DeskError("off")), \
+                mock.patch("desk.display.release") as release, self.assertRaises(DeskError):
+            display.drag("dom", 1, 2, 3, 4)
+        release.assert_called_once_with("dom", 3, 4, run=None)
 
 
 class SplitWindows(unittest.TestCase):

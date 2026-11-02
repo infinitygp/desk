@@ -247,7 +247,13 @@ shot = "empty-state"
 Other steps: `type`, the machine's mouse at screen pixels read from a screenshot (`click = [x, y]`
 with `button` and `double = true`, which a click by name takes too; `move = [x, y]` to hover;
 `drag = [x1, y1, x2, y2]` with the left button, moved as a hand would; `scroll = [x, y, notches]`,
-positive down; a point off the screen fails the step as desk's, exit 2, with nothing clicked),
+positive down; a point off the screen fails the step as desk's, exit 2, with nothing clicked;
+`move`, `drag = ["from name", "to name"]`, `press` and `release` also take elements by name, with
+`role`, `exact`, `timeout`, `window` as a click: `press = "Media control"` keeps the button down
+(`button` for another) for the steps that follow, so `expect`, `shot` and `key = "escape"` see the
+drag in progress, a `move` with it held glides there for drag-and-drop, and `release = true` lets
+go where the pointer is, or after gliding to a name or [x, y]; a button still held when the steps
+end or one fails is let go),
 `set_text = "Repository URL"` with `text = "/srv/repo"` (`role`, `exact`,
 `timeout`, `window` as on a `click`; `text = ""` empties it: the field's text replaced as `desk
 set-text` does, in a web page, a GTK/Qt application or a Windows one, and read back: a field that

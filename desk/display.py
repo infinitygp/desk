@@ -244,31 +244,46 @@ def click(dom, x: int, y: int, button: str = "left", count: int = 1, run=None) -
         time.sleep(0.08)
 
 
-def drag(dom, x1: int, y1: int, x2: int, y2: int, steps: int = 30, run=None) -> None:
-    """Press, move like a hand would and release over the target.
+def press(dom, x: int, y: int, button: str = "left", run=None) -> None:
+    """Move to (x, y) and press the button, which stays down until release()."""
+    p = _Pointer(dom, run, [(x, y)])
+    p.move(x, y)
+    time.sleep(0.1)
+    p.button(button, True)
+    time.sleep(0.15)
+
+
+def glide(dom, x1: int, y1: int, x2: int, y2: int, steps: int = 30, run=None) -> None:
+    """Move from (x1, y1) to (x2, y2) as a hand would, and wiggle over the target.
 
     Toolkit drag-and-drop (GTK, WebKit, Qt on Wayland) only starts after the pointer has moved a
     few pixels with the button held, and only accepts the drop once the target has seen motion
     over it; jumping there and letting go at once leaves the drag hanging."""
     p = _Pointer(dom, run, [(x1, y1), (x2, y2)])
-    p.move(x1, y1)
+    for i in range(1, steps + 1):
+        p.move(x1 + (x2 - x1) * i // steps, y1 + (y2 - y1) * i // steps)
+        time.sleep(0.02)
+    for dx in (2, -2, 0):
+        p.move(min(max(x2 + dx, 0), p.width - 1), y2)
+        time.sleep(0.06)
+    time.sleep(0.2)
+
+
+def release(dom, x: int, y: int, button: str = "left", run=None) -> None:
+    """Let go of a button pressed at or moved to (x, y), which tells a second monitor's agent."""
+    _Pointer(dom, run, [(x, y)]).button(button, False)
     time.sleep(0.1)
-    p.button("left", True)
+
+
+def drag(dom, x1: int, y1: int, x2: int, y2: int, steps: int = 30, run=None) -> None:
+    """Press, move like a hand would and release over the target."""
     try:
-        time.sleep(0.15)
-        for i in range(1, steps + 1):
-            p.move(x1 + (x2 - x1) * i // steps, y1 + (y2 - y1) * i // steps)
-            time.sleep(0.02)
-        # A last wiggle over the target, then let go.
-        for dx in (2, -2, 0):
-            p.move(min(max(x2 + dx, 0), p.width - 1), y2)
-            time.sleep(0.06)
-        time.sleep(0.2)
+        press(dom, x1, y1, run=run)
+        glide(dom, x1, y1, x2, y2, steps, run=run)
     finally:
         # Also when a point on the way is off the screen or the command is interrupted: a
         # button left down would turn every later pointer move into a drag.
-        p.button("left", False)
-    time.sleep(0.1)
+        release(dom, x2, y2, run=run)
 
 
 def scroll(dom, x: int, y: int, dy: int, run=None) -> None:
