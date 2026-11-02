@@ -205,7 +205,7 @@ ROLE_ALIASES = {
     "radio": "radio button", "textbox": "entry", "searchbox": "entry", "combobox": "combo box",
     "menuitem": "menu item", "listitem": "list item", "treeitem": "tree item", "spinbutton": "spin button",
     "img": "image", "row": "table row", "cell": "table cell", "gridcell": "table cell",
-    "columnheader": "column header", "rowheader": "row header",
+    "columnheader": "column header", "rowheader": "row header", "alert": "notification", "option": "list item",
 }
 
 

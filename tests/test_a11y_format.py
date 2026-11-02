@@ -205,6 +205,13 @@ class Roles(unittest.TestCase):
     def test_aria_names_work(self):
         self.assertEqual([n["ref"] for n in _matches(self.snap, "Source", "tab", True)], ["e1"])
 
+    def test_an_alert_is_a_notification_and_an_option_a_list_item(self):
+        # As Firefox and Chromium expose role="alert" and the options of a listbox (a drag-and-drop scenario).
+        snap = {"nodes": [node("e1", 0, "notification", "Key 4 cannot take the turn of Knob 1."),
+                          node("e2", 0, "list item", "Thing 3")]}
+        self.assertEqual([n["ref"] for n in _matches(snap, "Key 4 cannot", "alert", False)], ["e1"])
+        self.assertEqual([n["ref"] for n in _matches(snap, "Thing 3", "option", True)], ["e2"])
+
     def test_hint_names_what_the_name_belongs_to(self):
         self.assertIn("there is: page tab 'Source'", role_hint(self.snap, "Source", "button", True))
         self.assertEqual(role_hint(self.snap, "Source", None, True), "")
