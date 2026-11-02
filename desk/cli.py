@@ -746,7 +746,7 @@ def cmd_scenario(args) -> None:
     if args.from_step is not None:
         run = runs.resolve(args.run)
         sys.exit(0 if scenario.continue_scenario(path, run, args.from_step, image=args.image) else 1)
-    sys.exit(0 if scenario.run_scenario(path, keep=args.keep, image=args.image) else 1)
+    sys.exit(0 if scenario.run_scenario(path, keep=args.keep, image=args.image, no_build=args.no_build) else 1)
 
 
 def cmd_snapshot(args) -> None:
@@ -1375,6 +1375,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--keep", action="store_true",
                    help="leave the run running afterwards (report written), to go on testing by hand")
     p.add_argument("--image", help="another image than the file names")
+    p.add_argument("--no-build", action="store_true",
+                   help="skip [build] run and take the newest files matching artifacts as they are")
     p.add_argument("--from", dest="from_step", type=int, metavar="N",
                    help="run steps N.. in the run already there (-r / $DESK_RUN, e.g. left by --keep): "
                         "no build, no new run; it stays running")

@@ -64,7 +64,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk up IMAGE --resolution WxH --scale N --displays N`, `desk display [--resolution WxH] [--scale N]` | Monitors: mode, scaling in percent, several displays ([system.md](system.md)) |
 | `desk up IMAGE --memory 8G --cpus N` | Memory and vCPUs of this run instead of the image's (4 GB and 4 on the desktop images, 6 GB on Windows); other than its warm state's, the run boots cold (~25 s) |
 | `desk focus NAME` | Bring a window to the front by application or title (keys go to the focused window); on Windows it fails when Windows keeps the window behind the one in front |
-| `desk scenario run FILE [--keep]`, `desk scenario check FILE` | Run a repeatable test from a TOML file (see below) |
+| `desk scenario run FILE [--keep] [--no-build]`, `desk scenario check FILE` | Run a repeatable test from a TOML file (see below) |
 | `desk wait [--change] [--timeout S]` | Until the screen is still; `--change` first waits for it to change at all |
 | `desk wait --until-exec CMD [--root] [--timeout S]` | Run CMD in the guest every 2 s until it exits 0 (a service up, a file written; default 120 s), instead of a polling loop |
 | `desk reboot [--shot] [--prepare]` | Reboot and return when the new session is ready; reports apps that blocked shutdown; `--prepare` then redoes the image's preparation (Cockpit logged in again) |
@@ -315,7 +315,10 @@ afterwards (left alone, it is destroyed after 2 h idle). While writing a scenari
 step in the file and try it again in that run with `desk -r ID scenario run FILE --from N`: steps
 N.. only, no build and no new run, seconds instead of the whole scenario; the run stays, and its
 report (`desk down`) counts each step's last attempt. Finish with one whole run from the start,
-which is what the scenario has to pass. `scenario check` and `run` warn about fixed waits
+which is what the scenario has to pass. `--no-build` skips `[build] run` in a new run and takes
+the newest files matching `artifacts` as they are (the same build on several images, or again
+after a fix in the scenario only); the output and the report say so and which files, and with no
+file to take it stops before starting a run (exit 2). `scenario check` and `run` warn about fixed waits
 (`wait = 2`, `sleep` in a command): they fail on a busy host and waste time on an idle one, so
 `expect` what should appear, or repeat a check with `until = true`. A `type` step refuses, like `desk type`,
 when a browser's focus is not in a text field; `anywhere = true` types anyway (page shortcuts).

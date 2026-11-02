@@ -128,7 +128,22 @@ reboot = true
             self.assertEqual(scenario._base(plain, scenario.load(plain)), Path(top).resolve())
             base = scenario._base(other, scenario.load(other))
             self.assertEqual(base, Path(top, "cockpit-x").resolve())
-            self.assertEqual([f.name for f in scenario._build(scenario.load(other), base)], ["cockpit-x-1.rpm"])
+            self.assertEqual([f.name for f in scenario._build(scenario.load(other), base)[0]], ["cockpit-x-1.rpm"])
+
+    def test_no_build_takes_the_artifacts_as_they_are_and_says_so(self):
+        with tempfile.TemporaryDirectory() as top:
+            repo = Path(top)
+            (repo / "app-1.rpm").write_text("")
+            data = {"build": {"run": "touch built-anyway", "artifacts": ["*.rpm"]}}
+            files, said = scenario._build(data, repo, skip=True)
+            self.assertEqual([f.name for f in files], ["app-1.rpm"])
+            self.assertFalse((repo / "built-anyway").exists())
+            self.assertRegex(said, r"^skipped \(--no-build\); artifacts: app-1\.rpm \(\d{4}-\d\d-\d\d \d\d:\d\d\)$")
+            (repo / "app-1.rpm").unlink()
+            # Nothing to take: desk's failure before any run starts, never a run without the files.
+            with self.assertRaisesRegex(DeskError, r"no build artifact matches \*\.rpm \(--no-build: build it"):
+                scenario._build(data, repo, skip=True)
+            self.assertEqual(scenario._build({"build": {"run": "touch x", "artifacts": []}}, repo)[1], "")
 
     def test_what_each_action_takes(self):
         data = scenario.load(write('''

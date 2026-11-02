@@ -160,6 +160,29 @@ class Report(unittest.TestCase):
         self.assertIn("result: passed, 3 of 3 steps passed", md)
         self.assertNotIn("failed at step", md)
         self.assertIn("step 2 FAILED", md)  # the timeline keeps the first attempt
+        self.assertNotIn("- build:", md)
+
+    def test_a_build_skipped_with_no_build_is_in_the_report(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+
+        from desk import evidence
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            run_dir.mkdir()
+            said = "skipped (--no-build); artifacts: target/release/app (2026-11-02 01:00)"
+            events = [{"t": 100.0, "scenario": "/x/a.toml", "steps": 1, "build": said},
+                      {"t": 101.0, "step": 1, "action": "gui app", "ok": True, "detail": "", "seconds": 1.0},
+                      {"t": 110.0, "scenario": "/x/a.toml", "steps": 1, "first": 1}]  # then --from 1
+            (run_dir / "log.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
+            run = mock.Mock(id="r1", dir=run_dir, image="fedora-44-gnome", created=99.0, ready=0.0)
+            run.live_domain.return_value = None
+            with mock.patch.object(evidence, "REPORTS", Path(tmp) / "reports"):
+                md = (evidence.collect(run) / "report.md").read_text()
+        self.assertIn(f"- build: {said}", md)
 
 
 class DiffFailure(unittest.TestCase):

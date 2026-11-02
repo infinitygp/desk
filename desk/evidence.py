@@ -436,9 +436,13 @@ def collect(run, diff: bool = False) -> Path:
         last = sorted({ev["step"]: ev for ev in stepped}.values(), key=lambda ev: ev["step"])
         failed = [ev for ev in last if not ev["ok"]]
         total = scenario.get("steps", len(last))
-        md += ["## Scenario", "", f"- file: `{scenario['scenario']}`",
-               f"- result: {'FAILED' if failed or len(last) < total else 'passed'}, "
-               f"{len(last) - len(failed)} of {total} steps passed"]
+        md += ["## Scenario", "", f"- file: `{scenario['scenario']}`"]
+        # The start that copied the artifacts; `--from N` goes on without a build of its own.
+        built = next((ev["build"] for ev in events if "build" in ev), None)
+        if built:
+            md.append(f"- build: {built}")
+        md.append(f"- result: {'FAILED' if failed or len(last) < total else 'passed'}, "
+                  f"{len(last) - len(failed)} of {total} steps passed")
         for ev in failed:
             first, _, rest = ev["detail"].partition("\n")
             md.append(f"- failed at step {ev['step']} ({one_line(ev['action'])}): {first}"

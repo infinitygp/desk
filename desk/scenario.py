@@ -373,9 +373,11 @@ def _base(path: Path, data: dict) -> Path:
     return Path(r.stdout.strip()) if r.returncode == 0 else path.parent
 
 
-def _build(data: dict, repo: Path) -> list[Path]:
+def _build(data: dict, repo: Path, skip: bool = False) -> tuple[list[Path], str]:
+    """The artifacts, built first unless `skip` (desk scenario run --no-build); and what the
+    report says of the build when it was skipped."""
     build = data.get("build", {})
-    if build.get("run"):
+    if build.get("run") and not skip:
         print(f"build: {build['run']}", flush=True)
         if subprocess.run(build["run"], shell=True, cwd=repo).returncode != 0:
             raise DeskError(f"build failed: {build['run']}")
@@ -383,10 +385,17 @@ def _build(data: dict, repo: Path) -> list[Path]:
     for pattern in build.get("artifacts", []):
         hits = [Path(p) for p in glob.glob(str(repo / pattern))]
         if not hits:
-            raise DeskError(f"no build artifact matches {pattern}")
+            raise DeskError(f"no build artifact matches {pattern}"
+                            + (" (--no-build: build it, or run without --no-build)" if skip else ""))
         # Builds leave older versions around; the one just built is the newest.
         files.append(max(hits, key=lambda p: p.stat().st_mtime))
-    return files
+    if not (skip and build.get("run")):
+        return files, ""
+    said = "skipped (--no-build); artifacts: " + (", ".join(
+        f"{f.relative_to(repo) if f.is_relative_to(repo) else f} "
+        f"({time.strftime('%Y-%m-%d %H:%M', time.localtime(f.stat().st_mtime))})" for f in files) or "none")
+    print(f"build: {said}", flush=True)
+    return files, said
 
 
 def tail(text: str, lines: int = 15, chars: int = 1500) -> str:
@@ -590,13 +599,13 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
     return ""
 
 
-def run_scenario(path: Path, keep: bool = False, image: str | None = None) -> bool:
+def run_scenario(path: Path, keep: bool = False, image: str | None = None, no_build: bool = False) -> bool:
     data = load(path)
     spec = load_image(image or data["image"])
     check_observations(data, spec)
     _warn(data)
     base = _base(path, data)
-    artifacts = _build(data, base)
+    artifacts, built = _build(data, base, skip=no_build)
     agent, _ = runs.agent_process()
     run = runs.up(spec, label=f"scenario {base.name}/{path.name}" + (f" ({agent})" if agent else ""))
     print(f"run {run.id} ({spec.name})", flush=True)
@@ -604,7 +613,8 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None) -> bo
     try:
         if data.get("record"):
             record.start(run)
-        run.log_event(scenario=str(path.resolve()), steps=len(data.get("step", [])))
+        run.log_event(scenario=str(path.resolve()), steps=len(data.get("step", [])),
+                      **({"build": built} if built else {}))
         if artifacts:
             dest = GUEST_IN[spec.family]
             guest.ssh_run(run.ssh_port, run.user, spec.cmd(f"mkdir -p {dest}" if spec.family != "windows"
