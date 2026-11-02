@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 
 import libvirt
 
-from .config import DeskError
+from .config import DeskError, NotDone
 from .virt import conn, qmp
 
 ABS_MAX = 0x7FFF
@@ -152,7 +152,7 @@ def _btn(button: str, down: bool) -> dict:
     return {"type": "btn", "data": {"down": down, "button": button}}
 
 
-class OffScreen(DeskError):
+class OffScreen(NotDone):
     """A point a step gives is not on the guest's screen: nothing was clicked, which says nothing
     about the product."""
 

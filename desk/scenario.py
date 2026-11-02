@@ -12,13 +12,13 @@ from datetime import UTC
 from pathlib import Path
 
 from . import a11y, browser, clock, disks, display, evidence, guest, record, runs, usb, winagent
-from .config import DeskError, load_image
+from .config import DeskError, NotDone, load_image
 from .steps import Steps
 
 # Exactly one per step; the value is the action's argument.
 ACTIONS = {"root", "exec", "gui", "focus", "click", "type", "key", "expect", "expect_absent", "shot",
            "reboot", "wait", "clock", "disk_add", "disk_rm", "console_errors", "prepare", "open", "viewport",
-           "observe_start", "observe_stop", "mark", "set_text", "move", "drag", "scroll", "press", "release"}
+           "observe_start", "observe_stop", "mark", "set_text", "move", "drag", "scroll", "press", "release", "win"}
 OPTIONS = {"role", "exact", "timeout", "output", "rc", "name", "soft", "env", "step", "until", "anywhere", "browser",
            "button", "window", "state", "text", "double"}
 # The options each action reads, besides name and soft; any other would be ignored without a word.
@@ -58,6 +58,7 @@ VALUES = {
     **{a: (_text, "a text") for a in ("root", "exec", "focus", "type", "expect", "expect_absent", "shot",
                                       "clock", "disk_add", "disk_rm", "mark", "set_text")},
     "click": (lambda v: _text(v) or _pixels(v, 2), "a name, or [x, y] in screen pixels"),
+    "win": (_text, "what follows desk win, e.g. \"taskbar --align left\""),
     "move": (lambda v: _text(v) or _pixels(v, 2), "an element's name, or [x, y] in screen pixels"),
     "drag": (lambda v: _pixels(v, 4) or (isinstance(v, list) and len(v) == 2 and all(_text(x) for x in v)),
              "[x1, y1, x2, y2] in screen pixels or [\"from name\", \"to name\"]"),
@@ -193,6 +194,13 @@ def load(path: Path) -> dict:
             raise DeskError(f"{path}: step {i}: release without a press before it")
         if action in ("press", "release"):
             held = i if action == "press" else 0
+        if action == "win":
+            from . import winsettings
+
+            try:
+                winsettings.parse(split_windows(step["win"]))
+            except DeskError as e:
+                raise DeskError(f"{path}: step {i}: {e}") from None
         if action == "set_text" and "text" not in step:
             raise DeskError(f"{path}: step {i}: set_text names the field; text = \"...\" is what it gets")
         if action == "gui" and not {"rc", "output"} & set(step) and {"timeout", "until"} & set(step):
@@ -267,8 +275,13 @@ def observations(path: Path, data: dict) -> dict[str, dict]:
 
 
 def check_observations(data: dict, spec) -> None:
-    """What only the image tells: whether its guests are of a family the providers observe."""
+    """What only the image tells: whether its guests are of a family the providers observe, and
+    win steps are for Windows."""
     from . import observe
+
+    if spec.family != "windows" and any("win" in st for st in data.get("step", [])):
+        i = next(i for i, st in enumerate(data["step"], 1) if "win" in st)
+        raise DeskError(f"step {i}: win changes Windows settings, and {spec.name} is a {spec.family} guest")
 
     for t in data.get("observe", []):
         p = observe.provider(t["provider"])
@@ -494,6 +507,10 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
         steps.press(value, step.get("button", "left"), **_find(step))
     elif action == "release":
         steps.release(value, **_find(step))
+    elif action == "win":
+        from . import winsettings
+
+        return winsettings.apply(run, spec, winsettings.parse(split_windows(value)))
     elif action == "set_text":
         return steps.set_text(value, step["text"], role, step.get("exact", True), timeout or 60, step.get("window"))
     elif action == "type":
@@ -675,8 +692,7 @@ def _run_steps(run, spec, data: dict, first: int = 1, observed: dict | None = No
                 if isinstance(e, guest.NoConnection):
                     lost = guest.NoConnection(f"{e}; {runs.host_state(run)}")
                     detail = str(lost)
-                elif isinstance(e, (browser.Unchecked, ObserveError, winagent.AgentGone, a11y.Unread,
-                                    display.OffScreen)):
+                elif isinstance(e, (browser.Unchecked, ObserveError, winagent.AgentGone, NotDone)):
                     lost = e  # a check desk could not make (or ask the session) says nothing about the product either
             run.log_event(step=i, action=label, ok=passed, detail=detail, seconds=round(time.monotonic() - t0, 1))
             head, *rest = detail.splitlines() or [""]

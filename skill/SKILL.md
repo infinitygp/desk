@@ -254,6 +254,7 @@ positive down; a point off the screen fails the step as desk's, exit 2, with not
 drag in progress, a `move` with it held glides there for drag-and-drop, and `release = true` lets
 go where the pointer is, or after gliding to a name or [x, y]; a button still held when the steps
 end or one fails is let go),
+`win = "taskbar --align left"` (Windows settings, the words of `desk win`: windows.md),
 `set_text = "Repository URL"` with `text = "/srv/repo"` (`role`, `exact`,
 `timeout`, `window` as on a `click`; `text = ""` empties it: the field's text replaced as `desk
 set-text` does, in a web page, a GTK/Qt application or a Windows one, and read back: a field that

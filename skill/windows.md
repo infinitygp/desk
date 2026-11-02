@@ -57,9 +57,17 @@ Part of the desk skill ([SKILL.md](SKILL.md)); the commands and pitfalls there a
   showing anything (exit code 0xC0000135, or a "System Error" dialog); check with
   `Start-Process <exe> -PassThru -Wait` and the exit code when something silently does not start.
 - Settings tests switch often, without clicking through the Settings app:
-  `desk win theme dark|light` (apps and system, applied at once) and
-  `desk win taskbar [--edge bottom|top|left|right] [--size default|small] [--align left|center]
-  [--autohide on|off]` (restarts Explorer, ~5 s). Auto-hide only works with the taskbar at the bottom.
+  `desk win theme dark|light [--only apps|system]` (applied at once; `--only system` is a dark
+  taskbar over light apps), `desk win taskbar [--edge bottom|top|left|right] [--size default|small]
+  [--align left|center] [--autohide on|off]` (restarts Explorer, ~5 s; auto-hide only works with the
+  taskbar at the bottom), `desk win transparency on|off`, `desk win contrast
+  aquatic|desert|dusk|night-sky|off` (`off`: the Windows light theme, its wallpaper and light mode
+  too; Settings opens and is closed again), `desk win text-size 100-225` (programs started
+  afterwards show it; one already open, Notepad, keeps its size) and `desk win wallpaper PATH` (an
+  image file in the guest).
+  Each reads the setting back and fails (exit 2) when Windows does not have it afterwards; in a
+  scenario the same words are a step, `win = "taskbar --align left"`. No accent colour: Windows
+  derives a palette from it that only Settings computes.
 - Windows enables some features for a share of machines only (Controlled Feature Rollout). The
   image opts in to "Get the latest updates as soon as they're available" and forces on, with
   ViVeTool: taskbar position (59213768) and taskbar size (61090762). Everything else is as a

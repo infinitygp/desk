@@ -115,6 +115,12 @@ class DeskError(Exception):
     pass
 
 
+class NotDone(DeskError):
+    """desk could not do or confirm what a step asked (a point off the screen, a tree it could not
+    read, a setting that did not take): it says nothing about the product, so a scenario ends with
+    exit 2."""
+
+
 class Busy(DeskError):
     """The host could not give what was asked for in time (memory, a lock): nothing of the image
     or the product under test was tried."""

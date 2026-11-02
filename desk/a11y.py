@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 from . import display, guest, winagent
-from .config import DeskError, load_image
+from .config import DeskError, NotDone, load_image
 
 HELPER = Path(__file__).with_name("guest_a11y.py")
 SESSION_ENV = "env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus"
@@ -204,7 +204,7 @@ def locate_ref(run, ref: str) -> tuple[int, int]:
 STATES = {"focused", "checked", "selected", "expanded", "pressed", "editable", "active", "disabled"}
 
 
-class Unread(DeskError):
+class Unread(NotDone):
     """The accessibility tree could not be read: desk did not look, which says nothing about the product."""
 
 

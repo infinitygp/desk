@@ -76,6 +76,61 @@ class SetText(unittest.TestCase):
         self.assertEqual(self.replace("secret", value="••••", role="password text")[0], "")
 
 
+class WinSettings(unittest.TestCase):
+    """desk win and a scenario's win step: the same words, each setting read back afterwards."""
+
+    def test_the_words_of_a_win_step(self):
+        from desk import winsettings
+
+        args = winsettings.parse(["theme", "dark", "--only", "system"])
+        self.assertEqual((args.win_cmd, args.mode, args.only), ("theme", "dark", "system"))
+        self.assertEqual(winsettings.parse(["text-size", "150"]).percent, 150)
+        self.assertEqual(winsettings.parse(["wallpaper", "C:\\Windows\\Web\\Wallpaper\\ThemeB\\img24.jpg"]).path,
+                         "C:\\Windows\\Web\\Wallpaper\\ThemeB\\img24.jpg")
+        for bad in (["accent", "red"], ["text-size", "300"], ["transparency", "maybe"], ["theme"]):
+            with self.subTest(bad=bad), self.assertRaisesRegex(DeskError, "^win: "):
+                winsettings.parse(bad)
+
+    def test_a_setting_windows_did_not_take_is_desks_failure(self):
+        from desk import config, winsettings
+
+        spec = SimpleNamespace(family="windows", root_user="tester", cmd=lambda script: script)
+        answers = iter(["", "0"])  # the write, then what Windows has: still 0
+        with mock.patch("desk.winsettings._ps", side_effect=lambda run, spec, script: next(answers)), \
+                mock.patch("desk.winsettings._broadcast"), \
+                self.assertRaisesRegex(winsettings.NotApplied, "transparency effects did not take: Windows has 0 "
+                                                               "instead of 1"):
+            winsettings.transparency(RUN, spec, "on")
+        self.assertTrue(issubclass(winsettings.NotApplied, config.NotDone))  # exit 2 in a scenario
+
+    def test_text_size_100_is_no_value(self):
+        from desk import winsettings
+
+        spec = SimpleNamespace(family="windows", root_user="tester", cmd=lambda script: script)
+        scripts = []
+
+        def ps(run, spec, script):
+            scripts.append(script)
+            return ""
+
+        with mock.patch("desk.winsettings._ps", side_effect=ps), mock.patch("desk.winsettings._broadcast"):
+            self.assertTrue(winsettings.text_size(RUN, spec, 100).startswith("text size 100 %"))
+        self.assertIn("Remove-ItemProperty", scripts[0])
+
+    def test_a_win_step_is_refused_for_another_family(self):
+        from desk import scenario
+
+        with tempfile.TemporaryDirectory() as tmp:
+            f = Path(tmp) / "s.toml"
+            f.write_text('image = "a"\n[[step]]\nwin = "transparency off"\n')
+            data = scenario.load(f)
+            with self.assertRaisesRegex(DeskError, "step 1: win changes Windows settings, and fedora is a linux"):
+                scenario.check_observations(data, SimpleNamespace(family="linux", name="fedora"))
+            f.write_text('image = "a"\n[[step]]\nwin = "accent red"\n')
+            with self.assertRaisesRegex(DeskError, "step 1: win: argument win_cmd: invalid choice"):
+                scenario.load(f)
+
+
 class Scale(unittest.TestCase):
     def test_a_registry_that_refuses_costs_no_reboot(self):
         refused = subprocess.CompletedProcess([], 1, b"", b"Set-ItemProperty : Requested registry access is not allowed.")
