@@ -76,6 +76,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk push [--root] LOCAL REMOTE`, `desk pull [--root] REMOTE LOCAL` | Copy files (scp) as the desktop user; `--root` for `/root`, `/etc` and the like; stopped after 600 s (exit 124; `--timeout S`, 0: no limit) |
 | `desk diff [--all]` | Files changed in the guest since the image it started from: added, changed, removed (~30 s) |
 | `desk report [--diff]` | Write the evidence report now (see below) |
+| `desk offline on [--ports 443] \| off \| status` | Refuse the guest's outgoing connections but DNS (or only those to the ports) with its own firewall; desk's SSH and agent keep working; lasts over reboots |
 | `desk ls`, `desk down [ID] [--all] [--keep] [--diff] [--no-report]`, `desk gc` | List (with who holds each run), destroy (writing the report first), clean up idle runs |
 | `desk view` | Tell the user how to watch the run live (VNC through an SSH tunnel) |
 | `desk forward PORT[:LOCAL]`, `desk forward`, `desk forward --stop PORT\|all`, `desk up IMAGE --forward PORT` | Reach a guest port from the host (127.0.0.1, the same number when free and not another run's tunnel, else printed) for as long as the run exists, across reboots and snapshot restores; a port already forwarded keeps its local port (`--stop` it first to move it) |
@@ -258,6 +259,11 @@ drag in progress, a `move` with it held glides there for drag-and-drop, and `rel
 go where the pointer is, or after gliding to a name or [x, y]; a button still held when the steps
 end or one fails is let go),
 `win = "taskbar --align left"` (Windows settings, the words of `desk win`: windows.md),
+`offline = true` (every outgoing connection of the guest refused but DNS; `offline = [443]` only
+those to the ports; `offline = false` ends it; as `desk offline on|off [--ports 443]`: the guest's
+own firewall, nft on Linux and OpenWrt, Windows Firewall, so desk's SSH and agent keep working and
+it lasts over reboots; read back, exit 2 when it did not take; debian-13-gnome has no nftables:
+install it first),
 `pull = "/home/tester/Documents/full.backup"` with `to = "target/handoff/"` (a file of the guest
 copied to the host, relative to where `[build]` runs, for a later scenario to take as an artifact:
 a backup made on one image and restored on another; Windows paths as `C:/Users/tester/x`; the step

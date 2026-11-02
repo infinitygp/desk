@@ -975,6 +975,28 @@ def cmd_win(args) -> None:
     _after_action(run, run.dom(), args)
 
 
+def cmd_offline(args) -> None:
+    from . import offline
+
+    run = runs.resolve(args.run)
+    spec = runs.spec_for(run)
+    if args.state == "on":
+        print(offline.on(run, spec, args.ports))
+    elif args.ports:
+        raise DeskError("--ports goes with desk offline on")
+    elif args.state == "off":
+        print(offline.off(run, spec))
+    else:
+        print("offline: desk's firewall rules are in the guest" if offline.state(run, spec) else "online")
+
+
+def _ports(text: str) -> list[int]:
+    ports = [int(p) for p in text.split(",") if p.strip()]
+    if not ports or not all(0 < p < 65536 for p in ports):
+        raise argparse.ArgumentTypeError(f"ports are numbers 1-65535, comma-separated (got {text!r})")
+    return ports
+
+
 def cmd_disk(args) -> None:
     from . import disks
 
@@ -1395,6 +1417,12 @@ def build_parser() -> argparse.ArgumentParser:
                                    "contrast, text size, wallpaper")
     winsettings.add_commands(p.add_subparsers(dest="win_cmd", required=True), _action_opts)
     p.set_defaults(func=cmd_win)
+
+    p = sub.add_parser("offline", help="refuse the guest's outgoing connections but DNS, or only those to --ports, "
+                                       "with its own firewall; desk's SSH and agent keep working")
+    p.add_argument("state", choices=["on", "off", "status"])
+    p.add_argument("--ports", type=_ports, help="only these, e.g. 443 or 80,443")
+    p.set_defaults(func=cmd_offline)
 
     p = sub.add_parser("disk", help="extra empty disks plugged into the running guest")
     dsub = p.add_subparsers(dest="disk_cmd", required=True)

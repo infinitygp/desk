@@ -446,6 +446,16 @@ told from a command's by what ssh prints last at `LogLevel=ERROR` and, when it p
 closed connection is logged at INFO), by `exit 0` failing too; a connection the guest resets in
 the handshake started nothing, so it is sent again.
 
+`desk offline` and the offline step cut a guest off with its own firewall. passt, which connects
+the guest, cannot filter what goes out (`--no-tcp` would take SSH along, and the `--outbound`
+address that would keep only the host is not something libvirt passes on), and unplugging the
+NIC (`domif-setlink`) drops SSH and the Windows agent too. So: an nft table of desk's on Linux
+(`/etc/desk-offline.nft`, loaded again at boot by `desk-offline.service`), a chain in fw4's table
+on OpenWrt (`/etc/nftables.d/99-desk-offline.nft`; fw4 keeps an unknown chain, emptied, when it
+reloads, so `off` deletes it), a rule group in Windows Firewall whose block rules win over any allow
+rule. Each refuses what goes out but DNS, the answers of connections into the guest (desk's SSH and
+agent) and loopback, and is read back after the change.
+
 Mouse steps send the machine's input like `desk click` does. A `press` keeps the button down for the
 steps after it, and a `move` with it held glides as `drag` does, since toolkits start a
 drag-and-drop only after motion with the button down; a button still held when the steps end or

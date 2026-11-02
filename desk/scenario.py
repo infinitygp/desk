@@ -20,7 +20,7 @@ from .steps import Steps
 ACTIONS = {"root", "exec", "gui", "focus", "click", "type", "key", "expect", "expect_absent", "shot",
            "reboot", "wait", "clock", "disk_add", "disk_rm", "console_errors", "prepare", "open", "viewport",
            "observe_start", "observe_stop", "mark", "set_text", "move", "drag", "scroll", "press", "release", "win",
-           "pull"}
+           "pull", "offline"}
 OPTIONS = {"role", "exact", "timeout", "output", "rc", "name", "soft", "env", "step", "until", "anywhere", "browser",
            "button", "window", "state", "text", "double", "to"}
 # The options each action reads, besides name and soft; any other would be ignored without a word.
@@ -62,6 +62,9 @@ VALUES = {
     "click": (lambda v: _text(v) or _pixels(v, 2), "a name, or [x, y] in screen pixels"),
     "win": (_text, "what follows desk win, e.g. \"taskbar --align left\""),
     "pull": (_text, "a file in the guest"),
+    "offline": (lambda v: isinstance(v, bool) or (isinstance(v, list) and bool(v) and all(
+        isinstance(p, int) and not isinstance(p, bool) and 0 < p < 65536 for p in v)),
+                "true (every outgoing connection but DNS refused), a list of ports ([443]) or false"),
     "to": (_text, "a folder (ending in /) or file on the host, relative to where [build] runs"),
     "move": (lambda v: _text(v) or _pixels(v, 2), "an element's name, or [x, y] in screen pixels"),
     "drag": (lambda v: _pixels(v, 4) or (isinstance(v, list) and len(v) == 2 and all(_text(x) for x in v)),
@@ -586,6 +589,10 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
         from . import winsettings
 
         return winsettings.apply(run, spec, winsettings.parse(split_windows(value)))
+    elif action == "offline":
+        from . import offline
+
+        return offline.off(run, spec) if value is False else offline.on(run, spec, None if value is True else value)
     elif action == "pull":
         return _pull(run, spec, steps.base, step)
     elif action == "set_text":
