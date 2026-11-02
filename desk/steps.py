@@ -140,11 +140,26 @@ class Steps:
         return r.returncode == 0
 
     def click(self, name: str, role: str | None = None, exact: bool = True, timeout: float = 60,
-              button: str = "left", window: str | None = None) -> None:
+              button: str = "left", window: str | None = None, count: int = 1) -> None:
         self.wait_for(name, role, exact, timeout, window)
         # The listing that found it; _visible_point looks the position up again anyway.
         x, y = a11y.locate_name(self.target, name, role, exact, snap=self.snap)
-        display.click(self.target.dom(), x, y, button=button, run=self.target)
+        display.click(self.target.dom(), x, y, button=button, count=count, run=self.target)
+
+    def pointer(self, action: str, values: list[int], button: str = "left", count: int = 1) -> None:
+        """The machine's mouse at screen pixels: click [x, y], move [x, y] (hover), drag
+        [x1, y1, x2, y2] with the left button, scroll [x, y, notches] (positive: down)."""
+        dom = self.target.dom()
+        points = [tuple(values[i:i + 2]) for i in range(0, 4 if action == "drag" else 2, 2)]
+        display.check_points(dom, points)
+        if action == "click":
+            display.click(dom, *values, button=button, count=count, run=self.target)
+        elif action == "move":
+            display.move(dom, *values, run=self.target)
+        elif action == "drag":
+            display.drag(dom, *values, run=self.target)
+        else:
+            display.scroll(dom, *values, run=self.target)
 
     def focus(self, query: str) -> str:
         """Bring a window to the front by application or title, as clicking it would."""

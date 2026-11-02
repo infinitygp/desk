@@ -18,14 +18,14 @@ from .steps import Steps
 # Exactly one per step; the value is the action's argument.
 ACTIONS = {"root", "exec", "gui", "focus", "click", "type", "key", "expect", "expect_absent", "shot",
            "reboot", "wait", "clock", "disk_add", "disk_rm", "console_errors", "prepare", "open", "viewport",
-           "observe_start", "observe_stop", "mark", "set_text"}
+           "observe_start", "observe_stop", "mark", "set_text", "move", "drag", "scroll"}
 OPTIONS = {"role", "exact", "timeout", "output", "rc", "name", "soft", "env", "step", "until", "anywhere", "browser",
-           "button", "window", "state", "text"}
+           "button", "window", "state", "text", "double"}
 # The options each action reads, besides name and soft; any other would be ignored without a word.
 READS = {
     "root": {"timeout", "output", "rc", "until"}, "exec": {"timeout", "output", "rc", "until"},
     "gui": {"env", "rc", "output", "timeout", "until"}, "type": {"anywhere"},
-    "click": {"role", "exact", "timeout", "button", "window"},
+    "click": {"role", "exact", "timeout", "button", "window", "double"},
     "set_text": {"text", "role", "exact", "timeout", "window"},
     "expect": {"role", "exact", "timeout", "window", "state"}, "expect_absent": {"role", "exact", "timeout", "window"},
     "reboot": {"timeout"}, "wait": {"timeout"}, "clock": {"step", "timeout"}, "disk_rm": {"timeout"},
@@ -41,14 +41,24 @@ def _text(v) -> bool:
     return isinstance(v, str) and bool(v)
 
 
+def _pixels(v, n: int) -> bool:
+    return isinstance(v, list) and len(v) == n and all(isinstance(x, int) and not isinstance(x, bool) and x >= 0
+                                                       for x in v)
+
+
 def _texts(v) -> bool:
     return _text(v) or (isinstance(v, list) and bool(v) and all(_text(x) for x in v))
 
 
 # What each action and option takes, as (check, description).
 VALUES = {
-    **{a: (_text, "a text") for a in ("root", "exec", "focus", "click", "type", "expect", "expect_absent", "shot",
+    **{a: (_text, "a text") for a in ("root", "exec", "focus", "type", "expect", "expect_absent", "shot",
                                       "clock", "disk_add", "disk_rm", "mark", "set_text")},
+    "click": (lambda v: _text(v) or _pixels(v, 2), "a name, or [x, y] in screen pixels"),
+    "move": (lambda v: _pixels(v, 2), "[x, y] in screen pixels"),
+    "drag": (lambda v: _pixels(v, 4), "[x1, y1, x2, y2] in screen pixels (from, to)"),
+    "scroll": (lambda v: _pixels(v[:2], 2) and len(v) == 3 and _number(v[2]) and isinstance(v[2], int) and v[2] != 0
+               if isinstance(v, list) else False, "[x, y, notches] (positive: down)"),
     "text": (lambda v: isinstance(v, str), "a text (\"\" empties the field)"),
     "observe_start": (_text, "the label of an [[observe]] table"),
     "observe_stop": (lambda v: v is True or _text(v), "true (every open session) or an [[observe]] label"),
@@ -70,7 +80,7 @@ VALUES = {
     "browser": (lambda v: isinstance(v, str) and v in browser.NAMES, " or ".join(sorted(browser.NAMES))),
     "timeout": (lambda v: _number(v) and v > 0, "seconds"),
     "rc": (lambda v: isinstance(v, int) and not isinstance(v, bool), "an exit code"),
-    **{o: (lambda v: isinstance(v, bool), "true or false") for o in ("exact", "soft", "until", "anywhere")},
+    **{o: (lambda v: isinstance(v, bool), "true or false") for o in ("exact", "soft", "until", "anywhere", "double")},
     "env": (lambda v: isinstance(v, dict) and all(isinstance(x, (str, int, float)) for x in v.values()),
             "a table like {NAME = \"value\"}"),
 }
@@ -163,6 +173,9 @@ def load(path: Path) -> dict:
         action = actions.pop()
         if "until" in step and action not in ("exec", "root", "gui"):
             raise DeskError(f"{path}: step {i}: until goes with exec, root or gui")
+        if action == "click" and isinstance(step["click"], list) and {"role", "exact", "timeout", "window"} & set(step):
+            raise DeskError(f"{path}: step {i}: a click at [x, y] takes button and double, not role, exact, "
+                            "timeout or window, which find an element by name")
         if action == "set_text" and "text" not in step:
             raise DeskError(f"{path}: step {i}: set_text names the field; text = \"...\" is what it gets")
         if action == "gui" and not {"rc", "output"} & set(step) and {"timeout", "until"} & set(step):
@@ -447,8 +460,13 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
         steps.gui(*argv, env=env)
     elif action == "focus":
         return steps.focus(value)
+    elif action == "click" and isinstance(value, list):
+        steps.pointer("click", value, step.get("button", "left"), 2 if step.get("double") else 1)
     elif action == "click":
-        steps.click(value, role, step.get("exact", True), timeout or 60, step.get("button", "left"), step.get("window"))
+        steps.click(value, role, step.get("exact", True), timeout or 60, step.get("button", "left"), step.get("window"),
+                    2 if step.get("double") else 1)
+    elif action in ("move", "drag", "scroll"):
+        steps.pointer(action, value)
     elif action == "set_text":
         return steps.set_text(value, step["text"], role, step.get("exact", True), timeout or 60, step.get("window"))
     elif action == "type":
@@ -624,7 +642,7 @@ def _run_steps(run, spec, data: dict, first: int = 1, observed: dict | None = No
             if isinstance(e, guest.NoConnection):
                 lost = guest.NoConnection(f"{e}; {runs.host_state(run)}")
                 detail = str(lost)
-            elif isinstance(e, (browser.Unchecked, ObserveError, winagent.AgentGone, a11y.Unread)):
+            elif isinstance(e, (browser.Unchecked, ObserveError, winagent.AgentGone, a11y.Unread, display.OffScreen)):
                 lost = e  # a check desk could not make (or ask the session) says nothing about the product either
         run.log_event(step=i, action=label, ok=passed, detail=detail, seconds=round(time.monotonic() - t0, 1))
         head, *rest = detail.splitlines() or [""]

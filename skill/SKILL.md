@@ -244,7 +244,11 @@ expect = "Nothing here yet"  # waits until shown (name, value or text); role, ex
 shot = "empty-state"
 ```
 
-Other steps: `type`, `set_text = "Repository URL"` with `text = "/srv/repo"` (`role`, `exact`,
+Other steps: `type`, the machine's mouse at screen pixels read from a screenshot (`click = [x, y]`
+with `button` and `double = true`, which a click by name takes too; `move = [x, y]` to hover;
+`drag = [x1, y1, x2, y2]` with the left button, moved as a hand would; `scroll = [x, y, notches]`,
+positive down; a point off the screen fails the step as desk's, exit 2, with nothing clicked),
+`set_text = "Repository URL"` with `text = "/srv/repo"` (`role`, `exact`,
 `timeout`, `window` as on a `click`; `text = ""` empties it: the field's text replaced as `desk
 set-text` does, in a web page, a GTK/Qt application or a Windows one, and read back: a field that
 shows something else afterwards, a read-only one, fails the step and says what it shows),

@@ -152,6 +152,27 @@ def _btn(button: str, down: bool) -> dict:
     return {"type": "btn", "data": {"down": down, "button": button}}
 
 
+class OffScreen(DeskError):
+    """A point a step gives is not on the guest's screen: nothing was clicked, which says nothing
+    about the product."""
+
+
+def check_points(dom, points) -> None:
+    """All of `points` on a monitor of the guest, before any event is sent for them."""
+    sizes = screen_sizes(dom)
+    width = sum(w for w, _ in sizes)
+    for x, y in points:
+        left = 0
+        for i, (w, h) in enumerate(sizes):
+            if left <= x < left + w:
+                if not 0 <= y < h:
+                    raise OffScreen(f"({x},{y}) is below monitor {i + 1}, which is {h} pixels high")
+                break
+            left += w
+        else:
+            raise OffScreen(f"({x},{y}) is outside the screen, which is {width} pixels wide")
+
+
 class _Pointer:
     """Absolute pointer events in screen coordinates. With several monitors a point belongs to
     one of them, and QEMU takes its events for that GPU's console in the console's own pixels.

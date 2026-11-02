@@ -87,6 +87,16 @@ reboot = true
             'image = "a"\n[[step]]\nexpect = "x"\nbutton = "right"',
             'image = "a"\n[[step]]\ngui = "app"\ntimeout = 30',              # waits only with rc or output
             'image = "a"\n[[step]]\nset_text = "Repository URL"',           # what it gets is missing
+            'image = "a"\n[[step]]\nmove = [10]',
+            'image = "a"\n[[step]]\nmove = ["10", "20"]',
+            'image = "a"\n[[step]]\nmove = [10, -1]',
+            'image = "a"\n[[step]]\ndrag = [1, 2, 3]',
+            'image = "a"\n[[step]]\nscroll = [1, 2, 0]',
+            'image = "a"\n[[step]]\nscroll = [1, 2, 1.5]',
+            'image = "a"\n[[step]]\nclick = [1, 2, 3]',
+            'image = "a"\n[[step]]\nclick = [1, 2]\nrole = "button"',       # role finds by name
+            'image = "a"\n[[step]]\nmove = [1, 2]\nbutton = "right"',
+            'image = "a"\n[[step]]\nclick = [1, true]',
             'image = "a"\n[[step]]\nset_text = "URL"\ntext = 5',
             'image = "a"\n[[step]]\nclick = "URL"\ntext = "x"',
             'image = "a"\n[[step]]\ngui = "app"\nuntil = true',
@@ -372,7 +382,7 @@ class OtherWindows(unittest.TestCase):
             s.click("Example", button="right", window="overflow")
         self.assertTrue(snapshot.call_args.kwargs["all_windows"])
         self.assertEqual(point.call_args.args[1]["pid"], 2)  # the icon, not the window of the same name
-        display.click.assert_called_once_with("dom", 1046, 715, button="right", run=target)
+        display.click.assert_called_once_with("dom", 1046, 715, button="right", count=1, run=target)
 
     def test_no_such_window_says_which_there_are(self):
         s, _ = self.steps()
@@ -528,6 +538,54 @@ class SetText(unittest.TestCase):
                 self.assertRaisesRegex(DeskError, "entry 'Repository URL' did not take '/srv/x': "
                                                   "the field shows 'read only' afterwards"):
             s.set_text("Repository URL", "/srv/x")
+
+
+class PointerSteps(unittest.TestCase):
+    """The machine's mouse at screen pixels: click [x, y], move, drag, scroll."""
+
+    def steps(self):
+        from desk import steps
+
+        target = SimpleNamespace(agent_port=0, dom=lambda: "dom")
+        return steps.Steps(SimpleNamespace(family="linux", need_desktop=lambda what: None), target), target
+
+    def test_loads(self):
+        data = scenario.load(write('image = "a"\n[[step]]\nclick = [640, 400]\nbutton = "right"\n'
+                                   '[[step]]\nclick = "Open"\ndouble = true\n[[step]]\nmove = [10, 20]\n'
+                                   '[[step]]\ndrag = [1, 2, 300, 400]\n[[step]]\nscroll = [5, 5, -3]'))
+        self.assertEqual([scenario.describe(st)[0] for st in data["step"]],
+                         ["click", "click", "move", "drag", "scroll"])
+
+    def test_each_goes_to_its_display_function_after_the_points_are_checked(self):
+        s, target = self.steps()
+        with mock.patch("desk.steps.display") as display:
+            s.pointer("click", [640, 400], "right", 2)
+            s.pointer("drag", [1, 2, 300, 400])
+            s.pointer("scroll", [5, 5, -3])
+            s.pointer("move", [10, 20])
+        self.assertEqual(display.check_points.call_args_list[1].args, ("dom", [(1, 2), (300, 400)]))
+        display.click.assert_called_once_with("dom", 640, 400, button="right", count=2, run=target)
+        display.drag.assert_called_once_with("dom", 1, 2, 300, 400, run=target)
+        display.scroll.assert_called_once_with("dom", 5, 5, -3, run=target)
+        display.move.assert_called_once_with("dom", 10, 20, run=target)
+
+    def test_a_point_off_the_screen_sends_nothing_and_is_desks_failure(self):
+        from desk import display
+
+        s, _ = self.steps()
+        with mock.patch("desk.display.screen_sizes", return_value=[(1280, 800)]), \
+                mock.patch("desk.display.qmp") as qmp, \
+                self.assertRaisesRegex(display.OffScreen, r"\(1300,10\) is outside the screen, which is 1280"):
+            s.pointer("drag", [10, 10, 1300, 10])
+        qmp.assert_not_called()  # not even the press, which a drag that ends off the screen once left down
+        with mock.patch("desk.display.screen_sizes", return_value=[(1280, 800)]), \
+                self.assertRaisesRegex(display.OffScreen, "below monitor 1, which is 800 pixels high"):
+            display.check_points("dom", [(10, 900)])
+        run = mock.Mock()
+        with mock.patch("desk.scenario._step", side_effect=display.OffScreen("off")), \
+                mock.patch("desk.scenario.Steps"), mock.patch("desk.scenario.display.screenshot"), \
+                self.assertRaises(display.OffScreen):
+            scenario._run_steps(run, LostConnection.SPEC, {"step": [{"move": [9999, 1], "soft": True}, {"exec": "x"}]})
 
 
 class SplitWindows(unittest.TestCase):
