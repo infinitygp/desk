@@ -126,6 +126,10 @@ function ShutdownNoise($e) {
     $e.Message -match 'OpenSSH SSH Server' -and
     @($boots | ? { $_ -gt $e.TimeCreated -and ($_ - $e.TimeCreated).TotalSeconds -lt 60 }).Count -gt 0
 }
+# DCOM 10016: Windows' own components asking each other without the permission, which Microsoft
+# calls expected (Security Center's brokers after every restore); it was nearly every report's
+# only warning, which taught readers to skip them.
+function Noise($e) { ($e.ProviderName -eq 'Microsoft-Windows-DistributedCOM' -and $e.Id -eq 10016) -or (ShutdownNoise $e) }
 '=== failed'
 $scm = 7000, 7001, 7009, 7011, 7022, 7023, 7024, 7031, 7034
 Ev @{LogName='System'; ProviderName='Service Control Manager'; Id=$scm; StartTime=$S} |
@@ -133,7 +137,7 @@ Ev @{LogName='System'; ProviderName='Service Control Manager'; Id=$scm; StartTim
 # The in-session agent's ends (images/distros/windows-11/agent/agent-loop.ps1), in the guest's local time.
 Get-Content C:\desk\agent.log -ErrorAction SilentlyContinue | ? { $_ -match '^(\S+) ' -and [datetime]$Matches[1] -ge $S }
 '=== journal'
-Ev @{LogName='System','Application'; Level=1,2,3; StartTime=$S} | ? { -not (ShutdownNoise $_) } |
+Ev @{LogName='System','Application'; Level=1,2,3; StartTime=$S} | ? { -not (Noise $_) } |
     Select-Object -First 400 | % { Line $_ }
 '=== coredumps'
 Ev @{LogName='Application'; Id=1000,1002; StartTime=$S} | % { Line $_ }
