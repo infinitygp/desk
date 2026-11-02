@@ -20,12 +20,12 @@ ACTIONS = {"root", "exec", "gui", "focus", "click", "type", "key", "expect", "ex
            "reboot", "wait", "clock", "disk_add", "disk_rm", "console_errors", "prepare", "open", "viewport",
            "observe_start", "observe_stop", "mark"}
 OPTIONS = {"role", "exact", "timeout", "output", "rc", "name", "soft", "env", "step", "until", "anywhere", "browser",
-           "button", "window"}
+           "button", "window", "state"}
 # The options each action reads, besides name and soft; any other would be ignored without a word.
 READS = {
     "root": {"timeout", "output", "rc", "until"}, "exec": {"timeout", "output", "rc", "until"},
     "gui": {"env"}, "click": {"role", "exact", "timeout", "button", "window"}, "type": {"anywhere"},
-    "expect": {"role", "exact", "timeout"}, "expect_absent": {"role", "exact", "timeout"},
+    "expect": {"role", "exact", "timeout", "window", "state"}, "expect_absent": {"role", "exact", "timeout", "window"},
     "reboot": {"timeout"}, "wait": {"timeout"}, "clock": {"step", "timeout"}, "disk_rm": {"timeout"},
     "open": {"timeout", "browser"}, "viewport": {"browser"},
 }
@@ -59,7 +59,11 @@ VALUES = {
     "viewport": (lambda v: isinstance(v, str) and (v == "reset" or re.fullmatch(r"[1-9]\d*x[1-9]\d*", v)),
                  "WIDTHxHEIGHT (390x700) or reset"),
     "role": (_text, "a text"), "output": (_text, "a text"), "name": (_text, "a text"), "step": (_text, "a text"),
-    "window": (_text, "a text"), "button": (lambda v: v in ("left", "right", "middle"), "left, right or middle"),
+    "window": (_text, "a text"),
+    "state": (lambda v: (_text(v) and v in a11y.STATES) or (isinstance(v, list) and bool(v) and set(v) <= a11y.STATES
+                                                            and all(_text(x) for x in v)),
+              "one of " + ", ".join(sorted(a11y.STATES)) + " or a list of them"),
+    "button": (lambda v: v in ("left", "right", "middle"), "left, right or middle"),
     "browser": (lambda v: isinstance(v, str) and v in browser.NAMES, " or ".join(sorted(browser.NAMES))),
     "timeout": (lambda v: _number(v) and v > 0, "seconds"),
     "rc": (lambda v: isinstance(v, int) and not isinstance(v, bool), "an exit code"),
@@ -403,16 +407,14 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
     elif action == "key":
         steps.key(*([value] if isinstance(value, str) else value))
     elif action == "expect":
-        node = steps.wait_for(value, role, step.get("exact", False), timeout or 30)
+        states = step.get("state")
+        node = steps.wait_for(value, role, step.get("exact", False), timeout or 30, step.get("window"),
+                              [states] if isinstance(states, str) else states)
         return a11y.format_node(node, indent=False)
     elif action == "expect_absent":
         # Absent while the page is still loading proves nothing; at least let the screen settle.
         steps.settle()
-        deadline = time.monotonic() + (timeout or 30)
-        while a11y.find(run, value, role, step.get("exact", False), save=False):
-            if time.monotonic() > deadline:
-                raise StepFailed(f"{value!r} is still on screen")
-            time.sleep(1)
+        steps.wait_gone(value, role, step.get("exact", False), timeout or 30, step.get("window"))
     elif action == "shot":
         png, _ = display.wait_stable(run.dom(), timeout=3)
         path = run.next_shot_path(value)
@@ -573,7 +575,7 @@ def _run_steps(run, spec, data: dict, first: int = 1, observed: dict | None = No
             if isinstance(e, guest.NoConnection):
                 lost = guest.NoConnection(f"{e}; {runs.host_state(run)}")
                 detail = str(lost)
-            elif isinstance(e, (browser.Unchecked, ObserveError, winagent.AgentGone)):
+            elif isinstance(e, (browser.Unchecked, ObserveError, winagent.AgentGone, a11y.Unread)):
                 lost = e  # a check desk could not make (or ask the session) says nothing about the product either
         run.log_event(step=i, action=label, ok=passed, detail=detail, seconds=round(time.monotonic() - t0, 1))
         head, *rest = detail.splitlines() or [""]

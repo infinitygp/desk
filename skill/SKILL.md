@@ -217,8 +217,9 @@ several), copies the newest file matching each `artifacts` pattern (relative to 
 to `/tmp/desk/` in the guest, starts a run of `image`, executes the steps in order and stops at
 the first failure with a screenshot. Exit code 0 or 1, and 2 when a step lost SSH to the guest (a
 step that reboots it with a command says `rc = 255`; a connection the guest resets in the
-handshake is tried again first) or could not reach a Windows guest's in-session agent: then the
-message says whether the VM still runs and what the host had (free disk, memory, swap, other
+handshake is tried again first), could not reach a Windows guest's in-session agent or could not
+read the accessibility tree for as long as it waited (`expect`, `expect_absent`, `click`); after a
+lost SSH the message says whether the VM still runs and what the host had (free disk, memory, swap, other
 runs), as a full disk ends a VM; the report (and the video with `record = true`) shows every step
 in its timeline.
 
@@ -238,7 +239,7 @@ key = "f5"                   # one combo or a list
 click = "Foo"                # by accessible name in the focused window; role, exact (default true), button
 role = "link"
 [[step]]
-expect = "Nothing here yet"  # waits until shown (name, value or text); role, exact, timeout
+expect = "Nothing here yet"  # waits until shown (name, value or text); role, exact, timeout, window, state
 [[step]]
 shot = "empty-state"
 ```
@@ -251,8 +252,12 @@ need quotes, or give a list), `expect_absent` (after a reload, first
 (repeat it every 2 s until it gives the expected `rc`/`output`, `timeout` 120 s by default: a
 service coming up; an `exec`/`root` step that runs out of its `timeout`, 600 s without `until`, is
 stopped in the guest and fails as "still running"), `timeout` on a `click` (how long to wait for
-the element, 60 s by default), `button = "right"` (or `"middle"`) on a `click`, `window = "TEXT"` on
-a `click` (look for the element in the windows whose title or application contains TEXT instead of
+the element, 60 s by default), `button = "right"` (or `"middle"`) on a `click`, `state =
+"focused"` on an `expect` (or `checked`, `selected`, `expanded`, `pressed`, `editable`, `active`,
+`disabled`, or a list of them: the element must have them all; of several elements with the name, the
+one that has them, so `expect = "Device"` with `state = "focused"` asks which element has the
+keyboard focus; one that is there without them fails and says which states it has), `window =
+"TEXT"` on a `click`, `expect` or `expect_absent` (look for the element in the windows whose title or application contains TEXT instead of
 the focused one: the taskbar, `window = "explorer"` on Windows, where it has no title, or a tray's
 flyout, `"System tray overflow window."`, which stays open after a choice in a tray menu and whose
 arrow reads `Show Hidden Icons Hide` while it is open; GNOME's top bar, its indicators (tray icons)

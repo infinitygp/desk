@@ -84,7 +84,11 @@ reboot = true
             'image = "a"\n[[step]]\nclick = "x"\nbrowser = "chromium"',
             'image = "a"\n[[step]]\nclick = "x"\nbutton = "double"',
             'image = "a"\n[[step]]\nclick = "x"\nwindow = ""',
-            'image = "a"\n[[step]]\nexpect = "x"\nwindow = "Taskbar"',
+            'image = "a"\n[[step]]\nexpect = "x"\nbutton = "right"',
+            'image = "a"\n[[step]]\nexpect = "x"\nstate = "visible"',        # no listing gives it
+            'image = "a"\n[[step]]\nexpect = "x"\nstate = []',
+            'image = "a"\n[[step]]\nexpect_absent = "x"\nstate = "focused"',  # absent has no state
+            'image = "a"\n[[step]]\nclick = "x"\nstate = "focused"',
             'image = "a"\n[[step]]\ntype = "x"\nbutton = "right"',
         ):
             with self.subTest(text=text), self.assertRaises(DeskError):
@@ -370,6 +374,69 @@ class OtherWindows(unittest.TestCase):
                 self.assertRaisesRegex(DeskError, "no window with 'Taskbar' in its title or application name.*"
                                                   r"'System tray overflow window\.' \(explorer\)"):
             s.wait_for("Show Hidden Icons", window="Taskbar", timeout=0.01)
+
+
+class ExpectState(unittest.TestCase):
+    """`expect` with a state the element must have, and `window` on expect and expect_absent."""
+
+    SNAP = {"tops": [{"app": "example-app", "pid": 1, "title": "Example", "focus": True, "start": 0},
+                     {"app": "gnome-shell", "pid": 2, "title": "Main stage", "focus": False, "start": 2}],
+            "nodes": [{"pid": 1, "path": [0, 1], "role": "push button", "name": "Devices", "states": [],
+                       "bbox": [0, 0, 80, 30]},
+                      {"pid": 1, "path": [0, 2], "role": "combo box", "name": "Device", "states": ["focused"],
+                       "bbox": [0, 40, 80, 30]},
+                      {"pid": 2, "path": [0, 0], "role": "menu", "name": "Example", "states": [],
+                       "bbox": [1150, 0, 30, 30]}],
+            "truncated": False}
+
+    def steps(self):
+        from desk import steps
+
+        target = SimpleNamespace(agent_port=0, dom=lambda: "dom")
+        return steps.Steps(SimpleNamespace(family="linux", need_desktop=lambda what: None), target)
+
+    def test_the_element_that_has_the_state(self):
+        with mock.patch("desk.a11y.snapshot", return_value=self.SNAP):
+            # "Devices" comes first and contains "Device" too, but has no focus.
+            self.assertEqual(self.steps().wait_for("Device", exact=False, states=["focused"])["role"], "combo box")
+
+    def test_there_but_without_the_state_names_it(self):
+        with mock.patch("desk.a11y.snapshot", return_value=self.SNAP), mock.patch("desk.steps.time.sleep"), \
+                self.assertRaisesRegex(DeskError, "'Devices' is there but not checked within 0s; "
+                                                  "it is in no such state"):
+            self.steps().wait_for("Devices", states=["checked"], timeout=0.01)
+
+    def test_another_window_for_expect_absent(self):
+        s = self.steps()
+        focused = {**self.SNAP, "tops": self.SNAP["tops"][:1], "nodes": self.SNAP["nodes"][:2]}
+
+        def snapshot(run, all_windows=False, **kw):
+            return self.SNAP if all_windows else focused
+
+        with mock.patch("desk.a11y.snapshot", side_effect=snapshot), mock.patch("desk.steps.time.sleep"):
+            s.wait_gone("Example", role="menu", timeout=0.01)  # not in the focused window
+            with self.assertRaisesRegex(DeskError, "'Example' is still on screen"):
+                s.wait_gone("Example", role="menu", window="gnome-shell", timeout=0.01)
+
+    def test_a_tree_that_could_not_be_read_is_desks_failure_not_the_products(self):
+        from desk import a11y
+
+        s = self.steps()
+        broken = DeskError("a11y helper failed: Couldn't connect to accessibility bus")
+        with mock.patch("desk.a11y.snapshot", side_effect=broken), mock.patch("desk.steps.time.sleep"):
+            for wait in (lambda: s.wait_for("Configure", timeout=0.01), lambda: s.wait_gone("Quit", timeout=0.01)):
+                with self.subTest(wait=wait), self.assertRaisesRegex(a11y.Unread, "accessibility bus"):
+                    wait()
+        run = mock.Mock()
+        with mock.patch("desk.scenario._step", side_effect=a11y.Unread("could not be read")), \
+                mock.patch("desk.scenario.Steps"), mock.patch("desk.scenario.display"), \
+                self.assertRaises(a11y.Unread):
+            scenario._run_steps(run, LostConnection.SPEC, {"step": [{"expect": "x", "soft": True}, {"exec": "true"}]})
+
+    def test_state_is_read_from_the_file(self):
+        data = scenario.load(write('image = "a"\n[[step]]\nexpect = "x"\nstate = ["focused", "checked"]\n'
+                                   'window = "Example"\n[[step]]\nexpect_absent = "y"\nwindow = "Example"'))
+        self.assertEqual(data["step"][0]["state"], ["focused", "checked"])
 
 
 class SplitWindows(unittest.TestCase):

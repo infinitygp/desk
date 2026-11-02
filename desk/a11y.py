@@ -200,6 +200,14 @@ def locate_ref(run, ref: str) -> tuple[int, int]:
 
 
 # ARIA's names for roles, which agents testing web pages think in, for AT-SPI's.
+# The states snapshots give an element (guest_a11y.describe, uia.ps1), which `expect` can require.
+STATES = {"focused", "checked", "selected", "expanded", "pressed", "editable", "active", "disabled"}
+
+
+class Unread(DeskError):
+    """The accessibility tree could not be read: desk did not look, which says nothing about the product."""
+
+
 ROLE_ALIASES = {
     "tab": "page tab", "tablist": "page tab list", "tabpanel": "panel", "checkbox": "check box",
     "radio": "radio button", "textbox": "entry", "searchbox": "entry", "combobox": "combo box",

@@ -54,32 +54,66 @@ class Steps:
                 raise DeskError(f"starting {argv[0]} failed: {r.stderr.decode(errors='replace').strip()}")
         display.wait_change(dom, timeout=30, base=before)
 
+    def look(self, name: str, role: str | None, exact: bool, window: str | None) -> tuple[dict, dict, list[dict]]:
+        """The elements with this name in the focused window, or in the windows whose title or
+        application contains `window`; with the listing they come from, and the whole one."""
+        full = a11y.snapshot(self.target, all_windows=bool(window), limit=2000, save=False)
+        snap = a11y.in_windows(full, window) if window else full
+        return full, snap, a11y._matches(snap, name, role, exact)
+
     def wait_for(self, name: str, role: str | None = None, exact: bool = True, timeout: float = 60,
-                 window: str | None = None) -> dict:
+                 window: str | None = None, states: list[str] | None = None) -> dict:
         """Until an element with this name (or value or text) is in the focused window, or in the
-        windows whose title or application contains `window` (the taskbar, a tray's flyout)."""
+        windows whose title or application contains `window` (the taskbar, a tray's flyout), and
+        has all of `states` (focused, checked, ...)."""
         deadline = time.monotonic() + timeout
-        snap = full = None
+        snap = full = error = None
+        hits = []
         while True:
             try:
-                full = a11y.snapshot(self.target, all_windows=bool(window), limit=2000, save=False)
-                snap = a11y.in_windows(full, window) if window else full
-                hits = a11y._matches(snap, name, role, exact)
+                full, snap, hits = self.look(name, role, exact, window)
             except guest.NoConnection:
                 raise  # a guest that does not answer is not a window still coming up
-            except DeskError:
-                hits = []  # the window is still coming up
-            if hits:
+            except DeskError as e:
+                error = e  # the window is still coming up
+            fit = [n for n in hits if set(states or ()) <= set(n["states"])]
+            if fit:
                 self.snap = snap
-                return hits[0]
+                return fit[0]
             if time.monotonic() > deadline:
-                if window and snap is not None and not snap["tops"]:
+                if full is None:
+                    raise a11y.Unread(f"the accessibility tree could not be read within {timeout:.0f}s: {error}")
+                if hits:
+                    raise DeskError(f"{role or 'element'} {name!r} is there but not {' and '.join(states)} within "
+                                    f"{timeout:.0f}s; it is {', '.join(hits[0]['states']) or 'in no such state'}")
+                if window and not snap["tops"]:
                     there = ", ".join(f"{t['title']!r} ({t['app']})" for t in full["tops"])
                     raise DeskError(f"no window with {window!r} in its title or application name within "
                                     f"{timeout:.0f}s; there are: {there or 'none'}")
                 raise DeskError(f"{role or 'element'} {name!r} did not appear"
                                 + (f" in a window of {window!r}" if window else "") + f" within {timeout:.0f}s"
                                 + a11y.explain_missing(self.target, full, name))
+            time.sleep(1)
+
+    def wait_gone(self, name: str, role: str | None = None, exact: bool = False, timeout: float = 30,
+                  window: str | None = None) -> None:
+        """Until no element with this name is in the focused window (or those of `window`), as read
+        from a listing: one that could not be read shows nothing gone."""
+        deadline = time.monotonic() + timeout
+        error = None
+        while True:
+            try:
+                if not self.look(name, role, exact, window)[2]:
+                    return
+                error = None
+            except guest.NoConnection:
+                raise
+            except DeskError as e:
+                error = e
+            if time.monotonic() > deadline:
+                if error:
+                    raise a11y.Unread(f"the accessibility tree could not be read within {timeout:.0f}s: {error}")
+                raise DeskError(f"{name!r} is still on screen")
             time.sleep(1)
 
     def first(self, *candidates: tuple[str, str | None], timeout: float = 60, exact: bool = True) -> int:
