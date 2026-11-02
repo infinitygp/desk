@@ -98,6 +98,8 @@ reboot = true
             'image = "a"\n[[step]]\nmove = [1, 2]\nbutton = "right"',
             'image = "a"\n[[step]]\nclick = [1, true]',
             'image = "a"\n[[step]]\nrelease = true',                         # nothing pressed
+            'image = "a"\n[[step]]\npull = "/home/tester/a.tar"',            # to where
+            'image = "a"\n[[step]]\nexec = "x"\nto = "out/"',
             'image = "a"\n[[step]]\npress = "A"\n[[step]]\npress = "B"',   # still held
             'image = "a"\n[[step]]\npress = [1, 2]\nrole = "button"',
             'image = "a"\n[[step]]\ndrag = ["A"]',
@@ -703,6 +705,61 @@ class HoldAndRelease(unittest.TestCase):
                 mock.patch("desk.display.release") as release, self.assertRaises(DeskError):
             display.drag("dom", 1, 2, 3, 4)
         release.assert_called_once_with("dom", 3, 4, run=None)
+
+
+class Pull(unittest.TestCase):
+    """pull: a guest's file onto the host for a later scenario, its SHA-256 checked both sides."""
+
+    RUN = SimpleNamespace(ssh_port=1, user="tester", log_event=lambda **kw: None)
+    LINUX = SimpleNamespace(family="linux", shell="bash", root_user="root")
+
+    def pull(self, base, step, spec=None, guest_says=None, content=b"backup", scp_rc=0):
+        import hashlib
+
+        said = guest_says or subprocess.CompletedProcess([], 0, (hashlib.sha256(b"backup").hexdigest() + "  -\n")
+                                                         .encode(), b"")
+
+        def scp(port, src, dst, timeout=None):
+            if scp_rc == 0:
+                Path(dst).write_bytes(content)
+            return scp_rc
+
+        with mock.patch("desk.scenario.guest.ssh_run", return_value=said), \
+                mock.patch("desk.scenario.guest.scp", side_effect=scp) as copied:
+            return scenario._pull(self.RUN, spec or self.LINUX, base, step), copied
+
+    def test_into_a_folder_with_its_size_and_sum(self):
+        import hashlib
+
+        with tempfile.TemporaryDirectory() as top:
+            said, copied = self.pull(Path(top), {"pull": "/home/tester/Documents/fedora-full.backup",
+                                                 "to": "target/desk-handoff/"})
+            dest = Path(top, "target/desk-handoff/fedora-full.backup")
+            self.assertEqual(dest.read_bytes(), b"backup")
+            self.assertEqual(said, f"{dest} (6 bytes, sha256 {hashlib.sha256(b'backup').hexdigest()})")
+            self.assertEqual(copied.call_args.args[1],
+                             "tester@127.0.0.1:/home/tester/Documents/fedora-full.backup")
+
+    def test_a_windows_path_keeps_its_name(self):
+        windows = SimpleNamespace(family="windows", cmd=lambda script: script)
+        with tempfile.TemporaryDirectory() as top:
+            said, _ = self.pull(Path(top), {"pull": "C:/Users/tester/windows-expected.txt", "to": "out/"}, windows)
+            self.assertTrue(Path(top, "out/windows-expected.txt").exists())
+
+    def test_no_such_file_in_the_guest_is_a_failed_step(self):
+        gone = subprocess.CompletedProcess([], 3, b"", b"")
+        with tempfile.TemporaryDirectory() as top, \
+                self.assertRaisesRegex(scenario.StepFailed, "no file /home/tester/x in the guest"):
+            self.pull(Path(top), {"pull": "/home/tester/x", "to": "out/"}, guest_says=gone)
+
+    def test_a_copy_that_differs_or_fails_is_desks_failure(self):
+        from desk.config import NotDone
+
+        with tempfile.TemporaryDirectory() as top:
+            with self.assertRaisesRegex(NotDone, "has SHA-256 .*, the guest's /home/tester/x"):
+                self.pull(Path(top), {"pull": "/home/tester/x", "to": "out/"}, content=b"truncat")
+            with self.assertRaisesRegex(NotDone, r"copying /home/tester/x to .* failed \(scp exit 1\)"):
+                self.pull(Path(top), {"pull": "/home/tester/x", "to": "out/"}, scp_rc=1)
 
 
 class SplitWindows(unittest.TestCase):

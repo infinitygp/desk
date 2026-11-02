@@ -3,13 +3,14 @@ host, starts a run and drives it step by step with the same real input as the de
 The result is an exit code and the usual report, with the steps in its timeline."""
 
 import glob
+import hashlib
 import re
 import shlex
 import subprocess
 import time
 import tomllib
 from datetime import UTC
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from . import a11y, browser, clock, disks, display, evidence, guest, record, runs, usb, winagent
 from .config import DeskError, NotDone, load_image
@@ -18,15 +19,16 @@ from .steps import Steps
 # Exactly one per step; the value is the action's argument.
 ACTIONS = {"root", "exec", "gui", "focus", "click", "type", "key", "expect", "expect_absent", "shot",
            "reboot", "wait", "clock", "disk_add", "disk_rm", "console_errors", "prepare", "open", "viewport",
-           "observe_start", "observe_stop", "mark", "set_text", "move", "drag", "scroll", "press", "release", "win"}
+           "observe_start", "observe_stop", "mark", "set_text", "move", "drag", "scroll", "press", "release", "win",
+           "pull"}
 OPTIONS = {"role", "exact", "timeout", "output", "rc", "name", "soft", "env", "step", "until", "anywhere", "browser",
-           "button", "window", "state", "text", "double"}
+           "button", "window", "state", "text", "double", "to"}
 # The options each action reads, besides name and soft; any other would be ignored without a word.
 READS = {
     "root": {"timeout", "output", "rc", "until"}, "exec": {"timeout", "output", "rc", "until"},
     "gui": {"env", "rc", "output", "timeout", "until"}, "type": {"anywhere"},
     "click": {"role", "exact", "timeout", "button", "window", "double"},
-    "set_text": {"text", "role", "exact", "timeout", "window"},
+    "set_text": {"text", "role", "exact", "timeout", "window"}, "pull": {"to", "timeout"},
     # By name; a point [x, y] takes none of these (load says so), press takes button either way.
     "move": {"role", "exact", "timeout", "window"}, "drag": {"role", "exact", "timeout", "window"},
     "press": {"role", "exact", "timeout", "window", "button"}, "release": {"role", "exact", "timeout", "window"},
@@ -59,6 +61,8 @@ VALUES = {
                                       "clock", "disk_add", "disk_rm", "mark", "set_text")},
     "click": (lambda v: _text(v) or _pixels(v, 2), "a name, or [x, y] in screen pixels"),
     "win": (_text, "what follows desk win, e.g. \"taskbar --align left\""),
+    "pull": (_text, "a file in the guest"),
+    "to": (_text, "a folder (ending in /) or file on the host, relative to where [build] runs"),
     "move": (lambda v: _text(v) or _pixels(v, 2), "an element's name, or [x, y] in screen pixels"),
     "drag": (lambda v: _pixels(v, 4) or (isinstance(v, list) and len(v) == 2 and all(_text(x) for x in v)),
              "[x1, y1, x2, y2] in screen pixels or [\"from name\", \"to name\"]"),
@@ -199,6 +203,8 @@ def load(path: Path) -> dict:
                 winsettings.parse(split_windows(step["win"]))
             except DeskError as e:
                 raise DeskError(f"{path}: step {i}: {e}") from None
+        if action == "pull" and "to" not in step:
+            raise DeskError(f"{path}: step {i}: pull names the file in the guest; to = \"dir/\" is where it goes")
         if action == "set_text" and "text" not in step:
             raise DeskError(f"{path}: step {i}: set_text names the field; text = \"...\" is what it gets")
         if action == "gui" and not {"rc", "output"} & set(step) and {"timeout", "until"} & set(step):
@@ -505,6 +511,42 @@ def _checked_command(step: dict, once, lost) -> str:
     raise StepFailed("\n".join(shown))
 
 
+def _pull(run, spec, base: Path, step: dict) -> str:
+    """A file of the guest copied to the host for a later scenario to take as an artifact, with the
+    SHA-256 the guest computes checked against the copy's."""
+    src = step["pull"]
+    dest = base / step["to"]
+    if step["to"].endswith(("/", "\\")) or dest.is_dir():
+        dest = dest / (PureWindowsPath(src) if spec.family == "windows" else PurePosixPath(src)).name
+    if spec.family == "windows":
+        quoted = src.replace("'", "''")
+        script = (f"if (-not (Test-Path -LiteralPath '{quoted}' -PathType Leaf)) {{ exit 3 }}; "
+                  f"(Get-FileHash -Algorithm SHA256 -LiteralPath '{quoted}').Hash.ToLower()")
+    else:
+        script = f"test -f {shlex.quote(src)} || exit 3; sha256sum < {shlex.quote(src)}"
+    r = guest.ssh_run(run.ssh_port, run.user, guest.command(spec, [script], limit=600), capture=True, timeout=630)
+    guest.lost(r, run.ssh_port, run.user, f"step pull {src[:60]!r}")
+    if r.returncode == 3:
+        raise StepFailed(f"no file {src} in the guest")
+    said = r.stdout.decode(errors="replace").split()
+    if r.returncode != 0 or not said or not re.fullmatch(r"[0-9a-f]{64}", said[0]):
+        why = r.stderr.decode(errors="replace").strip()[-300:]
+        raise NotDone(f"the guest did not give the SHA-256 of {src}: {why or f'exit {r.returncode}'}")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    rc = guest.scp(run.ssh_port, f"{run.user}@127.0.0.1:{src}", str(dest), timeout=step.get("timeout", 600))
+    if rc != 0:
+        raise NotDone(f"copying {src} to {dest} " + ("ran out of time" if rc == 124 else f"failed (scp exit {rc})"))
+    digest = hashlib.sha256()
+    with dest.open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            digest.update(chunk)
+    if digest.hexdigest() != said[0]:
+        raise NotDone(f"{dest} has SHA-256 {digest.hexdigest()}, the guest's {src} {said[0]}")
+    size = dest.stat().st_size
+    run.log_event(pulled=str(dest), bytes=size, sha256=said[0])
+    return f"{dest} ({size} bytes, sha256 {said[0]})"
+
+
 def _find(step: dict) -> dict:
     """How a step that takes an element's name finds it, as click does."""
     return {"role": step.get("role"), "exact": step.get("exact", True), "timeout": step.get("timeout", 60),
@@ -544,6 +586,8 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
         from . import winsettings
 
         return winsettings.apply(run, spec, winsettings.parse(split_windows(value)))
+    elif action == "pull":
+        return _pull(run, spec, steps.base, step)
     elif action == "set_text":
         return steps.set_text(value, step["text"], role, step.get("exact", True), timeout or 60, step.get("window"))
     elif action == "type":
@@ -653,7 +697,7 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None, no_bu
             usb.add(run, device)
         # The run's end (evidence.finish) stops and collects whatever is still open, failure or not.
         _observe_before(run, path, data)
-        ok = _run_steps(run, runs.spec_for(run), data, observed=observations(path, data))
+        ok = _run_steps(run, runs.spec_for(run), data, observed=observations(path, data), base=base)
     finally:
         # Also when the VM is gone: the steps and why the guest was lost are in its directory.
         report, videos = evidence.finish(run, keep=keep, running=keep, stopped=True)
@@ -684,7 +728,8 @@ def continue_scenario(path: Path, run, first: int, image: str | None = None) -> 
     run.log_event(scenario=str(path.resolve()), steps=total, first=first)
     if first == 1:
         _observe_before(run, path, data)
-    ok = _run_steps(run, runs.spec_for(run), data, first, observed=observations(path, data))
+    ok = _run_steps(run, runs.spec_for(run), data, first, observed=observations(path, data),
+                    base=_base(path, for_image(data, spec.name)))
     print(f"steps {first}-{total} passed" if ok else "scenario FAILED")
     print(f"run {run.id} still running: desk down {run.id} writes the report")
     return ok
@@ -703,13 +748,15 @@ def _warn(data: dict) -> None:
         print(f"warning: {w}", flush=True)
 
 
-def _run_steps(run, spec, data: dict, first: int = 1, observed: dict | None = None) -> bool:
+def _run_steps(run, spec, data: dict, first: int = 1, observed: dict | None = None,
+               base: Path | None = None) -> bool:
     """Steps `first`.. in order, stopping at the first failure that is not soft; whether all passed."""
     from .observe import ObserveError
 
     ok = True
     steps = Steps(spec, run)
     steps.observations = observed or {}
+    steps.base = base or Path.cwd()  # where pull's `to` is, as [build]'s artifacts are
     try:
         for i, step in enumerate(data.get("step", []), 1):
             if i < first:

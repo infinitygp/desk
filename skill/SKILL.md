@@ -258,6 +258,11 @@ drag in progress, a `move` with it held glides there for drag-and-drop, and `rel
 go where the pointer is, or after gliding to a name or [x, y]; a button still held when the steps
 end or one fails is let go),
 `win = "taskbar --align left"` (Windows settings, the words of `desk win`: windows.md),
+`pull = "/home/tester/Documents/full.backup"` with `to = "target/handoff/"` (a file of the guest
+copied to the host, relative to where `[build]` runs, for a later scenario to take as an artifact:
+a backup made on one image and restored on another; Windows paths as `C:/Users/tester/x`; the step
+says its size and SHA-256, which the guest computed and the copy matched; no such file fails the
+step, a copy that failed or differs fails it as desk's, exit 2),
 `set_text = "Repository URL"` with `text = "/srv/repo"` (`role`, `exact`,
 `timeout`, `window` as on a `click`; `text = ""` empties it: the field's text replaced as `desk
 set-text` does, in a web page, a GTK/Qt application or a Windows one, and read back: a field that
