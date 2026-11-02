@@ -35,22 +35,45 @@ class Focus(unittest.TestCase):
 
 
 class SetText(unittest.TestCase):
-    SPEC = {"pid": 1, "path": [0], "role": "document", "name": "Text editor"}
+    """A field's text on Windows: a click into it and real keys, as a web view's page sees only those
+    (UI Automation's SetValue changed what WebView2 reported, not the page), then read back."""
 
-    def replace(self, answer: dict, text: str, role: str = "document") -> str:
-        with mock.patch("desk.a11y._helper", return_value=answer):
-            return a11y.replace_text(RUN, {**self.SPEC, "role": role}, text)
+    SPEC = {"pid": 1, "path": [0, 3], "role": "entry", "name": "Search actions and widgets"}
+    RUN = SimpleNamespace(agent_port=1, dom=lambda: "dom")
 
-    def test_the_field_holds_the_text(self):
-        self.assertEqual(self.replace({"done": True, "text": "line one\rline two"}, "line one\nline two"), "")
+    def replace(self, text: str, value: str | None = None, role: str = "entry", answer: dict | None = None):
+        node = {**self.SPEC, "role": role, "value": value} if value is not None else {**self.SPEC, "role": role}
+        with mock.patch("desk.a11y._visible_point", return_value=(123, 202)), \
+                mock.patch("desk.a11y.display") as display, \
+                mock.patch("desk.a11y.snapshot", return_value={"nodes": [node]}), \
+                mock.patch("desk.a11y._helper", return_value=answer or {}) as helper:
+            display.key_plan.side_effect = lambda t, layout: None if "\n" in t else [[30]] * len(t)
+            said = a11y.replace_text(self.RUN, {**self.SPEC, "role": role}, text)
+        return said, display, helper
+
+    def test_typed_and_read_back(self):
+        said, display, helper = self.replace("zażółć", value="zażółć")
+        self.assertEqual(said, "")
+        display.click.assert_called_once_with("dom", 123, 202, run=self.RUN)
+        self.assertEqual(display.key.call_args_list[0].args, ("dom", "ctrl+a"))
+        helper.assert_not_called()  # no SetValue
 
     def test_the_field_holds_something_else(self):
-        self.assertEqual(self.replace({"done": True, "text": "12345"}, "1234567890"),
-                         "the field shows '12345' afterwards")
+        self.assertEqual(self.replace("1234567890", value="12345")[0], "the field shows '12345' afterwards")
 
-    def test_a_field_that_does_not_tell(self):
-        self.assertEqual(self.replace({"done": True, "text": None}, "secret"), "")
-        self.assertEqual(self.replace({"done": True, "text": "••••"}, "secret", role="password text"), "")
+    def test_an_emptied_field_that_chromium_reports_as_its_name(self):
+        said, display, _ = self.replace("", value="Search actions and widgets")
+        self.assertEqual(said, "")
+        self.assertEqual(display.key.call_args_list[-1].args, ("dom", "delete"))
+
+    def test_what_the_keyboard_cannot_type_goes_through_ui_automation_and_says_so(self):
+        answer = {"done": True, "text": "line one\rline two"}
+        said, _, helper = self.replace("line one\nline two", answer=answer)
+        self.assertIn("set through UI Automation only", said)
+        self.assertEqual(helper.call_args.args[1], "set-text")
+
+    def test_a_password_box_does_not_tell(self):
+        self.assertEqual(self.replace("secret", value="••••", role="password text")[0], "")
 
 
 class Scale(unittest.TestCase):

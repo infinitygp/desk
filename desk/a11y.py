@@ -393,40 +393,73 @@ def _shown(text: str) -> str:
     return " ".join(text.replace("\ufffc", " ").split())[:400]
 
 
-def replace_text(run, spec: dict, text: str, layout: str = "us") -> str:
-    if run.agent_port:
-        shown = _helper(run, "set-text", json.dumps(spec), text).get("text")
-        if shown is None or spec["role"] == "password text" or _shown(shown) == _shown(text):
-            return ""
-        return f"the field shows {_shown(shown)!r} afterwards"
-    if not _helper(run, "edit", json.dumps(spec))["focused"]:
-        _helper(run, "set-text", json.dumps(spec), text)
-        return ("the field did not take the keyboard focus, so its text was replaced through AT-SPI only, "
-                "which a web page does not notice; click into it and use desk type")
-    dom = run.dom()
-    display.key(dom, "ctrl+a")
+def _type_over(dom, text: str, layout: str) -> bool:
+    """Select all in the field that has the focus and type `text` over it with real keys, as a user
+    does; False, having pressed nothing, when the keyboard cannot type it."""
     try:
         # Newlines and tabs typed would be Return and Tab: a form submitted, the focus moved.
         plan = None if any(c in text for c in "\n\t\r") else display.key_plan(text, layout)
     except DeskError:
         plan = None
+    if text and plan is None:
+        return False
+    display.key(dom, "ctrl+a")
     if not text:
         display.key(dom, "delete")
-    elif plan is not None:
-        for codes in plan:
-            display.chord(dom, codes)
-    else:
+    for codes in plan or []:
+        display.chord(dom, codes)
+    return True
+
+
+def replace_text(run, spec: dict, text: str, layout: str = "us") -> str:
+    if run.agent_port:
+        return _replace_text_windows(run, spec, text, layout)
+    if not _helper(run, "edit", json.dumps(spec))["focused"]:
+        _helper(run, "set-text", json.dumps(spec), text)
+        return ("the field did not take the keyboard focus, so its text was replaced through AT-SPI only, "
+                "which a web page does not notice; click into it and use desk type")
+    dom = run.dom()
+    if not _type_over(dom, text, layout):
         try:
             _helper(run, "clipboard", json.dumps(text))
         except DeskError:
             _helper(run, "set-text", json.dumps(spec), text)
             return ("the text has characters the keyboard cannot type and this image cannot paste "
                     "(desk image warm), so it was replaced through AT-SPI only, which a web page does not notice")
+        display.key(dom, "ctrl+a")
         display.key(dom, "ctrl+v")
     if spec["role"] == "password text":
         return ""  # it shows bullets, not the text
     shown = _helper(run, "read", json.dumps(spec))["text"]
     return "" if shown == _shown(text) else f"the field shows {shown!r} afterwards"
+
+
+def _replace_text_windows(run, spec: dict, text: str, layout: str) -> str:
+    # UI Automation's SetValue changes what a web view (WebView2, Chromium) reports, not the page,
+    # whose script keeps its own state while the screen shows the old text: a click into the field
+    # and real keys, as a user does, reach every kind of field.
+    dom = run.dom()
+    x, y = _visible_point(run, spec)
+    display.click(dom, x, y, run=run)
+    if not _type_over(dom, text, layout):
+        shown = _helper(run, "set-text", json.dumps(spec), text).get("text")
+        note = ("the text has characters the keyboard cannot type, so it was set through UI Automation only, "
+                "which a web page does not notice")
+        if shown is None or _shown(shown) == _shown(text):
+            return note
+        return f"the field shows {_shown(shown)!r} afterwards"
+    if spec["role"] == "password text":
+        return ""
+    display.wait_stable(dom, timeout=2, frames=2)
+    node = next((n for n in snapshot(run, all_windows=True, limit=2000, save=False)["nodes"]
+                 if n["pid"] == spec["pid"] and n["path"] == spec["path"]), None)
+    if node is None:
+        raise Unread(f"{called(spec)} could not be read back after typing into it")
+    shown = node.get("value", "")
+    # Chromium reports an empty field's value as its name.
+    if not text and shown in ("", node["name"]):
+        return ""
+    return "" if _shown(shown) == _shown(text) else f"the field shows {_shown(shown)!r} afterwards"
 
 
 # Web browsers as AT-SPI names them: their pages take keys pressed outside a text field as
