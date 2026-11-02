@@ -85,6 +85,9 @@ reboot = true
             'image = "a"\n[[step]]\nclick = "x"\nbutton = "double"',
             'image = "a"\n[[step]]\nclick = "x"\nwindow = ""',
             'image = "a"\n[[step]]\nexpect = "x"\nbutton = "right"',
+            'image = "a"\n[[step]]\ngui = "app"\ntimeout = 30',              # waits only with rc or output
+            'image = "a"\n[[step]]\ngui = "app"\nuntil = true',
+            'image = "a"\n[[step]]\nclick = "x"\nuntil = true',
             'image = "a"\n[[step]]\nexpect = "x"\nstate = "visible"',        # no listing gives it
             'image = "a"\n[[step]]\nexpect = "x"\nstate = []',
             'image = "a"\n[[step]]\nexpect_absent = "x"\nstate = "focused"',  # absent has no state
@@ -437,6 +440,55 @@ class ExpectState(unittest.TestCase):
         data = scenario.load(write('image = "a"\n[[step]]\nexpect = "x"\nstate = ["focused", "checked"]\n'
                                    'window = "Example"\n[[step]]\nexpect_absent = "y"\nwindow = "Example"'))
         self.assertEqual(data["step"][0]["state"], ["focused", "checked"])
+
+
+class GuiWaited(unittest.TestCase):
+    """A gui step with rc or output: the program in the session, waited for and checked like exec."""
+
+    def run_(self, agent_port=0):
+        return SimpleNamespace(ssh_port=1, user="tester", agent_port=agent_port)
+
+    SPEC = SimpleNamespace(root_user="root", family="linux", shell="bash", need_desktop=lambda what: None)
+
+    def test_loads_with_rc_output_timeout_until(self):
+        data = scenario.load(write('image = "a"\n[[step]]\ngui = "wl-paste"\noutput = "x"\ntimeout = 20\n'
+                                   'until = true\n[[step]]\ngui = ["msiexec.exe", "/i", "a.msi", "/qn"]\nrc = 0'))
+        self.assertEqual(len(data["step"]), 2)
+
+    def test_linux_in_the_session_with_its_limit_in_the_guest(self):
+        answer = subprocess.CompletedProcess([], 0, b"copied text\n", b"")
+        with mock.patch("desk.scenario.guest.ssh_run", return_value=answer) as ssh:
+            said = scenario._step(self.run_(), self.SPEC, mock.Mock(),
+                                  {"gui": "wl-paste", "output": "copied", "timeout": 20})
+        self.assertEqual(said, "copied text")
+        command = ssh.call_args.args[2]
+        self.assertIn("systemd-run --user", command)
+        self.assertIn("--wait --pipe", command)
+        self.assertIn("RuntimeMaxSec=20", command)
+
+    WINDOWS = SimpleNamespace(family="windows", need_desktop=lambda what: None)
+
+    def test_windows_through_the_agent_without_a_file_between(self):
+        with mock.patch("desk.scenario.winagent.request", return_value={"stdout": "3\r\n", "code": 0}) as agent:
+            said = scenario._step(self.run_(agent_port=2), self.WINDOWS, mock.Mock(),
+                                  {"gui": ["msiexec.exe", "/i", "a.msi", "/qn"], "rc": 0})
+        self.assertEqual(said, "3")
+        asked = agent.call_args.kwargs
+        self.assertEqual((asked["cmd"], asked["file"], asked["args"], asked["wait"], asked["timeout_s"]),
+                         ("run", "msiexec.exe", ["/i", "a.msi", "/qn"], True, 600))
+
+    def test_a_program_over_its_time_is_stopped_and_said_so(self):
+        with mock.patch("desk.scenario.winagent.request", return_value={"timeout": True, "stdout": "half"}), \
+                self.assertRaisesRegex(scenario.StepFailed, "still running after 5s, stopped"):
+            scenario._step(self.run_(agent_port=2), self.WINDOWS, mock.Mock(),
+                           {"gui": "powershell.exe -Command Start-Sleep 99", "rc": 0, "timeout": 5})
+
+    def test_without_rc_or_output_it_starts_the_program_as_before(self):
+        steps = mock.Mock()
+        with mock.patch("desk.scenario.guest.ssh_run") as ssh:
+            scenario._step(self.run_(), self.SPEC, steps, {"gui": "gnome-calculator"})
+        steps.gui.assert_called_once_with("gnome-calculator", env={})
+        ssh.assert_not_called()
 
 
 class SplitWindows(unittest.TestCase):

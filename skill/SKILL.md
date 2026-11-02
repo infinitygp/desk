@@ -246,7 +246,12 @@ shot = "empty-state"
 
 Other steps: `type`, `gui = "firefox https://..."` (with `env = {NAME = "value"}`; on Windows the
 string splits like a Windows command line, so `C:\path` stays as it is and paths with spaces
-need quotes, or give a list), `expect_absent` (after a reload, first
+need quotes, or give a list; it starts the program in the desktop session and waits until the
+screen changes; with `rc` or `output` it waits for the program to end instead and checks it like an
+`exec` step, as `exec --gui --wait`: what only the session has, its display for `wl-paste` or
+`xdotool`, UI Automation on Windows, an installer whose end matters (`gui = ["msiexec.exe", "/i",
+'C:\Users\tester\desk\app.msi', "/qn"]` with `rc = 0`), with `timeout` (600 s; stopped in the
+guest after it) and `until`), `expect_absent` (after a reload, first
 `expect` something that is always there, or the check passes on a half-loaded page), `reboot = true`,
 `wait = true` (screen still) or `wait = 2` (seconds), `until = true` on an `exec`/`root` step
 (repeat it every 2 s until it gives the expected `rc`/`output`, `timeout` 120 s by default: a

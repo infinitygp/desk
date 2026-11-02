@@ -24,7 +24,8 @@ OPTIONS = {"role", "exact", "timeout", "output", "rc", "name", "soft", "env", "s
 # The options each action reads, besides name and soft; any other would be ignored without a word.
 READS = {
     "root": {"timeout", "output", "rc", "until"}, "exec": {"timeout", "output", "rc", "until"},
-    "gui": {"env"}, "click": {"role", "exact", "timeout", "button", "window"}, "type": {"anywhere"},
+    "gui": {"env", "rc", "output", "timeout", "until"}, "type": {"anywhere"},
+    "click": {"role", "exact", "timeout", "button", "window"},
     "expect": {"role", "exact", "timeout", "window", "state"}, "expect_absent": {"role", "exact", "timeout", "window"},
     "reboot": {"timeout"}, "wait": {"timeout"}, "clock": {"step", "timeout"}, "disk_rm": {"timeout"},
     "open": {"timeout", "browser"}, "viewport": {"browser"},
@@ -158,8 +159,11 @@ def load(path: Path) -> dict:
             raise DeskError(f"{path}: step {i} needs exactly one of {sorted(ACTIONS)}, "
                             f"plus any of {sorted(OPTIONS)} (got {sorted(step)})")
         action = actions.pop()
-        if "until" in step and action not in ("exec", "root"):
-            raise DeskError(f"{path}: step {i}: until goes with exec or root")
+        if "until" in step and action not in ("exec", "root", "gui"):
+            raise DeskError(f"{path}: step {i}: until goes with exec, root or gui")
+        if action == "gui" and not {"rc", "output"} & set(step) and {"timeout", "until"} & set(step):
+            raise DeskError(f"{path}: step {i}: a gui step waits for the program only with rc or output, "
+                            "and timeout and until go with them")
         unread = set(step) - {action, "name", "soft"} - READS.get(action, set())
         if unread:
             takes = sorted(READS.get(action, set()) | {"name", "soft"})
@@ -346,23 +350,59 @@ def tail(text: str, lines: int = 15, chars: int = 1500) -> str:
 def _shell(run, spec, step: dict, as_root: bool) -> str:
     command = step["root" if as_root else "exec"]
     user = spec.root_user if as_root else run.user
+
+    def once(attempt: float) -> tuple[subprocess.CompletedProcess, bool]:
+        # Stopped in the guest when its time is up, as `desk exec` does: one that hangs would
+        # otherwise go on running there under the steps that follow.
+        try:
+            return guest.ssh_run(run.ssh_port, user, guest.command(spec, [command], limit=attempt), capture=True,
+                                 timeout=attempt + 30), False
+        except subprocess.TimeoutExpired as e:
+            return subprocess.CompletedProcess([], 124, e.stdout or b"", e.stderr or b""), True
+
+    return _checked_command(step, once, lambda r: guest.lost(r, run.ssh_port, user, f"step {command[:60]!r}"))
+
+
+def _gui_waited(run, spec, step: dict, argv: list[str], env: dict[str, str]) -> str:
+    """A program in the desktop session, waited for and checked like an exec step (exec --gui --wait):
+    what it sees there (the display, UI Automation, the session's environment) SSH does not."""
+    spec.need_desktop("a program in the session (gui)")
+
+    def once(attempt: float) -> tuple[subprocess.CompletedProcess, bool]:
+        if run.agent_port:
+            # The agent stops the program when its time is up.
+            reply = winagent.request(run, timeout=attempt + 30, cmd="run", file=argv[0], args=argv[1:] or None,
+                                     env=env or None, wait=True, timeout_s=attempt)
+            out, err = ((reply.get(k) or "").encode() for k in ("stdout", "stderr"))
+            stopped = bool(reply.get("timeout"))
+            return subprocess.CompletedProcess([], 124 if stopped else int(reply.get("code", 1)), out, err), stopped
+        try:
+            # systemd stops it (RuntimeMaxSec) when its time is up.
+            return guest.ssh_run(run.ssh_port, run.user,
+                                 guest.remote_command(argv, gui=True, wait=True, env=env, limit=attempt),
+                                 capture=True, timeout=attempt + 30), False
+        except subprocess.TimeoutExpired as e:
+            return subprocess.CompletedProcess([], 124, e.stdout or b"", e.stderr or b""), True
+
+    return _checked_command(step, once, None if run.agent_port else
+                            lambda r: guest.lost(r, run.ssh_port, run.user, f"step {argv[0][:60]!r}"))
+
+
+def _checked_command(step: dict, once, lost) -> str:
+    """Runs a command (`once`, given the seconds it may take; it says whether it was stopped) until it
+    gives the step's rc and output, once or (until) every 2 s for the step's time; `lost` tells ssh's
+    255 from the command's."""
     # until: the same command every 2 s until it does what the step expects, e.g. a service is up.
     limit = step.get("timeout", 120 if step.get("until") else 600)
     deadline = time.monotonic() + limit
     while True:
-        # Stopped in the guest when its time is up, as `desk exec` does: one that hangs would
-        # otherwise go on running there under the steps that follow.
         attempt = max(5, deadline - time.monotonic()) if step.get("until") else limit
         start = time.monotonic()
-        try:
-            r = guest.ssh_run(run.ssh_port, user, guest.command(spec, [command], limit=attempt), capture=True,
-                              timeout=attempt + 30)
-        except subprocess.TimeoutExpired as e:
-            r = subprocess.CompletedProcess([], 124, e.stdout or b"", e.stderr or b"")
+        r, stopped = once(attempt)
         # Windows ends its lines with \r\n, and an expected output of several lines has \n.
         out, err = (b.decode(errors="replace").replace("\r\n", "\n") for b in (r.stdout, r.stderr))
         problem = None
-        if r.returncode != step.get("rc", 0) and time.monotonic() - start >= attempt:
+        if r.returncode != step.get("rc", 0) and (stopped or time.monotonic() - start >= attempt):
             problem = f"still running after {attempt:.0f}s, stopped"
         elif r.returncode != step.get("rc", 0):
             problem = f"exit {r.returncode}"
@@ -371,8 +411,8 @@ def _shell(run, spec, step: dict, as_root: bool) -> str:
         if problem is None:
             return out.strip().splitlines()[-1][:120] if out.strip() else ""
         if not step.get("until") or time.monotonic() + 2 > deadline:
-            if step.get("rc", 0) != 255:
-                guest.lost(r, run.ssh_port, user, f"step {command[:60]!r}")
+            if step.get("rc", 0) != 255 and lost:
+                lost(r)
             break
         time.sleep(2)
     if step.get("until"):
@@ -397,7 +437,10 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
             argv = value
         else:
             argv = split_windows(value) if spec.family == "windows" else shlex.split(value)
-        steps.gui(*argv, env={k: str(v) for k, v in step.get("env", {}).items()})
+        env = {k: str(v) for k, v in step.get("env", {}).items()}
+        if {"rc", "output"} & set(step):
+            return _gui_waited(run, spec, step, argv, env)
+        steps.gui(*argv, env=env)
     elif action == "focus":
         return steps.focus(value)
     elif action == "click":
