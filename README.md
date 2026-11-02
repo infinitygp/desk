@@ -282,7 +282,13 @@ What else differs from Firefox:
   drive). It opts in to early feature updates and enables the taskbar position and size features
   (59213768, 61090762) with ViVeTool v0.3.4 (GPL-3.0, downloaded and checked against a pinned
   SHA-256), so `desk win taskbar --edge/--size` work on every build; `desk/winsettings.py` writes
-  theme and taskbar settings where the Settings app writes them.
+  theme, taskbar, transparency and text size where the Settings app writes them, applies contrast
+  themes by opening their theme file in the session and the wallpaper with `SystemParametersInfo`
+  there (from SSH it changes nothing), and reads every setting back. No accent colour: Settings
+  derives a palette from it that nothing else computes.
+- The in-session agent removes `PSExecutionPolicyPreference` from its environment after loading its
+  own scripts: it runs with `-ExecutionPolicy Bypass`, which every program it starts would inherit,
+  and a product's own scripts must meet Windows' default policy (Restricted) as on a user's machine.
 - Notepad's first-run teaching tip is marked closed in its settings: UI Automation gets nothing
   from its window while the tip is open.
 - Provisioning turns the IANA time zone into Windows' id with ICU's `ucal_getWindowsTimeZoneID`
@@ -431,6 +437,22 @@ step again without the ones before it. A step that loses the guest (exit 2) says
 still runs and what the host had then (`runs.host_state`: free disk where the run and libvirt's
 logs are, memory, swap, other runs), since a full disk that ends QEMU shows in the step only as
 "Connection refused".
+
+A step's failure reads as a finding about the product, so whatever desk could not do or confirm
+ends a scenario with exit 2 instead: lost SSH, an in-session agent that does not answer, an
+accessibility tree that could not be read for as long as a step waited, a point off the screen, a
+Windows setting that does not take (`config.NotDone`, from which these derive). ssh's own 255 is
+told from a command's by what ssh prints last at `LogLevel=ERROR` and, when it prints nothing (a
+closed connection is logged at INFO), by `exit 0` failing too; a connection the guest resets in
+the handshake started nothing, so it is sent again.
+
+Mouse steps send the machine's input like `desk click` does. A `press` keeps the button down for the
+steps after it, and a `move` with it held glides as `drag` does, since toolkits start a
+drag-and-drop only after motion with the button down; a button still held when the steps end or
+one fails is let go, as every later move would otherwise be a drag. Builds: `[build.image.NAME]`
+gives another image its own build over `[build]`, and a file that has such tables refuses an image
+it has none for rather than copy another's packages; `--no-build` takes the newest artifacts as
+they are and the report names them.
 
 ## Evidence
 
