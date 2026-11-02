@@ -74,7 +74,8 @@ VALUES = {
     "reboot": (lambda v: v is True or _text(v), "true or the command that reboots"),
     "prepare": (lambda v: v is True or _text(v), "true or the name of a prepare step"),
     "wait": (lambda v: v is True or (_number(v) and v > 0), "true (until the screen is still) or seconds"),
-    "console_errors": (lambda v: isinstance(v, int) and not isinstance(v, bool) and v >= 0, "a count, e.g. 0"),
+    "console_errors": (lambda v: v == "reset" or (isinstance(v, int) and not isinstance(v, bool) and v >= 0),
+                       "a count, e.g. 0, or \"reset\" (the count starts here)"),
     "open": (lambda v: _text(v) and browser.address(v), "a path on the site shown (/system) or a whole address"),
     "viewport": (lambda v: isinstance(v, str) and (v == "reset" or re.fullmatch(r"[1-9]\d*x[1-9]\d*", v)),
                  "WIDTHxHEIGHT (390x700) or reset"),
@@ -544,6 +545,11 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
         found, unknown = browser.errors(lines), browser.unlevelled(lines)
         new, steps.console_seen = found[steps.console_seen:], len(found)
         maybe, steps.console_unlevelled = unknown[steps.console_unlevelled:], len(unknown)
+        if value == "reset":
+            # Left out, not hidden: the step says how many and which.
+            left = new + maybe
+            return f"{len(left)} console messages before this point left out" + (
+                ": " + " | ".join(left[:3])[:300] if left else "")
         if len(new) > value:
             raise StepFailed(f"{len(new)} console errors (at most {value}): " + " | ".join(new[:3])[:300])
         if maybe:

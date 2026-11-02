@@ -248,6 +248,21 @@ class ConsoleErrors(unittest.TestCase):
         self.assertEqual(ok, "0 console errors")
         self.assertIsInstance(bad, scenario.StepFailed)
 
+    def test_reset_leaves_out_what_came_before_and_says_so_and_the_count_starts_there(self):
+        before = ['10:00:00 console.error: "Cockpit\'s own Overview"']
+        after = before + ['10:00:05 console.error: "the product\'s"']
+        steps = SimpleNamespace(console_seen=0, console_unlevelled=0)
+        with mock.patch("desk.scenario.browser.console", side_effect=[before, after]):
+            reset = scenario._step(SimpleNamespace(), SimpleNamespace(), steps, {"console_errors": "reset"})
+            self.assertEqual(reset, "1 console messages before this point left out: "
+                                    "10:00:00 console.error: \"Cockpit's own Overview\"")
+            with self.assertRaisesRegex(scenario.StepFailed, "1 console errors \\(at most 0\\).*the product's"):
+                scenario._step(SimpleNamespace(), SimpleNamespace(), steps, {"console_errors": 0})
+        self.assertEqual(scenario.load(write('image = "a"\n[[step]]\nconsole_errors = "reset"'))["step"][0]
+                         ["console_errors"], "reset")
+        with self.assertRaises(DeskError):
+            scenario.load(write('image = "a"\n[[step]]\nconsole_errors = "start"'))
+
     def test_chromium_messages_cannot_be_counted_as_clean(self):
         maybe = '10:00:00 Chromium console: "an error" (https://app.test/, line 8)'
         uncaught = "10:00:01 JavaScript error: https://app.test/, line 11: Uncaught TypeError: x"

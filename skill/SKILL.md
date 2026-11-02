@@ -291,7 +291,9 @@ viewport`; both take `browser = "chromium"` or `"firefox"`, else the browser in 
 before the first step, `usb = ["0fd9:0084"]` hands host USB devices over), `console_errors = 0` (at
 most that many new errors in the web console since the start or the previous such step; end a UI
 scenario with one. Chromium's messages may be console.error, which its log does not tell: any
-new one makes the step fail with exit 2, desk's failure, not the product's). In a scenario's
+new one makes the step fail with exit 2, desk's failure, not the product's; `console_errors =
+"reset"` judges nothing and starts the count there, for errors that are not the product's, Cockpit's
+own Overview after a package install, and says how many it left out and which). In a scenario's
 report every console message is tagged with the step running when it was logged (`[before the
 first step]` for what the warm state and setup logged; a page logs a moment after the step that
 opened it, so look at the step before as well), so no extra step is needed just to separate setup
