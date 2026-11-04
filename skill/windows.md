@@ -13,6 +13,11 @@ Part of the desk skill ([SKILL.md](SKILL.md)); the commands and pitfalls there a
   would. Run a helper script with `powershell.exe -NoProfile -ExecutionPolicy Bypass -File X.ps1`,
   or `Set-ExecutionPolicy -Scope Process Bypass -Force; & X.ps1` in one `exec`; a command typed
   into `desk exec` itself is no script file and needs neither.
+- Several words after `desk exec --` are a program and its arguments: desk quotes each for
+  PowerShell and escapes the double quotes and backslashes that PowerShell 5.1 would drop, so
+  `desk exec -- powershell -NoProfile -Command "Write-Output 'a b'"` prints `a b` and
+  `desk exec -- curl.exe -d '{"a":1}'` sends `{"a":1}`. One word is PowerShell code as typed, and
+  the next point applies to the programs it calls.
 - Windows PowerShell 5.1 then passes arguments to programs its own way: it splits an unquoted
   `-name.x=1` at the dot (`./pkg.test.exe -test.count=1` gets `-test .count=1`; write
   `'-test.count=1'`), and drops the double quotes inside one (`curl.exe -d '{"a":1}'` sends

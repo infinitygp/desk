@@ -265,6 +265,10 @@ What else differs from Firefox:
   AHCI emulation crashes under Windows); an e1000e NIC (inbox driver); OpenSSH from the MSI with
   PowerShell as the shell; virtio-win guest tools for the display driver and qemu-guest-agent.
 - Commands are sent as `powershell -EncodedCommand`, since Windows' command line mangles quotes.
+  A command of several words is a program and its arguments: `guest.command` quotes each for
+  PowerShell (`& 'prog' 'arg'`) and escapes the double quotes and trailing backslashes that
+  Windows PowerShell 5.1 leaves as they are when it passes an argument with a space in double
+  quotes; POSIX quoting (`shlex`) there turned `'a b'` into ` a b `.
 - Keys go through the PS/2 keyboard. The install has a USB one as well, as this OVMF build ignores
   PS/2 at the CD prompt; QEMU queues 16 scancodes for it, which Windows takes one per poll, and a
   Windows busy for a moment (after a restore, Defender scanning) lost keys typed 40 ms apart,

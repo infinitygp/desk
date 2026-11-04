@@ -19,6 +19,27 @@ class Limits(unittest.TestCase):
         self.assertIn("timeout -k 5 90 bash", guest.remote_command(["make"], limit=90.4))
 
 
+class WindowsArguments(unittest.TestCase):
+    """A program and its arguments for a Windows guest: PowerShell quoting, not POSIX."""
+
+    windows = SimpleNamespace(family="windows", cmd=lambda script: script)
+
+    def test_quoted_text_and_spaces_reach_the_program_as_they_are(self):
+        script = guest.command(self.windows, ["powershell", "-NoProfile", "-Command", "Write-Output 'a b'"])
+        self.assertEqual(script, "& 'powershell' '-NoProfile' '-Command' 'Write-Output ''a b'''")
+        # One element is PowerShell code and goes as it is.
+        code = r"Test-Path 'C:\Program Files\x'"
+        self.assertEqual(guest.command(self.windows, [code]), code)
+
+    def test_double_quotes_and_trailing_backslashes_survive_powershell_5(self):
+        self.assertEqual(guest._ps_argument('say "hi"'), r"""'say \"hi\"'""")
+        self.assertEqual(guest._ps_argument('a\\"b'), r"""'a\\\"b'""")
+        self.assertEqual(guest._ps_argument("C:\\some dir\\"), r"'C:\some dir\\'")
+        # Without a space PowerShell adds no quotes, so a trailing backslash stays single.
+        self.assertEqual(guest._ps_argument("C:\\dir\\"), r"'C:\dir\'")
+        self.assertEqual(guest._ps_argument("it's $HOME"), "'it''s $HOME'")
+
+
 class SshsOwnFailure(unittest.TestCase):
     """ssh's 255 told from a command's: by what ssh says last, as OpenSSH prints it at LogLevel=ERROR."""
 

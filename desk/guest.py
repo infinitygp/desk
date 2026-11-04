@@ -82,7 +82,9 @@ def command(spec, argv: list[str], env: dict[str, str] | None = None, limit: flo
     if spec.family != "windows":
         return remote_command(argv, env=env, limit=limit, shell=spec.shell)
     script = "".join(f"$env:{k} = '{v.replace(chr(39), chr(39) * 2)}'; " for k, v in (env or {}).items())
-    script += remote_command(argv)
+    # One element is PowerShell code; several are a program and its arguments, which POSIX
+    # quoting (shlex) would garble there: ' a b ' for 'a b'.
+    script += argv[0] if len(argv) == 1 else "& " + " ".join(_ps_argument(a) for a in argv)
     if limit:
         # Processes outlive a closed SSH session on Windows, so a watchdog in the guest ends the
         # command and everything it started.
@@ -90,6 +92,16 @@ def command(spec, argv: list[str], env: dict[str, str] | None = None, limit: flo
                   f"'-NoProfile', '-Command', \"Start-Sleep {_seconds(limit)}; taskkill.exe /T /F /PID $PID\"; "
                   f"try {{ {script}\n}} finally {{ Stop-Process -Id $deskWatch.Id -Force -ErrorAction Ignore }}")
     return spec.cmd(script)
+
+
+def _ps_argument(arg: str) -> str:
+    """`arg` as one argument of a program called from Windows PowerShell 5.1. It puts an argument
+    with a space in double quotes but leaves the quotes and backslashes inside as they are, so they
+    are escaped here the way the program's C runtime reads them back."""
+    arg = re.sub(r'(\\*)"', lambda m: m[1] * 2 + '\\"', arg)
+    if re.search(r"\s", arg):
+        arg = re.sub(r"(\\+)$", lambda m: m[1] * 2, arg)
+    return "'" + arg.replace("'", "''") + "'"
 
 
 def _ssh_said(r: subprocess.CompletedProcess, port: int, before: bool = False) -> bool:
