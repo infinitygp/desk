@@ -111,8 +111,9 @@ class AddRemove(unittest.TestCase):
             usb.add(mock.Mock(), "0fd9:0084")
 
     def test_plugs_in_by_address(self):
-        run = mock.Mock()
+        run = mock.Mock(**{"dom.return_value": domain()})
         with mock.patch.object(usb, "host_devices", return_value=[DECK]), \
+             mock.patch.object(usb, "present", return_value={(3, 7)}), \
              mock.patch("desk.runs.all_runs", return_value=[]):
             usb.add(run, "0fd9:0084")
         xml = run.dom.return_value.attachDeviceFlags.call_args[0][0]
@@ -123,6 +124,77 @@ class AddRemove(unittest.TestCase):
         with mock.patch.object(usb, "host_devices", return_value=[]):
             self.assertEqual(usb.remove(run, "3.7")["dev"], 7)
         run.dom.return_value.detachDeviceFlags.assert_called_once()
+
+
+class Gone(unittest.TestCase):
+    """Entries of devices that left the host: shown, and taken out before the next add."""
+
+    def setUp(self):
+        capability = mock.patch.object(doctor, "_qemu_devices", return_value='name "usb-host", bus USB\n')
+        capability.start()
+        self.addCleanup(capability.stop)
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.sys = Path(self.tmp.name)
+        fake_sys(self.sys, "usb13", idVendor="1d6b", idProduct="0002", bDeviceClass="09", busnum=13, devnum=1)
+        fake_sys(self.sys, "13-1", idVendor="0fd9", idProduct="0084", bDeviceClass="00", busnum=13, devnum=40)
+        fake_sys(self.sys, "3-1", idVendor="1209", idProduct="0001", bDeviceClass="00", busnum=3, devnum=8)
+        fake_sys(self.sys, "13-1:1.0", bInterfaceClass="03")
+
+    def test_only_numbers_absent_from_the_host_are_gone(self):
+        dom = domain((13, 13), (3, 8), (13, 1), (13, 14))
+        # 13.1 is a hub now: a number in use is never taken for gone, whatever has it.
+        self.assertEqual(usb.gone(dom, self.sys), [(13, 13), (13, 14)])
+        self.assertEqual(usb.present(self.sys), {(13, 1), (13, 40), (3, 8)})
+
+    def test_add_takes_out_every_gone_entry_first_and_logs_it(self):
+        stale = [(13, n) for n in range(13, 27)]
+        dom = domain(*stale, (3, 8))
+        run = mock.Mock(**{"dom.return_value": dom})
+        new = {**DECK, "bus": 13, "dev": 40, "node": "/dev/bus/usb/013/040"}
+        with mock.patch.object(usb, "host_devices", return_value=[new]), \
+             mock.patch.object(usb, "SYS", self.sys), mock.patch("desk.runs.all_runs", return_value=[]), \
+             mock.patch("sys.stderr"):
+            usb.add(run, "13.40")
+        detached = [c.args[0] for c in dom.detachDeviceFlags.call_args_list]
+        self.assertEqual(detached, [usb._xml(b, d) for b, d in stale])
+        self.assertNotIn(usb._xml(3, 8), detached)
+        self.assertEqual([c.kwargs for c in run.log_event.call_args_list][:14],
+                         [{"usb": "remove", "device": f"13.{n}", "reason": "gone from the host"}
+                          for n in range(13, 27)])
+        self.assertIn("<address bus='13' device='40'/>", dom.attachDeviceFlags.call_args.args[0])
+
+    def test_a_device_on_the_host_is_never_taken_out(self):
+        dom = domain((3, 8))
+        run = mock.Mock(**{"dom.return_value": dom})
+        new = {**DECK, "bus": 13, "dev": 40}
+        with mock.patch.object(usb, "host_devices", return_value=[new]), \
+             mock.patch.object(usb, "SYS", self.sys), mock.patch("desk.runs.all_runs", return_value=[]):
+            usb.add(run, "13.40")
+        dom.detachDeviceFlags.assert_not_called()
+
+    def test_a_failed_take_out_says_which_entry_and_adds_nothing(self):
+        dom = domain((13, 13))
+        dom.detachDeviceFlags.side_effect = usb.libvirt.libvirtError("busy")
+        run = mock.Mock(**{"dom.return_value": dom})
+        with mock.patch.object(usb, "host_devices", return_value=[{**DECK, "bus": 13, "dev": 40}]), \
+             mock.patch.object(usb, "SYS", self.sys), mock.patch("desk.runs.all_runs", return_value=[]), \
+             self.assertRaisesRegex(DeskError, "13.13, gone from the host"):
+            usb.add(run, "13.40")
+        dom.attachDeviceFlags.assert_not_called()
+
+    def test_listing_shows_gone_entries_with_their_run(self):
+        other = SimpleNamespace(id="b2", live_domain=lambda: domain((13, 13), (13, 40)))
+        present = {**DECK, "bus": 13, "dev": 40}
+        with mock.patch.object(usb, "host_devices", return_value=[present]), \
+             mock.patch.object(usb, "SYS", self.sys), mock.patch("desk.runs.all_runs", return_value=[other]):
+            rows = usb.listing()
+        self.assertEqual(rows[0]["run"], "b2")
+        self.assertEqual([(r["bus"], r["dev"], r["run"]) for r in rows if r.get("gone")], [(13, 13, "b2")])
+        with mock.patch.object(usb, "listing", return_value=rows), \
+             mock.patch("builtins.print") as out:
+            cli.cmd_usb(SimpleNamespace(usb_cmd="ls"))
+        self.assertIn("13.13\t-\tgone, still in run b2", out.call_args_list[1].args[0])
 
 
 if __name__ == "__main__":

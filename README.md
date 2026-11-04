@@ -391,6 +391,12 @@ journalctl --user -u desk-maintain  # output of the last runs
   `desk doctor` lists it as optional, and `usb add` and `up --usb` check QEMU's advertised devices
   before attaching or starting a run, with package install hints if absent or the probe fails.
   Listing, removal and runs without host USB do not need it.
+  A device that leaves the host (unplugged, or enumerated again under a new number) keeps its
+  `<hostdev>` in the domain, and each entry holds one of the xHCI controller's 15 ports until
+  `add` fails with "No free USB ports". `desk usb ls` shows such entries as `gone` with their run,
+  and `desk usb add` takes them out of its run first, each with a line in the run's log. Only
+  numbers that no device on the host has (`/sys/bus/usb/devices`, hubs included) count as gone,
+  so a device that is there, even during a reset, is never taken from the guest.
 - `desk clock` (`desk/clock.py`) sets the guest's time through qemu-guest-agent with the guest's
   time sync off and keeps the offset in `run.json`, put back after snapshot restores and reboots
   (tried for 20 s, as the agent may answer a moment late after a restore). A moved clock that

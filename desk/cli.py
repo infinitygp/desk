@@ -1021,6 +1021,10 @@ def cmd_usb(args) -> None:
 
     if args.usb_cmd == "ls":
         for d in usb.listing():
+            if d.get("gone"):
+                print(f"-\t{d['bus']}.{d['dev']}\t-\tgone, still in run {d['run']} "
+                      f"(desk -r {d['run']} usb rm {d['bus']}.{d['dev']}, or the next usb add takes it out)")
+                continue
             where = f"in run {d['run']}" if d["run"] else ("free" if d["access"] else
                                                           "free, but not yours to open (desk usb add says how)")
             print(f"{d['id']}\t{d['bus']}.{d['dev']}\t{d['name'] or '-'}\t{where}")

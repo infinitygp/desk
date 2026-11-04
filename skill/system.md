@@ -36,7 +36,9 @@ plugs it into the guest's USB controller as it is. The host does without it unti
 the host's adb meanwhile. QEMU runs as the desk user, so the device node must be the user's to
 open; otherwise `desk usb add` refuses and prints a udev rule as a fish command with sudo: give it
 to the user to run. A device that re-enumerates (a firmware update, a phone switching USB mode)
-gets a new device number on the host: `desk usb add` it again.
+gets a new device number on the host: `desk usb add` it again. Its old entry stays in the guest
+and holds a USB port; `desk usb ls` lists it as `gone`, and the next `desk usb add` in that run
+takes it out.
 
 Host passthrough needs QEMU's `usb-host` backend (`qemu-hw-usb-host` on Arch,
 `qemu-device-usb-host` on Fedora), not just a guest USB controller. `desk doctor` lists this
