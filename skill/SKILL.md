@@ -311,7 +311,9 @@ to the front as it does for a user, and on Windows a menu it opens is the focuse
 when the page did not load; `timeout`, 30 s), `viewport = "390x700"` (or `"reset"`; `desk browser
 viewport`; both take `browser = "chromium"` or `"firefox"`, else the browser in the focused window),
 `disk_add = "8G:data"`, `disk_rm = "data"` (top-level `disks = ["8G:data"]` plugs them in
-before the first step, `usb = ["0fd9:0084"]` hands host USB devices over), `console_errors = 0` (at
+before the first step, `usb = ["0fd9:0084"]` hands host USB devices over), `usb_add = "port:9-2.2"`,
+`usb_rm = "port:9-2.2"` (hand a host USB device over or take it back mid-scenario, named as for
+`desk usb add`; `usb_add` waits `timeout`, 10 s, for a device that is coming back), `console_errors = 0` (at
 most that many new errors in the web console since the start or the previous such step; end a UI
 scenario with one. Chromium's messages may be console.error, which its log does not tell: any
 new one makes the step fail with exit 2, desk's failure, not the product's; `console_errors =

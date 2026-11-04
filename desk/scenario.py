@@ -21,7 +21,7 @@ from .steps import Steps
 ACTIONS = {"root", "exec", "gui", "focus", "click", "type", "key", "expect", "expect_absent", "shot",
            "reboot", "wait", "clock", "disk_add", "disk_rm", "console_errors", "prepare", "open", "viewport",
            "observe_start", "observe_stop", "mark", "set_text", "move", "drag", "scroll", "press", "release", "win",
-           "pull", "offline"}
+           "pull", "offline", "usb_add", "usb_rm"}
 OPTIONS = {"role", "exact", "timeout", "output", "rc", "name", "soft", "env", "step", "until", "anywhere", "browser",
            "button", "window", "state", "text", "double", "to"}
 # The options each action reads, besides name and soft; any other would be ignored without a word.
@@ -35,7 +35,7 @@ READS = {
     "press": {"role", "exact", "timeout", "window", "button"}, "release": {"role", "exact", "timeout", "window"},
     "expect": {"role", "exact", "timeout", "window", "state"}, "expect_absent": {"role", "exact", "timeout", "window"},
     "reboot": {"timeout"}, "wait": {"timeout"}, "clock": {"step", "timeout"}, "disk_rm": {"timeout"},
-    "open": {"timeout", "browser"}, "viewport": {"browser"},
+    "open": {"timeout", "browser"}, "viewport": {"browser"}, "usb_add": {"timeout"},
 }
 
 
@@ -63,6 +63,7 @@ VALUES = {
     "click": (lambda v: _text(v) or _pixels(v, 2), "a name, or [x, y] in screen pixels"),
     "win": (_text, "what follows desk win, e.g. \"taskbar --align left\""),
     "pull": (_text, "a file in the guest"),
+    **{a: (lambda v: _text(v) and usb.is_query(v), f"a USB device, {usb.QUERY}") for a in ("usb_add", "usb_rm")},
     "offline": (lambda v: isinstance(v, bool) or (isinstance(v, list) and bool(v) and all(
         isinstance(p, int) and not isinstance(p, bool) and 0 < p < 65536 for p in v)),
                 "true (every outgoing connection but DNS refused), a list of ports ([443]) or false"),
@@ -169,10 +170,8 @@ def load(path: Path) -> dict:
     for d in data.get("disks", []):
         _checked(path, "disks", disks.parse, d)
     devices = data.get("usb", [])
-    if not isinstance(devices, list) or not all(isinstance(d, str) and (usb.ID.fullmatch(d.lower()) or
-                                                                        usb.ADDRESS.fullmatch(d))
-                                                for d in devices):
-        raise DeskError(f"{path}: usb is a list like [\"0fd9:0084\"] (VENDOR:PRODUCT or BUS.DEVICE)")
+    if not isinstance(devices, list) or not all(isinstance(d, str) and usb.is_query(d) for d in devices):
+        raise DeskError(f"{path}: usb is a list like [\"0fd9:0084\"] ({usb.QUERY})")
     build = data.get("build", {})
     _check_build(path, build, "[build]")
     variants = build.get("image", {})
@@ -522,7 +521,7 @@ def _checked_command(step: dict, once, lost) -> str:
 # With a browser machine (browser = IMAGE) these steps go to the guest under test, and the rest (its
 # screen, the browser, clicks, keys) to the browser machine.
 GUEST_ACTIONS = {"root", "exec", "reboot", "pull", "clock", "disk_add", "disk_rm", "prepare", "offline",
-                 "observe_start", "observe_stop", "mark"}
+                 "observe_start", "observe_stop", "mark", "usb_add", "usb_rm"}
 # A port of the guest under test in an address to open: {guest:80}.
 GUEST_PORT = re.compile(r"\{guest:(\d{1,5})\}")
 
@@ -697,6 +696,14 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
         return browser.viewport(run, value, browser=step.get("browser"))
     elif action == "disk_add":
         return f"disk {disks.add(run, *disks.parse(value))} plugged in"
+    elif action == "usb_add":
+        # A device that is still coming back (re-enumerating, a reset) gets the step's timeout.
+        usb.wait_present(value, 10 if timeout is None else timeout)
+        d = usb.add(run, value)
+        return f"USB device {d['id']} {d['name']} ({d['bus']}.{d['dev']}) handed to the guest"
+    elif action == "usb_rm":
+        d = usb.remove(run, value)
+        return f"USB device {d['id']} ({d['bus']}.{d['dev']}) back with the host"
     elif action == "disk_rm":
         disks.remove(run, value, timeout=timeout or 30)
         return f"disk {value} unplugged"

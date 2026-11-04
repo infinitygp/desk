@@ -397,6 +397,11 @@ journalctl --user -u desk-maintain  # output of the last runs
   and `desk usb add` takes them out of its run first, each with a line in the run's log. Only
   numbers that no device on the host has (`/sys/bus/usb/devices`, hubs included) count as gone,
   so a device that is there, even during a reset, is never taken from the guest.
+  Besides VENDOR:PRODUCT and BUS.DEVICE, a device is named by its port (`port:9-2.2`, the name
+  of its directory in `/sys/bus/usb/devices`) or its serial number (`serial:…`), which keep while
+  the device number changes; desk looks the number up each time it needs one and refuses a name
+  that fits several devices. The scenario steps `usb_add` and `usb_rm` do what `desk usb add|rm`
+  does between other steps; `usb_add` waits up to its `timeout` for a device that is coming back.
 - `desk clock` (`desk/clock.py`) sets the guest's time through qemu-guest-agent with the guest's
   time sync off and keeps the offset in `run.json`, put back after snapshot restores and reboots
   (tried for 20 s, as the agent may answer a moment late after a restore). A moved clock that

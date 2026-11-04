@@ -5,6 +5,7 @@ USB controller as they are, while the host does without them. QEMU runs as the d
 import os
 import re
 import sys
+import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -15,6 +16,15 @@ from .config import DeskError
 SYS = Path("/sys/bus/usb/devices")
 ID = re.compile(r"[0-9a-f]{4}:[0-9a-f]{4}")
 ADDRESS = re.compile(r"(\d+)\.(\d+)")
+# Stay with a device while its BUS.DEVICE changes: the port it is plugged into, its serial number.
+PORT = re.compile(r"port:(\d+-\d+(?:\.\d+)*)")
+SERIAL = re.compile(r"serial:(\S+)")
+QUERY = "VENDOR:PRODUCT (1209:0001), BUS.DEVICE (3.7), port:BUS-PORT (3-1.2) or serial:SERIAL"
+
+
+def is_query(query: str) -> bool:
+    return bool(ID.fullmatch(query.lower()) or ADDRESS.fullmatch(query) or PORT.fullmatch(query)
+                or SERIAL.fullmatch(query))
 HUB = "09"
 
 
@@ -35,6 +45,7 @@ def host_devices(sys_dir: Path = SYS) -> list[dict]:
         bus, dev = int(_read(d, "busnum")), int(_read(d, "devnum"))
         node = Path(f"/dev/bus/usb/{bus:03d}/{dev:03d}")
         out.append({"id": f"{vendor}:{product}", "bus": bus, "dev": dev, "node": str(node),
+                    "port": d.name, "serial": _read(d, "serial"),
                     "name": " ".join(filter(None, (_read(d, "manufacturer"), _read(d, "product")))),
                     "access": os.access(node, os.R_OK | os.W_OK)})
     return out
@@ -58,21 +69,40 @@ def gone(dom, sys_dir: Path | None = None) -> list[tuple[int, int]]:
     return [a for a in attached(dom) if a not in here]
 
 
-def pick(devices: list[dict], query: str) -> dict:
+def matches(devices: list[dict], query: str) -> list[dict]:
     q = query.lower()
     if ID.fullmatch(q):
         hits = [d for d in devices if d["id"] == q]
     elif m := ADDRESS.fullmatch(q):
         hits = [d for d in devices if (d["bus"], d["dev"]) == (int(m[1]), int(m[2]))]
+    elif m := PORT.fullmatch(query):
+        hits = [d for d in devices if d.get("port") == m[1]]
+    elif m := SERIAL.fullmatch(query):
+        hits = [d for d in devices if d.get("serial") == m[1]]
     else:
-        raise DeskError(f"a USB device is VENDOR:PRODUCT (1209:0001) or BUS.DEVICE (3.7), not {query!r}; "
-                        "desk usb ls lists them")
+        raise DeskError(f"a USB device is {QUERY}, not {query!r}; desk usb ls lists them")
+    return hits
+
+
+def pick(devices: list[dict], query: str) -> dict:
+    hits = matches(devices, query)
     if not hits:
         raise DeskError(f"no USB device {query} on the host (desk usb ls)")
     if len(hits) > 1:
         raise DeskError(f"several USB devices are {query}: "
-                        + ", ".join(f"{d['bus']}.{d['dev']}" for d in hits) + "; give BUS.DEVICE")
+                        + ", ".join(f"{d['bus']}.{d['dev']} ({d['id']}, port {d.get('port') or '?'})" for d in hits)
+                        + "; give BUS.DEVICE or port:")
     return hits[0]
+
+
+def wait_present(query: str, timeout: float) -> dict:
+    """The host device `query` names, once it is there and udev has given its node to this user."""
+    deadline = time.monotonic() + timeout
+    while True:
+        devices = host_devices()
+        if any(d["access"] for d in matches(devices, query)) or time.monotonic() >= deadline:
+            return pick(devices, query)
+        time.sleep(0.5)
 
 
 def udev_hint(device: dict) -> str:
@@ -136,7 +166,7 @@ def add(run, query: str) -> dict:
         dom.attachDeviceFlags(_xml(*here), libvirt.VIR_DOMAIN_AFFECT_LIVE)
     except libvirt.libvirtError as e:
         raise DeskError(f"could not hand USB device {device['id']} to the guest: {e}") from None
-    run.log_event(usb="add", device=device["id"], name=device["name"])
+    run.log_event(usb="add", device=device["id"], address=f"{here[0]}.{here[1]}", name=device["name"])
     return device
 
 
@@ -155,7 +185,7 @@ def remove(run, query: str) -> dict:
         dom.detachDeviceFlags(_xml(device["bus"], device["dev"]), libvirt.VIR_DOMAIN_AFFECT_LIVE)
     except libvirt.libvirtError as e:
         raise DeskError(f"could not take USB device {device['id']} back: {e}") from None
-    run.log_event(usb="remove", device=device["id"])
+    run.log_event(usb="remove", device=device["id"], address=f"{device['bus']}.{device['dev']}")
     return device
 
 

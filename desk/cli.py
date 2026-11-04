@@ -1022,12 +1022,12 @@ def cmd_usb(args) -> None:
     if args.usb_cmd == "ls":
         for d in usb.listing():
             if d.get("gone"):
-                print(f"-\t{d['bus']}.{d['dev']}\t-\tgone, still in run {d['run']} "
+                print(f"-\t{d['bus']}.{d['dev']}\t-\t-\tgone, still in run {d['run']} "
                       f"(desk -r {d['run']} usb rm {d['bus']}.{d['dev']}, or the next usb add takes it out)")
                 continue
             where = f"in run {d['run']}" if d["run"] else ("free" if d["access"] else
                                                           "free, but not yours to open (desk usb add says how)")
-            print(f"{d['id']}\t{d['bus']}.{d['dev']}\t{d['name'] or '-'}\t{where}")
+            print(f"{d['id']}\t{d['bus']}.{d['dev']}\tport:{d['port']}\t{d['name'] or '-'}\t{where}")
         return
     run = runs.resolve(args.run)
     if args.usb_cmd == "add":
@@ -1226,8 +1226,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="vCPUs of this run (default: the image's; other than its warm state's: boots cold)")
     p.add_argument("--disk", action="append", metavar="SIZE[:NAME]", help="extra empty disk, e.g. 10G:backup "
                    "(repeatable; desk disk)")
-    p.add_argument("--usb", action="append", metavar="VENDOR:PRODUCT|BUS.DEVICE",
-                   help="hand a host USB device to the guest (repeatable; desk usb)")
+    p.add_argument("--usb", action="append", metavar="DEVICE",
+                   help="hand a host USB device to the guest: VENDOR:PRODUCT, BUS.DEVICE, port:BUS-PORT or "
+                        "serial:SERIAL (repeatable; desk usb)")
     p.add_argument("--forward", action="append", type=_port_arg, metavar="PORT",
                    help="reach this guest port from the host (repeatable; desk forward)")
     p.set_defaults(func=cmd_up)
@@ -1443,7 +1444,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("usb", help="hand host USB devices to the running guest")
     usub = p.add_subparsers(dest="usb_cmd", required=True)
     up_ = usub.add_parser("add", help="plug a host USB device into the guest (the host does without it)")
-    up_.add_argument("device", help="VENDOR:PRODUCT (1209:0001) or BUS.DEVICE (3.7), as desk usb ls shows")
+    up_.add_argument("device", help="VENDOR:PRODUCT (1209:0001), BUS.DEVICE (3.7), port:BUS-PORT (3-1.2) or "
+                                      "serial:SERIAL, as desk usb ls shows")
     up_ = usub.add_parser("rm", help="give a USB device back to the host")
     up_.add_argument("device")
     usub.add_parser("ls", help="host USB devices and the runs they are in")

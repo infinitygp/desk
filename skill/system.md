@@ -29,7 +29,7 @@ first unless pulling a disk out is what you test. `desk disk ls` lists them; sna
 ## Host USB devices
 
 For hardware the product talks to (a Stream Deck, a phone, a dongle, a USB stick): `desk usb ls`
-lists the host's devices (VENDOR:PRODUCT, BUS.DEVICE, name, the run that has it), and
+lists the host's devices (VENDOR:PRODUCT, BUS.DEVICE, port, name, the run that has it), and
 `desk usb add 0fd9:0084` (or `desk up IMAGE --usb 0fd9:0084`, in a scenario `usb = ["0fd9:0084"]`)
 plugs it into the guest's USB controller as it is. The host does without it until `desk usb rm` or
 `desk down`, so hand over only the device the user named: a phone given to the guest is gone from
@@ -38,7 +38,11 @@ open; otherwise `desk usb add` refuses and prints a udev rule as a fish command 
 to the user to run. A device that re-enumerates (a firmware update, a phone switching USB mode)
 gets a new device number on the host: `desk usb add` it again. Its old entry stays in the guest
 and holds a USB port; `desk usb ls` lists it as `gone`, and the next `desk usb add` in that run
-takes it out.
+takes it out. Name a device by what does not change with its number: `port:9-2.2` (the host port
+it is plugged into, as `desk usb ls` shows) or `serial:SERIAL`; BUS.DEVICE is looked up each time.
+Two devices of one model need one of these, and a name that fits several devices or none is
+refused with the ones it fits. In a scenario, `usb_rm` and `usb_add` steps take a device out and
+put it back between other steps (a hot-plug or reconnect test).
 
 Host passthrough needs QEMU's `usb-host` backend (`qemu-hw-usb-host` on Arch,
 `qemu-device-usb-host` on Fedora), not just a guest USB controller. `desk doctor` lists this

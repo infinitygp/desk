@@ -42,12 +42,67 @@ class Devices(unittest.TestCase):
 
     def test_two_alike_need_the_address(self):
         twins = self.devices + [{**self.devices[0], "dev": 8}]
-        with self.assertRaisesRegex(DeskError, "3.7, 3.8; give BUS.DEVICE"):
+        with self.assertRaisesRegex(DeskError, r"3\.7 \(0fd9:0084, port 3-1\), 3\.8 .*give BUS.DEVICE or port:"):
             usb.pick(twins, "0fd9:0084")
 
 
+class Selectors(unittest.TestCase):
+    """port: and serial: name the same device after it came back under another BUS.DEVICE."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        for port, dev, serial in (("9-2.2", 19, "A00NA41632OR6N"), ("9-2.3", 20, "DUPLICATE"),
+                                  ("13-1", 40, "DUPLICATE")):
+            fake_sys(self.root, port, idVendor="0fd9", idProduct="008f", bDeviceClass="00", busnum=port.split("-")[0],
+                     devnum=dev, serial=serial)
+
+    def devices(self):
+        return usb.host_devices(self.root)
+
+    def test_a_port_or_serial_follows_the_device_to_its_new_number(self):
+        self.assertEqual(usb.pick(self.devices(), "port:9-2.2")["dev"], 19)
+        self.assertEqual(usb.pick(self.devices(), "serial:A00NA41632OR6N")["port"], "9-2.2")
+        (self.root / "9-2.2" / "devnum").write_text("31\n")  # enumerated again
+        self.assertEqual(usb.pick(self.devices(), "port:9-2.2")["dev"], 31)
+        self.assertEqual(usb.pick(self.devices(), "serial:A00NA41632OR6N")["dev"], 31)
+
+    def test_a_serial_two_devices_share_is_refused_with_both(self):
+        with self.assertRaisesRegex(DeskError, r"several USB devices are serial:DUPLICATE: 13\.40 .*port 13-1.*"
+                                               r"9\.20 .*port 9-2\.3"):
+            usb.pick(self.devices(), "serial:DUPLICATE")
+
+    def test_no_match_is_refused(self):
+        for query in ("port:9-9", "serial:a00na41632or6n"):  # serials are compared as they are
+            with self.subTest(query), self.assertRaisesRegex(DeskError, f"no USB device {query} on the host"):
+                usb.pick(self.devices(), query)
+
+    def test_usb_add_waits_for_a_device_that_is_coming_back(self):
+        later = [[], [{**DECK, "access": False}], [DECK]]
+        with mock.patch.object(usb, "host_devices", side_effect=lambda: later.pop(0) if len(later) > 1 else later[0]), \
+             mock.patch("time.sleep"):
+            self.assertEqual(usb.wait_present("serial:AL1", 5)["dev"], 7)
+        with mock.patch.object(usb, "host_devices", return_value=[]), mock.patch("time.sleep"), \
+             mock.patch("time.monotonic", side_effect=[0, 0, 6]), \
+             self.assertRaisesRegex(DeskError, "no USB device serial:AL1 on the host"):
+            usb.wait_present("serial:AL1", 5)
+
+    def test_ls_shows_the_port_to_name_a_device_by(self):
+        with mock.patch.object(usb, "listing", return_value=[{**DECK, "run": None}]), \
+             mock.patch("builtins.print") as out:
+            cli.cmd_usb(SimpleNamespace(usb_cmd="ls"))
+        self.assertEqual(out.call_args.args[0], "0fd9:0084\t3.7\tport:3-1\tStream Deck +\tfree")
+
+    def test_what_counts_as_a_device(self):
+        for good in ("0fd9:008f", "9.19", "port:9-2.2", "port:13-1", "serial:A00N-41"):
+            self.assertTrue(usb.is_query(good), good)
+        for bad in ("deck", "port:9", "port:../x", "serial:", "9-2.2"):
+            self.assertFalse(usb.is_query(bad), bad)
+
+
 DECK = {"id": "0fd9:0084", "bus": 3, "dev": 7, "node": "/dev/bus/usb/003/007", "name": "Stream Deck +",
-        "access": True}
+        "access": True, "port": "3-1", "serial": "AL1"}
 
 
 def domain(*addresses):
@@ -194,7 +249,7 @@ class Gone(unittest.TestCase):
         with mock.patch.object(usb, "listing", return_value=rows), \
              mock.patch("builtins.print") as out:
             cli.cmd_usb(SimpleNamespace(usb_cmd="ls"))
-        self.assertIn("13.13\t-\tgone, still in run b2", out.call_args_list[1].args[0])
+        self.assertIn("13.13\t-\t-\tgone, still in run b2", out.call_args_list[1].args[0])
 
 
 if __name__ == "__main__":

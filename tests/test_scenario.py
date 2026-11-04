@@ -232,6 +232,38 @@ browser = "firefox"
 '''))
         self.assertEqual(len(data["step"]), 18)
 
+    def test_usb_steps_name_a_device_that_may_change_its_number(self):
+        data = scenario.load(write('''image = "a"
+usb = ["port:9-2.2"]
+[[step]]
+usb_rm = "serial:A00NA41632OR6N"
+[[step]]
+usb_add = "port:9-2.2"
+timeout = 30
+[[step]]
+usb_add = "0fd9:008f"
+'''))
+        self.assertEqual([scenario.describe(s) for s in data["step"]],
+                         [("usb_rm", "serial:A00NA41632OR6N"), ("usb_add", "port:9-2.2"), ("usb_add", "0fd9:008f")])
+        for bad in ('usb_add = "deck"', 'usb_add = "9-2.2"', 'usb_rm = "port:9-2.2"\ntimeout = 5', 'usb_add = 3'):
+            with self.subTest(bad), self.assertRaises(DeskError):
+                scenario.load(write(f'image = "a"\n[[step]]\n{bad}'))
+        with self.assertRaisesRegex(DeskError, "port:BUS-PORT"):
+            scenario.load(write('image = "a"\nusb = ["deck"]'))
+
+    def test_usb_steps_hand_over_and_take_back_by_what_they_name(self):
+        deck = {"id": "0fd9:008f", "name": "Stream Deck XL", "bus": 9, "dev": 31}
+        run = SimpleNamespace()
+        with mock.patch("desk.usb.wait_present") as present, mock.patch("desk.usb.add", return_value=deck) as add, \
+             mock.patch("desk.usb.remove", return_value=deck) as remove:
+            got = scenario._step(run, SimpleNamespace(), None, {"usb_add": "port:9-2.2", "timeout": 30})
+            self.assertEqual(got, "USB device 0fd9:008f Stream Deck XL (9.31) handed to the guest")
+            present.assert_called_once_with("port:9-2.2", 30)
+            add.assert_called_once_with(run, "port:9-2.2")
+            got = scenario._step(run, SimpleNamespace(), None, {"usb_rm": "port:9-2.2"})
+            self.assertEqual(got, "USB device 0fd9:008f (9.31) back with the host")
+            remove.assert_called_once_with(run, "port:9-2.2")
+
     def test_a_missing_file_is_a_mistake_too(self):
         with self.assertRaisesRegex(DeskError, "No such file"):
             scenario.load(Path("/nonexistent/scenario.toml"))
