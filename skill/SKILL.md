@@ -313,7 +313,10 @@ viewport`; both take `browser = "chromium"` or `"firefox"`, else the browser in 
 `disk_add = "8G:data"`, `disk_rm = "data"` (top-level `disks = ["8G:data"]` plugs them in
 before the first step, `usb = ["0fd9:0084"]` hands host USB devices over), `usb_add = "port:9-2.2"`,
 `usb_rm = "port:9-2.2"` (hand a host USB device over or take it back mid-scenario, named as for
-`desk usb add`; `usb_add` waits `timeout`, 10 s, for a device that is coming back), `console_errors = 0` (at
+`desk usb add`; `usb_add` waits `timeout`, 10 s, for a device that is coming back), `host =
+["tool", "arg"]` (a program on the host, no shell, checked like `exec` with `timeout`, `rc`,
+`output`, `until`; it gets `DESK_RUN`, `DESK_RUN_DIR`, `DESK_SSH_PORT`; `save = "ADDR"` keeps its
+stdout for `{ADDR}` in later steps), `console_errors = 0` (at
 most that many new errors in the web console since the start or the previous such step; end a UI
 scenario with one. Chromium's messages may be console.error, which its log does not tell: any
 new one makes the step fail with exit 2, desk's failure, not the product's; `console_errors =

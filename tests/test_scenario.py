@@ -264,6 +264,55 @@ usb_add = "0fd9:008f"
             self.assertEqual(got, "USB device 0fd9:008f (9.31) back with the host")
             remove.assert_called_once_with(run, "port:9-2.2")
 
+    def test_host_steps_take_a_program_and_save_for_later_steps(self):
+        data = scenario.load(write('''image = "a"
+[[step]]
+host = ["del", "connect"]
+save = "ADDR"
+timeout = 40
+[[step]]
+usb_add = "{ADDR}"
+[[step]]
+exec = "echo {ADDR}"
+output = "{ADDR}"
+'''))
+        self.assertEqual(scenario.describe(data["step"][0]), ("host", "del connect"))
+        for bad, why in (('host = "del connect"', "no shell"), ('host = []', "no shell"),
+                         ('host = ["x"]\nsave = "addr"', "capitals"), ('exec = "x"\nsave = "A"', "does not use save"),
+                         ('usb_add = "{ADDR}"', "no step before it saves ADDR"),
+                         ('exec = "echo {LATER}"\n[[step]]\nhost = ["x"]\nsave = "LATER"', "saves LATER")):
+            with self.subTest(bad), self.assertRaisesRegex(DeskError, why):
+                scenario.load(write(f'image = "a"\n[[step]]\n{bad}'))
+
+    def test_a_host_step_runs_without_a_shell_names_the_run_and_saves_its_stdout(self):
+        import sys
+        run = SimpleNamespace(id="r1", dir=Path("/runs/r1"), ssh_port=2222)
+        steps = SimpleNamespace(saved={}, base=Path.cwd())
+        code = "import os; print('ignored'); print(os.environ['DESK_RUN'], os.environ['DESK_RUN_DIR'], " \
+               "os.environ['DESK_SSH_PORT'], os.environ['X'], '$HOME')"
+        got = scenario._step(run, SimpleNamespace(), steps,
+                             {"host": [sys.executable, "-c", code], "save": "OUT", "env": {"X": 1}})
+        self.assertEqual(got, "exit 0: r1 /runs/r1 2222 1 $HOME")
+        self.assertEqual(steps.saved, {"OUT": "ignored\nr1 /runs/r1 2222 1 $HOME"})
+        later = scenario._substituted({"usb_add": "{OUT}", "name": "x"}, {"OUT": "13.40"})
+        self.assertEqual(later, {"usb_add": "13.40", "name": "x"})
+        with self.assertRaisesRegex(DeskError, r"\{MISSING\} has no value"):
+            scenario._substituted({"exec": "echo {MISSING}"}, {})
+
+    def test_a_host_step_fails_like_exec(self):
+        import sys
+        run = SimpleNamespace(id="r1", dir=Path("/runs/r1"), ssh_port=2222)
+        steps = SimpleNamespace(saved={}, base=Path.cwd())
+        fail = [sys.executable, "-c", "import sys; print('said'); print('wrong', file=sys.stderr); sys.exit(3)"]
+        with self.assertRaisesRegex(scenario.StepFailed, "(?s)exit 3.*stdout:\nsaid.*stderr:\nwrong"):
+            scenario._step(run, SimpleNamespace(), steps, {"host": fail})
+        self.assertEqual(scenario._step(run, SimpleNamespace(), steps, {"host": fail, "rc": 3}), "exit 3: said")
+        with self.assertRaisesRegex(scenario.StepFailed, "still running after 1s"):
+            scenario._step(run, SimpleNamespace(), steps,
+                           {"host": [sys.executable, "-c", "import time; time.sleep(5)"], "timeout": 1})
+        with self.assertRaisesRegex(DeskError, "cannot run /nonexistent/tool"):
+            scenario._step(run, SimpleNamespace(), steps, {"host": ["/nonexistent/tool"]})
+
     def test_a_missing_file_is_a_mistake_too(self):
         with self.assertRaisesRegex(DeskError, "No such file"):
             scenario.load(Path("/nonexistent/scenario.toml"))

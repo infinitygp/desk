@@ -5,6 +5,7 @@ The result is an exit code and the usual report, with the steps in its timeline.
 import glob
 import hashlib
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -21,9 +22,9 @@ from .steps import Steps
 ACTIONS = {"root", "exec", "gui", "focus", "click", "type", "key", "expect", "expect_absent", "shot",
            "reboot", "wait", "clock", "disk_add", "disk_rm", "console_errors", "prepare", "open", "viewport",
            "observe_start", "observe_stop", "mark", "set_text", "move", "drag", "scroll", "press", "release", "win",
-           "pull", "offline", "usb_add", "usb_rm"}
+           "pull", "offline", "usb_add", "usb_rm", "host"}
 OPTIONS = {"role", "exact", "timeout", "output", "rc", "name", "soft", "env", "step", "until", "anywhere", "browser",
-           "button", "window", "state", "text", "double", "to"}
+           "button", "window", "state", "text", "double", "to", "save"}
 # The options each action reads, besides name and soft; any other would be ignored without a word.
 READS = {
     "root": {"timeout", "output", "rc", "until"}, "exec": {"timeout", "output", "rc", "until"},
@@ -36,7 +37,10 @@ READS = {
     "expect": {"role", "exact", "timeout", "window", "state"}, "expect_absent": {"role", "exact", "timeout", "window"},
     "reboot": {"timeout"}, "wait": {"timeout"}, "clock": {"step", "timeout"}, "disk_rm": {"timeout"},
     "open": {"timeout", "browser"}, "viewport": {"browser"}, "usb_add": {"timeout"},
+    "host": {"timeout", "rc", "output", "env", "until", "save"},
 }
+# {NAME} in a step: the stdout a host step before it kept with save = "NAME".
+SAVED = re.compile(r"\{([A-Z][A-Z0-9_]*)\}")
 
 
 def _number(v) -> bool:
@@ -101,6 +105,10 @@ VALUES = {
     **{o: (lambda v: isinstance(v, bool), "true or false") for o in ("exact", "soft", "until", "anywhere", "double")},
     "env": (lambda v: isinstance(v, dict) and all(isinstance(x, (str, int, float)) for x in v.values()),
             "a table like {NAME = \"value\"}"),
+    "host": (lambda v: isinstance(v, list) and bool(v) and all(_text(x) for x in v),
+             "a program and its arguments, [\"program\", \"arg\"] (no shell)"),
+    "save": (lambda v: isinstance(v, str) and re.fullmatch(r"[A-Z][A-Z0-9_]*", v) is not None,
+             "a NAME in capitals, used as {NAME} by later steps"),
 }
 # What an [[observe]] table takes: a session started before the first step (start = "before") or
 # by an observe_start step (start = "step"), stopped by an observe_stop step or when the run ends.
@@ -182,14 +190,21 @@ def load(path: Path) -> dict:
     if not isinstance(data.get("step", []), list) or not all(isinstance(s, dict) for s in data.get("step", [])):
         raise DeskError(f"{path}: steps are [[step]] tables")
     held = 0  # the step whose press is not released yet
+    saved: set[str] = set()  # names host steps before this one keep
     for i, step in enumerate(data.get("step", []), 1):
+        unknown = sorted(set(SAVED.findall(json.dumps(step))) - saved)
+        if unknown:
+            raise DeskError(f"{path}: step {i}: no step before it saves {', '.join(unknown)} "
+                            "(a host step with save = \"NAME\")")
+        if "save" in step:
+            saved.add(step["save"])
         actions = set(step) & ACTIONS
         if len(actions) != 1 or set(step) - ACTIONS - OPTIONS:
             raise DeskError(f"{path}: step {i} needs exactly one of {sorted(ACTIONS)}, "
                             f"plus any of {sorted(OPTIONS)} (got {sorted(step)})")
         action = actions.pop()
-        if "until" in step and action not in ("exec", "root", "gui"):
-            raise DeskError(f"{path}: step {i}: until goes with exec, root or gui")
+        if "until" in step and action not in ("exec", "root", "gui", "host"):
+            raise DeskError(f"{path}: step {i}: until goes with exec, root, gui or host")
         by_name = {"role", "exact", "timeout", "window"} & set(step)
         if action in ("click", "move", "drag", "press", "release") and by_name and not (
                 isinstance(step[action], str) or (isinstance(step[action], list) and isinstance(step[action][0], str))):
@@ -224,6 +239,8 @@ def load(path: Path) -> dict:
                             f"(it takes {', '.join(takes)})")
         for key, value in step.items():
             check, takes = VALUES[key]
+            if isinstance(value, str) and SAVED.search(value):
+                continue  # known only when the step runs, where what reads it checks it
             if not check(value):
                 raise DeskError(f"{path}: step {i}: {key} takes {takes} (got {value!r})")
         if action == "disk_add":
@@ -456,6 +473,45 @@ def _shell(run, spec, step: dict, as_root: bool) -> str:
     return _checked_command(step, once, lambda r: guest.lost(r, run.ssh_port, user, f"step {command[:60]!r}"))
 
 
+def _host(run, step: dict, saved: dict[str, str], base: Path) -> str:
+    """A program on the host, as desk's user and without a shell, checked like an exec step; its
+    environment names the run, so a host tool (a device emulator, a power switch) can aim at it."""
+    argv = step["host"]
+    env = {**os.environ, "DESK_RUN": run.id, "DESK_RUN_DIR": str(run.dir), "DESK_SSH_PORT": str(run.ssh_port),
+           **{k: str(v) for k, v in step.get("env", {}).items()}}
+    last = {}
+
+    def once(attempt: float) -> tuple[subprocess.CompletedProcess, bool]:
+        stopped = False
+        try:
+            r = subprocess.run(argv, capture_output=True, timeout=attempt, env=env, cwd=base)
+        except subprocess.TimeoutExpired as e:
+            r, stopped = subprocess.CompletedProcess(argv, 124, e.stdout or b"", e.stderr or b""), True
+        except OSError as e:
+            raise DeskError(f"host step: cannot run {argv[0]}: {e.strerror}") from None
+        last["r"] = r
+        return r, stopped
+
+    shown = _checked_command(step, once, None)
+    out = last["r"].stdout.decode(errors="replace").strip()
+    if "save" in step:
+        saved[step["save"]] = out[:4096]
+    return f"exit {last['r'].returncode}" + (f": {shown}" if shown else "")
+
+
+def _substituted(step: dict, saved: dict[str, str]) -> dict:
+    """The step with each {NAME} replaced by what a host step saved under NAME."""
+    def one(v):
+        if isinstance(v, str):
+            def value(m):
+                if m[1] not in saved:
+                    raise DeskError(f"{{{m[1]}}} has no value: the host step that saves it did not run here")
+                return saved[m[1]]
+            return SAVED.sub(value, v)
+        return [one(x) for x in v] if isinstance(v, list) else v
+    return {k: one(v) for k, v in step.items()}
+
+
 def _gui_waited(run, spec, step: dict, argv: list[str], env: dict[str, str]) -> str:
     """A program in the desktop session, waited for and checked like an exec step (exec --gui --wait):
     what it sees there (the display, UI Automation, the session's environment) SSH does not."""
@@ -521,7 +577,7 @@ def _checked_command(step: dict, once, lost) -> str:
 # With a browser machine (browser = IMAGE) these steps go to the guest under test, and the rest (its
 # screen, the browser, clicks, keys) to the browser machine.
 GUEST_ACTIONS = {"root", "exec", "reboot", "pull", "clock", "disk_add", "disk_rm", "prepare", "offline",
-                 "observe_start", "observe_stop", "mark", "usb_add", "usb_rm"}
+                 "observe_start", "observe_stop", "mark", "usb_add", "usb_rm", "host"}
 # A port of the guest under test in an address to open: {guest:80}.
 GUEST_PORT = re.compile(r"\{guest:(\d{1,5})\}")
 
@@ -618,6 +674,8 @@ def _find(step: dict) -> dict:
 def _step(run, spec, steps: Steps, step: dict) -> str:
     action, _ = describe(step)
     value, role, timeout = step[action], step.get("role"), step.get("timeout")
+    if action == "host":
+        return _host(run, step, steps.saved, steps.base)
     if action in ("root", "exec"):
         return _shell(run, spec, step, action == "root")
     if action in ("observe_start", "observe_stop", "mark"):
@@ -850,6 +908,7 @@ def _run_steps(run, spec, data: dict, first: int = 1, observed: dict | None = No
     steps = Steps(spec, run)
     steps.observations = observed or {}
     steps.base = base or Path.cwd()  # where pull's `to` is, as [build]'s artifacts are
+    steps.saved = {}  # what host steps kept with save
     on_browser = None
     if machine is not None:
         on_browser = (machine, runs.spec_for(machine._run))
@@ -864,6 +923,7 @@ def _run_steps(run, spec, data: dict, first: int = 1, observed: dict | None = No
             lost = None
             target, tspec, tsteps = on_browser if on_browser and action not in GUEST_ACTIONS else (run, spec, steps)
             try:
+                step = _substituted(step, steps.saved)
                 if action == "open":
                     step = {**step, "open": _guest_url(step["open"], run, machine)}
                 detail = _step(target, tspec, tsteps, step)

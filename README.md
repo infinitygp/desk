@@ -457,6 +457,16 @@ told from a command's by what ssh prints last at `LogLevel=ERROR` and, when it p
 closed connection is logged at INFO), by `exit 0` failing too; a connection the guest resets in
 the handshake started nothing, so it is sent again.
 
+A `host` step runs a program on the host between guest steps (a device emulator, a power switch,
+a test server): as desk's user, from a list with no shell in between, from where `[build]` runs,
+checked like an `exec` step (`timeout`, `rc`, `output`, `until`), with `DESK_RUN`, `DESK_RUN_DIR`
+and `DESK_SSH_PORT` in its environment so it can aim at the run. Its line in the report and the
+timeline is the command, its exit code and its time. `save = "NAME"` keeps its stdout, and
+`{NAME}` in any later step becomes that value (an address to `usb_add`, a value an `exec` checks).
+Loading refuses a `{NAME}` that no step before it saves, and a step run with `--from` past the one
+that saves it fails as desk's. Only `{` and a name in capitals count, so `{guest:80}` and code in
+braces stay as they are.
+
 A guest without a desktop gets a browser machine (`browser = IMAGE`): a second run, of a Linux
 desktop image, whose Firefox opens the guest's pages, so a11y, console errors, screenshots and the
 report work there as they do on any desktop, with no browser to install on the host and no second
