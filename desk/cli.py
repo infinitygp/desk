@@ -736,8 +736,7 @@ def cmd_scenario(args) -> None:
         print(f"{path}: image {image}, {len(data.get('step', []))} steps"
               + (f"; build: {build['run']}" if build.get("run") else ""))
         for i, step in enumerate(data.get("step", []), 1):
-            action, arg = scenario.describe(step)
-            print(f"  {i:>2}. {step.get('name') or (action + ' ' + arg).strip()}")
+            print(f"  {i:>2}. {scenario.step_label(step)}")
         scenario.check_observations(data, load_image(image))
         if scenario.browser_machine(data):
             print(f"  browser machine: {data['browser']} (the steps that are not commands go to it)")

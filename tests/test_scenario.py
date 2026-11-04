@@ -299,6 +299,12 @@ output = "{ADDR}"
         with self.assertRaisesRegex(DeskError, r"\{MISSING\} has no value"):
             scenario._substituted({"exec": "echo {MISSING}"}, {})
 
+    def test_a_named_host_step_still_shows_its_command(self):
+        self.assertEqual(scenario.step_label({"host": ["del", "connect"], "name": "reconnect"}),
+                         "reconnect (host del connect)")
+        self.assertEqual(scenario.step_label({"host": ["del", "stop"]}), "host del stop")
+        self.assertEqual(scenario.step_label({"exec": "true", "name": "check"}), "check")
+
     def test_a_host_step_fails_like_exec(self):
         import sys
         run = SimpleNamespace(id="r1", dir=Path("/runs/r1"), ssh_port=2222)

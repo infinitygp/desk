@@ -418,6 +418,16 @@ def describe(step: dict) -> tuple[str, str]:
     return action, value if isinstance(value, str) else " ".join(map(str, value)) if isinstance(value, list) else ""
 
 
+def step_label(step: dict) -> str:
+    """The step as the output, the timeline and the report name it; a host step with a name keeps
+    its command too, since what ran on the host must show."""
+    action, arg = describe(step)
+    command = f"{action} {arg}".strip()
+    if "name" not in step:
+        return command
+    return f"{step['name']} ({command})" if action == "host" else step["name"]
+
+
 def _base(path: Path, data: dict) -> Path:
     """Where [build] runs and its artifacts are: `dir`, relative to the scenario file (a project in
     a repository of several), else the top of the scenario's git repository."""
@@ -918,7 +928,7 @@ def _run_steps(run, spec, data: dict, first: int = 1, observed: dict | None = No
             if i < first:
                 continue
             action, arg = describe(step)
-            label = step.get("name") or f"{action} {arg}".strip()
+            label = step_label(step)
             t0 = time.monotonic()
             lost = None
             target, tspec, tsteps = on_browser if on_browser and action not in GUEST_ACTIONS else (run, spec, steps)
