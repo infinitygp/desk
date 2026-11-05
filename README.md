@@ -21,15 +21,17 @@ A host that only uses desk needs no checkout: a release is one file, `desk.pyz`,
 the system's `python3` with the distribution's libvirt bindings (see Host setup). In fish:
 
 ```fish
-curl --create-dirs -fLo ~/.local/bin/desk https://github.com/infinitygp/desk/releases/latest/download/desk.pyz
+mkdir -p ~/.local/bin
+gh release download --repo infinitygp/desk --pattern desk.pyz --output ~/.local/bin/desk
 chmod +x ~/.local/bin/desk
 desk install      # the skill into ~/.agents/skills/desk (and ~/.claude/skills/desk), then desk doctor
 desk update       # later: the newest release, skill included
 ```
 
-`desk update` downloads over HTTPS as well, and only when that fails (a private repository, a fork
-of it) with `gh`, logged in: the first line would then be
-`gh release download --repo OWNER/desk --pattern desk.pyz --output ~/.local/bin/desk`.
+The repository is private, so the release is downloaded with `gh`, logged in (`gh auth login`); a
+plain `curl` of `https://github.com/infinitygp/desk/releases/latest/download/desk.pyz` gets 404.
+`desk update` tries HTTPS first and falls back to `gh` the same way. A public fork can use `curl
+--create-dirs -fLo ~/.local/bin/desk https://github.com/OWNER/desk/releases/latest/download/desk.pyz`.
 
 On its first start a release unpacks itself into `~/.cache/desk/<build>/` and runs from there,
 so the blocks and the helpers it starts or copies into guests are ordinary files;
