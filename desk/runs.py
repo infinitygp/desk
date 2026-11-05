@@ -409,7 +409,9 @@ def _meta(warm_dir: Path) -> dict:
 
 
 def warm_meta(spec: ImageSpec) -> dict:
-    return _meta(spec.warm_dir)
+    """What was recorded of the guest's build: a derived image has no warm state, its own build
+    carries the licence end and the zone and layout of the run it was saved from."""
+    return _meta(spec.base_dir if spec.derived_from else spec.warm_dir)
 
 
 def warm_stale(spec: ImageSpec) -> str | None:
@@ -430,6 +432,8 @@ def warm_is_current(spec: ImageSpec) -> bool:
 
 def cold_reason(spec: ImageSpec, warm_dir: Path | None = None) -> str | None:
     """Why a run of this image would boot instead of restoring the warm state; None: it restores."""
+    if spec.derived_from:
+        return "a derived image has no warm state"
     warm = (warm_dir or spec.warm_dir) / "memory.save"
     if not warm.exists():
         return f"no warm state for {spec.name} (desk image warm {spec.name})"
@@ -688,12 +692,19 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
     rd = RUNS / run_id
     if rd.exists():
         raise DeskError(f"run {run_id} already exists")
+    if spec.derived_from and not spec.base_xml.exists():
+        raise DeskError(f"the saved disk of {spec.name} is missing ({spec.base_dir}); desk image rm {spec.name} "
+                        "removes it, desk image save makes a new one from a run")
     if not spec.base_xml.exists():
         raise DeskError(f"base image {spec.name} not built yet (desk image build {spec.name})")
     # Pin the builds now: `desk maintain` may switch the current ones while this run starts.
     base_dir, warm_dir = spec.base_dir.resolve(), spec.warm_dir.resolve()
     warm = warm_dir / "memory.save"
     saved_xml = None
+    derived = bool(spec.derived_from)
+    if derived and not cold:
+        print(f"[desk] booting cold: {cold_reason(spec)}")
+        cold = True
     if displays > 1 and spec.family != "windows":
         # Measured on GNOME 50: the second GPU's monitor shows its first frame and is never
         # updated again (mutter's copy to a GPU without 3D), so screenshots would lie.
@@ -725,10 +736,11 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
                       f"this run {spec.memory_mib} MiB and {spec.vcpus}")
                 cold, saved_xml = True, None
     # The provisioned disk of a current warm build spares provisioning and a relogin, and gives
-    # cold runs the files warm ones start from.
-    fresh = cold and not ((warm_dir / images.PROVISIONED).exists() and warm_is_current(spec))
+    # cold runs the files warm ones start from. A derived image's disk has been provisioned and
+    # more: it is the disk, and provisioning it again would redo what the run it was saved from did.
+    fresh = cold and not derived and not ((warm_dir / images.PROVISIONED).exists() and warm_is_current(spec))
     # What the guest was provisioned with: the warm build's, or this spec's when the run provisions.
-    made = {} if fresh else _meta(warm_dir)
+    made = {} if fresh else _meta(base_dir if derived else warm_dir)
     rd.mkdir(parents=True)
     # A restore must also keep the saved domain name; run ids stay independent of it.
     domain = f"desk-{run_id}" if cold else ET.fromstring(saved_xml).findtext("name")
@@ -748,8 +760,10 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
     disk, nvram = rd / "disk.qcow2", rd / "VARS.qcow2"
     try:
         if cold:
-            qemu_img_overlay(base_dir / "disk.qcow2" if fresh else warm_dir / images.PROVISIONED, disk)
-            reflink_copy((base_dir if fresh else warm_dir) / "VARS.qcow2", nvram)
+            # A derived image's build holds the disk and the firmware variables of the run it was saved from.
+            from_base = fresh or derived
+            qemu_img_overlay(base_dir / "disk.qcow2" if from_base else warm_dir / images.PROVISIONED, disk)
+            reflink_copy((base_dir if from_base else warm_dir) / "VARS.qcow2", nvram)
             template = (base_dir / "domain.xml").read_text()
         else:
             qemu_img_overlay(warm_dir / "disk.qcow2", disk)

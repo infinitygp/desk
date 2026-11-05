@@ -85,6 +85,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk browser viewport WxH\|reset [--browser chromium]` | Pages at WxH CSS pixels (a phone: `390x700`) through Firefox's responsive design mode or Chromium's device mode (DevTools docked in its window, the page at 100 %); prints the `desk shot --region` of the page area |
 | `desk browser console [--errors] [--all]` | Web console of every page since the run started (see Pitfalls) |
 | `desk record start [--fps N]`, `desk record stop`, `desk up --record` | Record the screen as a WebM video, kept with the report |
+| `desk image save NAME RUN` | Keep the disk of a prepared run as the new image NAME and take the run down: the guest is shut down cleanly first, the disk copied in full (about the size of its used part, ~13 GiB for Windows). `desk up NAME` boots cold (~25 s for Windows) with everything installed; it is what replaces a snapshot for runs with the usbvfiod controller ([system.md](system.md)) |
 | `desk usb ls`, `desk usb add VENDOR:PRODUCT\|BUS.DEVICE`, `desk usb rm ...`, `desk up IMAGE --usb ...` | Hand a host USB device to the guest ([system.md](system.md)) |
 | `desk up IMAGE --usbvfiod`, `desk usb add DEVICE --at PORTPATH [--hub ...]`, `desk usb rm at:PORTPATH`, `desk usb socket` | A USB controller where hubs and devices stand at port paths, and its hotplug socket for a process that serves emulated devices ([system.md](system.md)) |
 | `desk observe start PROVIDER`, `desk observe mark TEXT`, `desk observe stop`, `desk observe providers` | Record what a program does inside a Windows guest with its own tools (Process Monitor, ETW, pktmon, USBPcap, IPC listings, debugger servers); files copied, hashed and checked ([observe.md](observe.md)) |
@@ -202,6 +203,19 @@ Windows 11 Enterprise (evaluation) for Windows builds and installers; `openwrt-2
 (`desk image list` shows the date) unless the host renews them with `desk maintain`, by hand or
 from its weekly timer; if `desk up` prints a warning about a failed maintenance or a licence
 running out, pass it on to the user.
+
+## Derived images
+
+A run with the usbvfiod controller cannot be snapshotted and always boots cold, so what the user
+installed in it would be installed again in every run. When they want that kept, `desk image save
+NAME RUN` turns a prepared run into an image: it shuts the guest down, copies the disk, and takes
+the run down (a guest that does not answer is left running, and the command says so). Ask for a
+name that says what is in it (`windows-11-xlu`: lower-case letters, digits, `-`), and tell the user
+the copy takes the space of the used disk (~13 GiB for Windows). `desk up NAME [--usbvfiod]` then
+boots cold (~25 s for Windows) with everything installed and is not provisioned again. It has the
+settings of the image it came from, `desk maintain` never rebuilds it (a Windows evaluation licence
+keeps running out on its source's clock: when `desk up` says it is, the user renews the source and
+saves a new image), and `desk image rm NAME` removes it.
 
 ## Snapshots
 

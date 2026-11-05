@@ -69,17 +69,35 @@ def cmd_image(args) -> None:
         print(f"{args.name}: {', '.join(f'{k} = {v}' for k, v in settings.items())} "
               "(desk maintain makes the builds it needs)")
         return
+    if args.image_cmd == "save":
+        from . import derive
+
+        derive.check_name(args.name)
+        run = runs.resolve(args.source_run)
+        derive.save(args.name, run)
+        _down(run)
+        return
     if args.image_cmd == "rm":
         variant = config.base_of(args.name) is not None
+        derived = config.derived_from(args.name) is not None
+        users = [n for n in list_images() if config.derived_from(n) == args.name]
         config.remove_image(args.name)
         # NAME and NAME.VERSION: NAME* is also the builds of the images whose names begin with it.
-        builds = ", ".join(f"{d / args.name}, {d / args.name}.*" for d in ((WARM,) if variant else (BASE, WARM)))
+        roots = (WARM,) if variant else (BASE,) if derived else (BASE, WARM)
+        builds = ", ".join(f"{d / args.name}, {d / args.name}.*" for d in roots)
         print(f"removed {args.name}; its builds stay until deleted by hand ({builds})")
+        if users:
+            # Their disks are whole, but what a run of them is set up with comes from the source's definition.
+            command = config.add_command(args.name)
+            print(f"{', '.join(users)} derived from {args.name}: a run of {'it' if len(users) == 1 else 'them'} takes "
+                  f"its settings from that definition, so define it again before one starts"
+                  + (f" ({command})" if command else ""))
         return
     spec = load_image(args.name)
     if args.image_cmd == "show":
         _image_show(spec)
         return
+    images.refuse_derived(spec, args.image_cmd)
     # Builds are versioned (images.promote), so runs of the current build may go on meanwhile.
     with runs.image_lock(spec.name):
         if args.image_cmd == "build":
@@ -110,9 +128,13 @@ def _shown(value, files: bool = False) -> str:
 
 def _image_show(spec) -> None:
     """The settings an image's blocks add up to, those that differ from ImageSpec's defaults."""
-    data = config.read_image(spec.name)
-    print(f"# {config._image_file(spec.name)}: " + " + ".join(
-        [data["distro"], *([data["desktop"]] if data["desktop"] else []), *data["addons"]]))
+    if spec.derived_from:
+        print(f"# {config._image_file(spec.name)}: derived from {spec.derived_from}, a disk saved from a run "
+              "(desk image save); the settings are its")
+    else:
+        data = config.read_image(spec.name)
+        print(f"# {config._image_file(spec.name)}: " + " + ".join(
+            [data["distro"], *([data["desktop"]] if data["desktop"] else []), *data["addons"]]))
     for f in fields(spec):
         value = getattr(spec, f.name)
         if f.name not in ("name", "dir", "base_version", "warm_version") and value != f.default:
@@ -153,6 +175,8 @@ def _image_list() -> None:
             print(f"{name:<{w}}{'-':<8}{'-':<12}{'-':<20}broken definition: {e}")
             continue
         notes = [f"variant of {spec.base}"] if spec.base else []
+        if spec.derived_from:
+            notes.append(_derived_note(spec))
         if (spec.warm_dir / "memory.save").exists():
             state = "warm"
             stale = runs.warm_stale(spec)
@@ -182,6 +206,15 @@ def _image_list() -> None:
         command = config.add_command(name)
         print(f"{name:<{w}}{'-':<8}{'-':<12}{'-':<20}builds without a definition: "
               + (f"use them again after {command}" if command else "delete them by hand"))
+
+
+def _derived_note(spec) -> str:
+    """Where a derived image comes from, as its build says: the run it was saved from."""
+    try:
+        run = json.loads((spec.base_dir / "meta.json").read_text()).get("source_run")
+    except (OSError, ValueError):
+        run = None
+    return f"derived from {spec.derived_from}" + (f" (run {run})" if run else "")
 
 
 def _resolution(text: str | None) -> tuple[int, int] | None:
@@ -245,19 +278,22 @@ def cmd_down(args) -> None:
         raise DeskError(f"two different runs given: -r {args.run} and {args.id}")
     targets = runs.all_runs() if args.all else [runs.resolve(args.id or args.run)]
     for run in targets:
-        gone = _run_files(run)
-        # A VM that is gone (QEMU ended) still has its screenshots and timeline to report.
-        report, videos = evidence.finish(run, keep=args.keep, diff=args.diff, report=not args.no_report,
-                                         stopped=not evidence.reported(run))
-        if args.keep or run.dir.exists():
-            print(f"run {run.id} down (files kept in {run.dir})")
-        else:
-            print(f"run {run.id} down; deleted {run.dir}{gone} (--keep keeps it)"
-                  + ("; screenshots and logs are in the report" if report else ""))
-        if report:
-            print(f"report: {report / 'report.md'}")
-        for v in videos:
-            print(f"video: {v}")
+        _down(run, keep=args.keep, diff=args.diff, report=not args.no_report)
+
+
+def _down(run: runs.Run, keep: bool = False, diff: bool = False, report: bool = True) -> None:
+    gone = _run_files(run)
+    # A VM that is gone (QEMU ended) still has its screenshots and timeline to report.
+    written, videos = evidence.finish(run, keep=keep, diff=diff, report=report, stopped=not evidence.reported(run))
+    if keep or run.dir.exists():
+        print(f"run {run.id} down (files kept in {run.dir})")
+    else:
+        print(f"run {run.id} down; deleted {run.dir}{gone} (--keep keeps it)"
+              + ("; screenshots and logs are in the report" if written else ""))
+    if written:
+        print(f"report: {written / 'report.md'}")
+    for v in videos:
+        print(f"video: {v}")
 
 
 def _run_files(run: runs.Run) -> str:
@@ -1230,6 +1266,10 @@ def build_parser() -> argparse.ArgumentParser:
         ip = isub.add_parser(name, help=hlp)
         ip.add_argument("name")
         ip.add_argument("--force", action="store_true")
+    ip = isub.add_parser("save", help="keep the disk of a prepared run as a new image (shuts the guest down, "
+                                      "takes the run down)")
+    ip.add_argument("name", help="the new image: lower-case letters, digits and -")
+    ip.add_argument("source_run", metavar="RUN")
     ip = isub.add_parser("shot", help="screenshot of an image install in progress")
     ip.add_argument("name")
     p.set_defaults(func=cmd_image)

@@ -153,6 +153,69 @@ class Due(unittest.TestCase):
             self.assertEqual(maintain.check_usable(self.spec), [])
 
 
+class Derived(unittest.TestCase):
+    """An image saved from a run is never installed or warmed again: that would replace what was saved."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.home = Path(tmp.name)
+        (self.home / "images").mkdir()
+        (self.home / "images" / "windows-11.toml").write_text('distro = "windows-11"\n')
+        (self.home / "images" / "xlu.toml").write_text('derived_from = "windows-11"\n')
+        for target, value in (("desk.config.IMAGES", self.home / "images"), ("desk.maintain.BASE", self.home / "base"),
+                              ("desk.config.BASE", self.home / "base"), ("desk.maintain.WARM", self.home / "warm"),
+                              ("desk.config.WARM", self.home / "warm")):
+            patch = mock.patch(target, value)
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def saved(self, expires: float | None) -> Path:
+        d = self.home / "base" / "xlu.20261001-030000"
+        d.mkdir(parents=True)
+        (d / "disk.qcow2").write_bytes(b"")
+        # Another definition than today's: a rebuild would be due for any other image.
+        (d / "meta.json").write_text(json.dumps({"created": time.time() - 400 * DAY, "fingerprint": "of the past",
+                                                 **({"expires": expires} if expires else {})}))
+        images.promote(self.home / "base" / "xlu", d)
+        return d
+
+    def test_it_is_in_no_family(self):
+        self.assertEqual(maintain.families(), {"windows-11": ["windows-11"]})
+
+    def test_maintain_looks_after_the_others_and_names_it_when_asked(self):
+        self.saved(None)
+        with mock.patch("desk.maintain.selected", return_value=["windows-11"]) as selected, \
+                mock.patch("desk.maintain._family", return_value=["- windows-11: up to date"]) as family, \
+                mock.patch("desk.maintain.images.build") as build, mock.patch("desk.maintain.images.warm") as warm, \
+                mock.patch("desk.maintain._log"):
+            self.assertTrue(maintain.maintain(dry_run=True))
+            self.assertEqual([c.args[0] for c in selected.call_args_list], ["windows-11"])
+            self.assertEqual([c.args[0] for c in family.call_args_list], ["windows-11"])
+            with self.assertRaisesRegex(DeskError, "xlu is derived from windows-11: desk maintain never renews a disk "
+                                                   "that was saved from a run.*maintain --only windows-11"):
+                maintain.maintain(only="xlu", dry_run=True)
+        build.assert_not_called()
+        warm.assert_not_called()
+
+    def test_its_licence_is_the_one_its_build_says_not_a_warm_states(self):
+        spec = load_image("xlu")
+        self.assertIsNone(maintain.days_left(spec))
+        self.assertEqual(maintain.check_usable(spec), [])
+        self.saved(time.time() + 5 * DAY)
+        self.assertAlmostEqual(maintain.days_left(spec), 5, delta=0.01)
+        self.assertEqual(maintain.check_usable(spec),
+                         ["the licence of xlu runs out in 5 days (desk maintain does not renew a derived image; renew "
+                          "windows-11 with desk maintain --only windows-11 and save a new xlu from a run of it with "
+                          "desk image save)"])
+
+    def test_an_expired_licence_stops_runs_and_says_what_renews_it(self):
+        self.saved(time.time() - 3 * DAY)
+        with self.assertRaisesRegex(DeskError, "licence of xlu ran out 3 days ago.*Desk maintain does not renew a "
+                                               "derived image; renew windows-11 with desk maintain --only windows-11"):
+            maintain.check_usable(load_image("xlu"))
+
+
 class ExitCode(unittest.TestCase):
     """1 is a selftest that failed; what kept desk from looking after an image is desk's."""
 

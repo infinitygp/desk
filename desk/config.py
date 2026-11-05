@@ -6,7 +6,7 @@ import sys
 import tomllib
 import types
 import typing
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -177,6 +177,10 @@ class ImageSpec:
     # A variant reuses another image's installed disk and differs only in provisioning, so it
     # has its own warm state (e.g. the same system in another language) without a second install.
     base: str | None = None
+    # A derived image (`desk image save`) is the disk of a prepared run of the image of this name.
+    # It has the settings of that image and a build of its own, no warm state, and `desk maintain`
+    # never renews it.
+    derived_from: str | None = None
     agent_wrapper: list[str] | None = None
     relogin: str | None = None
     # The guest's keyboard layout (one of LAYOUTS), which `desk type` maps characters to keys for,
@@ -469,6 +473,16 @@ def _unknown(name: str) -> str:
     return f"image {name!r} is not defined on this host ({known}); define it with: {command}"
 
 
+def derived_from(name: str) -> str | None:
+    """The image a derived image was saved from; None for every other definition, and for a file
+    that is missing or cannot be read."""
+    try:
+        source = _toml(_image_file(name)).get("derived_from")
+    except (OSError, DeskError):
+        return None
+    return source if isinstance(source, str) else None
+
+
 def read_image(name: str) -> dict:
     """What an image's file says: its blocks and the settings it overrides."""
     f = _image_file(name)
@@ -510,7 +524,32 @@ def _type_name(hint) -> str:
     return hint.__name__ if isinstance(hint, type) else str(hint)
 
 
+def _load_derived(name: str, data: dict) -> ImageSpec:
+    """The settings of the image a derived image was saved from, under the derived image's name:
+    its build is BASE/<name> and it has no warm state. The source may be derived itself."""
+    chain = [name]
+    while "derived_from" in data:
+        f = _image_file(chain[-1])
+        source = data["derived_from"]
+        if not isinstance(source, str) or len(data) != 1:
+            raise DeskError(f'{f}: the file of a derived image holds derived_from = "IMAGE" and nothing else')
+        if source in chain:
+            raise DeskError(f"{f}: {' -> '.join([*chain, source])} derives from itself")
+        chain.append(source)
+        data = _toml(_image_file(source)) if _image_file(source).is_file() else {}
+    try:
+        spec = load_image(chain[-1])
+    except DeskError as e:
+        # The source's builds are not needed, its definition is: it says what the guest is.
+        raise DeskError(f"{_image_file(name)}: derived from {chain[1]}, whose definition cannot be loaded "
+                        f"({e})") from None
+    return replace(spec, name=name, base=None, derived_from=chain[1], base_version=None, warm_version=None)
+
+
 def load_image(name: str) -> ImageSpec:
+    f = _image_file(name)
+    if f.is_file() and "derived_from" in (derived := _toml(f)):
+        return _load_derived(name, derived)
     data = read_image(name)
     distro, desktop, addons = data.pop("distro"), data.pop("desktop"), data.pop("addons")
     d_dir, layers, extra = _layers(distro, desktop, addons)
@@ -581,7 +620,7 @@ def _toml_value(v) -> str:
 def write_image(name: str, data: dict) -> Path:
     """An image's file: its blocks first, then the settings it overrides."""
     IMAGES.mkdir(parents=True, exist_ok=True)
-    lines = ["# Written by desk image add and desk image set, which keep no comments; editing it by hand is fine."]
+    lines = ["# Written by desk image add, set and save, which keep no comments; editing it by hand is fine."]
     for key in ("distro", "desktop", "addons", *sorted(set(data) - {"distro", "desktop", "addons"})):
         if data.get(key) not in (None, []):
             lines.append(f"{key} = {_toml_value(data[key])}")
@@ -597,7 +636,10 @@ def add_image(distro: str, desktop: str | None, addons: list[str], settings: dic
     written, that one first."""
     name = image_name(distro, desktop, addons)
     if _image_file(name).exists():
-        raise DeskError(f"{name} is defined already ({_image_file(name)}); desk image set {name} changes it")
+        source = derived_from(name)
+        raise DeskError(f"{name} is defined already ({_image_file(name)}); "
+                        + (f"it is derived from {source}, and desk image rm {name} removes it" if source else
+                           f"desk image set {name} changes it"))
     written = []
     base = variant_of(distro, desktop, addons)
     if base and not _image_file(base).exists():
@@ -614,6 +656,10 @@ def add_image(distro: str, desktop: str | None, addons: list[str], settings: dic
 
 
 def set_image(name: str, settings: dict) -> None:
+    source = derived_from(name)
+    if source:
+        raise DeskError(f"{name} is derived from {source} and has its settings; change them there, or for one run "
+                        "with desk up --memory and --cpus")
     data = read_image(name)
     before = _image_file(name).read_bytes()
     write_image(name, {**data, **settings})
@@ -626,6 +672,8 @@ def set_image(name: str, settings: dict) -> None:
 
 def base_of(name: str) -> str | None:
     """The image whose install an image runs on; of one whose file does not load, what its name says."""
+    if derived_from(name):
+        return None
     try:
         return load_image(name).base
     except DeskError:

@@ -75,6 +75,12 @@ desk -r usb1 usb rm 0fd9:008f                       # or at:5.1 (a hub too: ever
   the user's to open, `desk usb rm` or `desk down` gives it back). `usb add --at` on a run without
   the controller is refused, as is a snapshot of one with it (the controller is added to the
   running guest, so a restore would not have it).
+- To keep a prepared guest of such a run (software installed, settings made), save its disk as an
+  image instead: `desk image save windows-11-xlu usb1` shuts the guest down, copies the disk and
+  takes the run down. `desk up windows-11-xlu --usbvfiod` then boots cold (~25 s for Windows) with
+  everything installed, no provisioning again. The image is a full copy (about the size of the
+  used disk, ~13 GiB for Windows), `desk maintain` never rebuilds it, and for a Windows evaluation
+  image it keeps the licence clock of the image it came from.
 - `desk ls` says "usbvfiod ended" when the server is gone: the guest has lost the controller, and
   QEMU can abort the VM with it. The run cannot be repaired; `desk down` it (the report has the
   server's log). Never kill the server (`usbvfiod`) of a run yourself while its VM runs. A server

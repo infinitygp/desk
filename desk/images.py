@@ -120,6 +120,7 @@ def build(spec: ImageSpec, force: bool = False, promote_it: bool = True) -> str:
     """Install a new build of the base image and return its version; re-running attaches to an
     install that is still in progress. Builds sit next to each other, so runs keep using the
     build they started from."""
+    refuse_derived(spec, "build")
     if spec.base:
         raise DeskError(f"{spec.name} is a variant of {spec.base}: "
                         f"build {spec.base}, then `desk image warm {spec.name}`")
@@ -172,6 +173,15 @@ def install_problem(spec: ImageSpec, console: str) -> str | None:
         return None
     said = [line.strip() for line in console.splitlines() if marker.split(":")[0] + ":" in line]
     return said[-1][-500:] if said else f"it powered off without reporting {marker!r}, so its setup did not finish"
+
+
+def refuse_derived(spec: ImageSpec, command: str) -> None:
+    """A derived image is a disk that was saved from a run: building or warming it would put the
+    source's content in its place."""
+    if spec.derived_from:
+        raise DeskError(f"{spec.name} is derived from {spec.derived_from}: its disk was saved from a run, so "
+                        f"desk image {command} does not apply to it (desk image save makes a new one from a run, "
+                        "desk image rm removes it)")
 
 
 def _discard_build(name: str) -> None:
@@ -551,9 +561,9 @@ def _install(spec: ImageSpec, deadline: float) -> None:
         raise
 
 
-def _seal(spec: ImageSpec) -> None:
+def _seal(spec: ImageSpec, extra: dict | None = None) -> None:
     spec.base_disk.chmod(0o444)
-    meta = {"image": spec.name, "created": time.time(), "fingerprint": install_fingerprint(spec)}
+    meta = {"image": spec.name, "created": time.time(), "fingerprint": install_fingerprint(spec), **(extra or {})}
     (spec.base_dir / "meta.json").write_text(json.dumps(meta, indent=2))
     _log(f"base image ready: {spec.base_dir}")
 
@@ -671,7 +681,7 @@ def provision(spec: ImageSpec, port: int, relogin: bool = True) -> None:
                 _log("session did not come back after relogin, restarting the display manager again")
 
 
-def _power_off(dom, spec: ImageSpec, port: int, timeout: float = 600) -> None:
+def _power_off(dom, spec: ImageSpec, port: int, timeout: float = 600, after: str = "after provisioning") -> None:
     try:
         guest.ssh_run(port, spec.root_user, spec.cmd(spec.poweroff), capture=True, timeout=60)
     except subprocess.TimeoutExpired:
@@ -684,7 +694,7 @@ def _power_off(dom, spec: ImageSpec, port: int, timeout: float = 600) -> None:
         except libvirt.libvirtError:
             return  # a transient domain is gone once it has shut down
         time.sleep(2)
-    raise DeskError(f"the guest did not power off within {timeout:.0f}s after provisioning")
+    raise DeskError(f"the guest did not power off within {timeout:.0f}s {after}")
 
 
 def _boot_and_wait_ssh(dom, port: int, spec: ImageSpec, wd: Path, timeout: float = 300) -> bool:
@@ -708,6 +718,7 @@ def _boot_and_wait_ssh(dom, port: int, spec: ImageSpec, wd: Path, timeout: float
 def warm(spec: ImageSpec, force: bool = False, promote_it: bool = True) -> str:
     """Boot the base image, provision it and shut it down (the disk cold runs boot), boot that
     disk and save the running, logged-in desktop as a new warm build; returns its version."""
+    refuse_derived(spec, "warm")
     if not spec.base_xml.exists():
         raise DeskError(f"base image {spec.name} not built yet (desk image build {spec.name})")
     link = WARM / spec.name

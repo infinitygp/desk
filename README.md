@@ -93,6 +93,7 @@ bin/desk image warm fedora-44-gnome                # boot, provision, shut down,
 bin/desk image shot windows-11                     # look at a graphical installer while it runs
 bin/desk image list                                # state, build date, last selftest, licence, problems
 bin/desk image rm fedora-44-gnome-cockpit          # the definition; its builds stay until deleted by hand
+bin/desk image save windows-11-xlu RUN             # keep the disk of a prepared run as an image (Derived images)
 ```
 
 ### Definitions
@@ -327,13 +328,61 @@ the logged-in session (`images/distros/windows-11/agent/agent.ps1`, its port for
   limit is a `setsid` watchdog (BusyBox has no `timeout`), and `desk forward` leads to the LAN
   address, where router services listen.
 
+### Derived images
+
+`desk image save NAME RUN` keeps the disk of a prepared run as a new image, so that runs start
+from it with everything installed. It is what replaces a snapshot for a run with the usbvfiod
+controller: that run cannot be snapshotted (the controller is added to the running guest) and
+always boots cold, so software installed in it would be installed again in every run.
+
+```bash
+bin/desk up windows-11 --usbvfiod --name prep      # install and set up what the tests need
+bin/desk image save windows-11-xlu prep            # shuts the guest down, copies the disk, takes the run down
+bin/desk up windows-11-xlu --usbvfiod              # cold in ~25 s (Windows), with everything installed
+```
+
+- NAME is a name of its own: lower-case letters, digits and `-`, not defined yet, not the name
+  of an image that blocks make and without builds left from an image of that name. The guest of a
+  running RUN is shut down through the guest (the image's `sync`, then its `poweroff`, within 10
+  minutes), because the disk of a Windows guest that is copied while it runs does not boot. A
+  guest that does not answer is left running and the command fails; a run that is off is saved
+  as it is. A failed save leaves the run (off) for another try and no half an image.
+- The run's whole backing chain is flattened with `qemu-img convert -O qcow2` into
+  `base/NAME.<version>/disk.qcow2`, a build like any other: with no backing file, it never
+  depends on the base and warm builds of the image it came from, which `desk maintain` replaces
+  and `desk gc` deletes. Beside it are the `domain.xml` of the base build the run's disk stands
+  on (the hardware the run was started with), the run's `VARS.qcow2` (UEFI variables) and a
+  `meta.json` like a base build's, with `derived_from`, `source_run`, `source_base`, the zone and
+  layout of the guest and, for an image that tracks its licence, `expires`. The disk is made
+  read-only, `base/NAME` points to the build, and `~/.config/desk/images/NAME.toml` holds
+  `derived_from = "IMAGE"` and nothing else. Last, the run is taken down as `desk down` does,
+  report included. The run's extra disks (`desk disk`) are not part of the image.
+- It is a full copy: about the size of the used disk (~13 GiB for a Windows run). Old builds of
+  it go like those of any image; the current one stays.
+- A run of it always boots cold, from an overlay on the saved disk with the saved firmware
+  variables, and says "a derived image has no warm state" (`--usbvfiod` and `--shared-memory`
+  work as they do for any image). It is not provisioned again: its disk has been, and has what
+  the run it was saved from had installed. The image's prepare script still runs, as after any
+  cold boot, and the zone and layout are those of the saved guest.
+- Its settings are those of the image it was saved from, read from that image's definition
+  (`desk image show NAME`); `desk image set` refuses it, and `desk up --memory/--cpus` change them
+  for one run. Removing the source's definition is allowed, but a run of the derived image needs
+  it again, which `desk image rm` says; its builds are not needed. `desk image build` and `warm`
+  refuse a derived image, and `desk maintain` leaves it out: a definition that changed, a base
+  that grew old or a failed selftest of its source rebuild nothing of it, as that would replace
+  the saved content. `desk image list` shows "derived from IMAGE (run RUN)".
+- For a Windows evaluation image the licence clock of its source goes on in the copy: `expires`
+  is copied, `desk up` warns three weeks before it ends and refuses after it, and says to renew
+  the source and save a new image from a run of it.
+
 ## Builds and maintenance
 
 Every install and every warm state is a build of its own, `base/<image>.<version>/` and
 `warm/<image>.<version>/` (the version is the UTC time it began), with `base/<image>` and
 `warm/<image>` symlinks to the current ones. Runs pin the builds they start from, so a new build
 never disturbs a running or kept run; `desk gc` deletes builds nothing uses any more. Builds of an
-image whose definition is gone stay until they are deleted by hand.
+image whose definition is gone stay until they are deleted by hand. A derived image has a base
+build and no warm build.
 
 `desk maintain` reinstalls an image family (a base image and its variants) when
 
@@ -462,6 +511,8 @@ journalctl --user -u desk-maintain  # output of the last runs
   - Snapshots are refused: the controller is added to the running guest, so the domain definition
     a restore starts from does not hold it (a raw `virsh save` and `restore` gave a guest with
     the qemu-xhci controller only), and the save has already ended the server's connection.
+    What keeps a prepared guest for such runs is a derived image (`desk image save`, under
+    Images): runs start cold from its disk, with everything installed.
 - `desk clock` (`desk/clock.py`) sets the guest's time through qemu-guest-agent with the guest's
   time sync off and keeps the offset in `run.json`, put back after snapshot restores and reboots
   (tried for 20 s, as the agent may answer a moment late after a restore). A moved clock that

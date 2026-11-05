@@ -235,12 +235,16 @@ def images() -> tuple[list[str], dict[str, list[str]]]:
         except DeskError as e:
             lines.append(f"  {name:<25}broken definition: {e}")
             continue
-        missing = [] if spec.base else [n.what for n in INSTALLERS.get(spec.installer, []) if not n.present()]
+        missing = [] if spec.base or spec.derived_from else [
+            n.what for n in INSTALLERS.get(spec.installer, []) if not n.present()]
         for what in missing:
             wanted.setdefault(what, []).append(name)
         if (spec.warm_dir / "memory.save").exists():
             stale = runs.warm_stale(spec)
             state = f"warm state that {stale} (boots cold)" if stale else "warm"
+        elif spec.derived_from:
+            state = (f"derived from {spec.derived_from}, boots cold" if spec.base_xml.exists()
+                     else f"derived from {spec.derived_from}, its build is missing (desk image rm {name})")
         elif spec.base_xml.exists():
             state = f"installed, no warm state (boots cold; desk image warm {name})"
         elif spec.base:

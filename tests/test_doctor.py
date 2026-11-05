@@ -89,5 +89,30 @@ class QemuDevices(unittest.TestCase):
                     self.assertIn(package, output.getvalue())
 
 
+class Images(unittest.TestCase):
+    def test_a_derived_image_needs_no_installer_and_boots_cold(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / "images").mkdir()
+            (home / "images" / "windows-11.toml").write_text('distro = "windows-11"\n')
+            (home / "images" / "xlu.toml").write_text('derived_from = "windows-11"\n')
+            (home / "images" / "gone.toml").write_text('derived_from = "windows-11"\n')
+            (home / "base" / "xlu").mkdir(parents=True)
+            (home / "base" / "xlu" / "domain.xml").write_text("<domain/>")
+            absent = [replace(n, present=lambda: False) for n in doctor.INSTALLERS["windows"]]
+            with mock.patch("desk.config.IMAGES", home / "images"), mock.patch("desk.config.BASE", home / "base"), \
+                    mock.patch("desk.config.WARM", home / "warm"), \
+                    mock.patch.dict(doctor.INSTALLERS, {"windows": absent}):
+                lines, wanted = doctor.images()
+        self.assertIn("  xlu                      derived from windows-11, boots cold", lines)
+        self.assertIn("  gone                     derived from windows-11, its build is missing (desk image rm gone)",
+                      lines)
+        self.assertTrue(wanted)
+        self.assertTrue(all(images == ["windows-11"] for images in wanted.values()))
+
+
 if __name__ == "__main__":
     unittest.main()

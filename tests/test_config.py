@@ -190,6 +190,107 @@ class Definitions(HostFiles):
             list_images()
 
 
+class DerivedDefinitions(HostFiles):
+    """An image saved from a run (`desk image save`): a file that names the image it came from."""
+
+    def derive(self, name: str, source: str) -> Path:
+        f = self.images_dir / f"{name}.toml"
+        f.write_text(f'derived_from = "{source}"\n')
+        return f
+
+    def setUp(self):
+        self.images_dir = self.images()
+        config.add_image("windows-11", None, [], {"memory_mib": 8192})
+        config.add_image("fedora-44", "gnome", ["cockpit"], {})
+
+    def test_it_has_the_settings_of_its_source_and_a_build_of_its_own(self):
+        from desk.config import BASE, WARM
+
+        self.derive("xlu", "windows-11")
+        spec, source = load_image("xlu"), load_image("windows-11")
+        self.assertEqual((spec.name, spec.derived_from, spec.memory_mib, spec.family, spec.dir),
+                         ("xlu", "windows-11", 8192, "windows", source.dir))
+        self.assertEqual((spec.base, spec.base_name, spec.base_dir, spec.warm_dir),
+                         (None, "xlu", BASE / "xlu", WARM / "xlu"))
+        self.assertEqual((spec.base_xml, spec.base_nvram), (BASE / "xlu" / "domain.xml", BASE / "xlu" / "VARS.qcow2"))
+        self.assertEqual(spec.provision_scripts, source.provision_scripts)
+        self.assertIsNone(source.derived_from)
+
+    def test_a_variant_as_its_source_is_a_build_of_its_own_not_a_variant(self):
+        self.derive("ck", "fedora-44-gnome-cockpit")
+        spec = load_image("ck")
+        self.assertEqual((spec.derived_from, spec.base, spec.base_name), ("fedora-44-gnome-cockpit", None, "ck"))
+        self.assertEqual(spec.provision_scripts, load_image("fedora-44-gnome-cockpit").provision_scripts)
+        self.assertIsNone(config.base_of("ck"))
+        self.assertEqual(config.base_of("fedora-44-gnome-cockpit"), "fedora-44-gnome")
+
+    def test_a_derived_image_can_be_the_source_of_another(self):
+        self.derive("xlu", "windows-11")
+        self.derive("xlu2", "xlu")
+        spec = load_image("xlu2")
+        self.assertEqual((spec.name, spec.derived_from, spec.memory_mib, spec.family),
+                         ("xlu2", "xlu", 8192, "windows"))
+
+    def test_it_is_listed_and_composition_does_not_apply_to_it(self):
+        self.derive("xlu", "windows-11")
+        # Its name looks like an image with an addon that is not there.
+        self.derive("windows-11-xlu", "windows-11")
+        self.assertEqual(list_images(), ["fedora-44-gnome", "fedora-44-gnome-cockpit", "windows-11", "windows-11-xlu",
+                                         "xlu"])
+        self.assertEqual(load_image("windows-11-xlu").derived_from, "windows-11")
+        self.assertEqual((config.base_of("windows-11-xlu"), config.derived_from("windows-11-xlu")),
+                         (None, "windows-11"))
+        self.assertIsNone(config.derived_from("windows-11"))
+        self.assertIsNone(config.derived_from("missing"))
+
+    def test_the_file_holds_the_source_and_nothing_else(self):
+        f = self.derive("xlu", "windows-11")
+        for text, said in (('derived_from = "windows-11"\nmemory_mib = 4096\n', "holds derived_from"),
+                           ("derived_from = 5\n", "holds derived_from"),
+                           ('derived_from = "xlu"\n', "xlu -> xlu derives from itself")):
+            f.write_text(text)
+            with self.subTest(text=text), self.assertRaisesRegex(DeskError, said):
+                load_image("xlu")
+        self.derive("a", "b")
+        self.derive("b", "a")
+        with self.assertRaisesRegex(DeskError, "a -> b -> a derives from itself"):
+            load_image("a")
+
+    def test_it_needs_the_definition_of_its_source_not_its_builds(self):
+        self.derive("xlu", "windows-11")
+        config.remove_image("windows-11")  # allowed: the disk of xlu is whole
+        with self.assertRaisesRegex(DeskError, r"xlu\.toml: derived from windows-11, whose definition cannot be "
+                                               r"loaded \(image 'windows-11' is not defined.*desk image add windows-11"):
+            load_image("xlu")
+        # It can be removed all the same, and it is no variant of anything its name looks like.
+        self.derive("windows-11-xlu", "windows-11")
+        self.assertIsNone(config.base_of("windows-11-xlu"))
+        config.remove_image("windows-11-xlu")
+        config.remove_image("xlu")
+        self.assertEqual(list_images(), ["fedora-44-gnome", "fedora-44-gnome-cockpit"])
+
+    def test_a_source_can_be_removed_while_derived_images_name_it(self):
+        self.derive("xlu", "windows-11")
+        config.remove_image("windows-11")
+        self.assertEqual(list_images(), ["fedora-44-gnome", "fedora-44-gnome-cockpit", "xlu"])
+
+    def test_it_is_not_changed_with_set_or_defined_again_with_add(self):
+        f = self.derive("xlu", "windows-11")
+        with self.assertRaisesRegex(DeskError, "xlu is derived from windows-11 and has its settings; change them"):
+            config.set_image("xlu", {"memory_mib": 4096})
+        self.assertEqual(f.read_text(), 'derived_from = "windows-11"\n')
+        # An image of blocks whose file is a derived one (written by hand): neither is it replaced.
+        self.derive("windows-11", "xlu")
+        with self.assertRaisesRegex(DeskError, "windows-11 is defined already.*derived from xlu, and desk image rm"):
+            config.add_image("windows-11", None, [], {})
+
+    def test_what_desk_writes_for_it_reads_back(self):
+        f = config.write_image("xlu", {"derived_from": "windows-11"})
+        with f.open("rb") as fh:
+            self.assertEqual(tomllib.load(fh), {"derived_from": "windows-11"})
+        self.assertEqual(load_image("xlu").derived_from, "windows-11")
+
+
 class HostBlocks(HostFiles):
     """Blocks of the host's own, beside config.toml."""
 

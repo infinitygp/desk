@@ -23,7 +23,8 @@ from dataclasses import replace
 from pathlib import Path
 
 from . import images, runs
-from .config import BASE, HOME, LAUNCHER, URI, WARM, Busy, DeskError, ImageSpec, list_images, load_image
+from .config import (BASE, HOME, LAUNCHER, URI, WARM, Busy, DeskError, ImageSpec, derived_from, list_images,
+                     load_image)
 from .virt import conn, spare_usb_keyboards
 
 MAINTAIN = HOME / "maintain"
@@ -69,11 +70,17 @@ def check_usable(spec: ImageSpec) -> list[str]:
     """Warnings for `desk up`; raises when the image can no longer be used."""
     warnings = []
     left = days_left(spec)
+    # desk maintain never reinstalls a derived image: its licence is the one of the image it was saved from.
+    again = (f"desk maintain does not renew a derived image; renew {spec.derived_from} with desk maintain --only "
+             f"{spec.derived_from} and save a new {spec.name} from a run of it with desk image save"
+             if spec.derived_from else None)
     if left is not None and left <= 0:
-        raise DeskError(f"the licence of {spec.name} ran out {-left:.0f} days ago; the guest shuts itself down "
-                        f"hourly. Reinstall it: desk maintain --only {spec.name} (or desk image build --force)")
+        raise DeskError(f"the licence of {spec.name} ran out {-left:.0f} days ago; the guest shuts itself down hourly. "
+                        + (f"{again[0].upper()}{again[1:]}" if again else
+                           f"Reinstall it: desk maintain --only {spec.name} (or desk image build --force)"))
     if left is not None and left < WARN_DAYS:
-        warnings.append(f"the licence of {spec.name} runs out in {left:.0f} days (desk maintain reinstalls it)")
+        warnings.append(f"the licence of {spec.name} runs out in {left:.0f} days "
+                        f"({again or 'desk maintain reinstalls it'})")
     last = load_status().get(spec.name, {}).get("maintain")
     # A warm state made after the failure (e.g. a manual rebuild) supersedes it.
     if last and last["ok"] is False and last["t"] > runs.warm_meta(spec).get("created", 0):
@@ -136,7 +143,9 @@ def families(broken: dict[str, str] | None = None) -> dict[str, list[str]]:
             if broken is None:
                 raise
             broken[n] = str(e)
-    return {n: [n] + [v for v, s in specs.items() if s.base == n] for n, s in specs.items() if not s.base}
+    # A derived image is a disk that was saved: renewing it would replace the saved content.
+    return {n: [n] + [v for v, s in specs.items() if s.base == n]
+            for n, s in specs.items() if not s.base and not s.derived_from}
 
 
 def selected(base: str, members: list[str], only: str | None) -> list[str]:
@@ -235,6 +244,9 @@ def maintain(only: str | None = None, dry_run: bool = False) -> bool:
     fams = families(broken)
     if only in broken:
         raise DeskError(broken[only])
+    if only and derived_from(only):
+        raise DeskError(f"{only} is derived from {derived_from(only)}: desk maintain never renews a disk that was "
+                        f"saved from a run (desk maintain --only {derived_from(only)} renews the image it came from)")
     if only and not any(only in members for members in fams.values()):
         raise DeskError(f"unknown image {only!r}")
     for name, why in ({} if only else broken).items():

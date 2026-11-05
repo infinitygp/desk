@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import subprocess
@@ -9,7 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 from desk import images
-from desk.config import load_image
+from desk.config import DeskError, load_image
 
 
 class Versions(unittest.TestCase):
@@ -249,6 +250,38 @@ class InstallProblem(unittest.TestCase):
         # Images without a marker are judged by powering off alone, as before.
         self.assertIsNone(install_problem(load_image("fedora-44-gnome"), ""))
 
+
+class Derived(unittest.TestCase):
+    def spec(self):
+        return replace(load_image("windows-11"), name="xlu", derived_from="windows-11")
+
+    def test_it_is_neither_installed_nor_warmed_again(self):
+        # Before anything of libvirt or the disk is looked at.
+        with mock.patch("desk.images.lookup") as lookup:
+            for call, command in ((images.build, "build"), (images.warm, "warm")):
+                with self.subTest(command=command), self.assertRaisesRegex(
+                        DeskError, f"xlu is derived from windows-11: its disk was saved from a run, so desk image "
+                                   f"{command} does not apply to it \\(desk image save makes a new one"):
+                    call(self.spec(), force=True)
+        lookup.assert_not_called()
+
+    def test_a_seal_keeps_what_it_is_told_of_the_build(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch("desk.config.BASE", Path(tmp)), mock.patch("sys.stdout"):
+            spec = replace(self.spec(), base_version="20261001-030000")
+            spec.base_dir.mkdir()
+            spec.base_disk.write_bytes(b"")
+            images._seal(spec, {"derived_from": "windows-11", "source_run": "r1"})
+            meta = json.loads((spec.base_dir / "meta.json").read_text())
+            self.assertEqual((meta["image"], meta["derived_from"], meta["source_run"]), ("xlu", "windows-11", "r1"))
+            self.assertEqual(spec.base_disk.stat().st_mode & 0o777, 0o444)
+
+    def test_a_guest_that_does_not_power_off_is_said_in_the_words_of_the_caller(self):
+        dom = mock.Mock()
+        dom.isActive.return_value = True
+        with mock.patch("desk.images.guest.ssh_run"), mock.patch("desk.images.time.sleep"), \
+                mock.patch("desk.images.time.monotonic", side_effect=[0, 1, 700]), \
+                self.assertRaisesRegex(DeskError, "did not power off within 600s after the shutdown was asked for"):
+            images._power_off(dom, load_image("windows-11"), 1, after="after the shutdown was asked for")
 
 
 @unittest.skipIf(shutil.which("curl") is None, "curl not installed")

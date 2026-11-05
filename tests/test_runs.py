@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import tempfile
 import time
 import unittest
@@ -457,6 +458,86 @@ class Up(unittest.TestCase):
             runs.up(load_image("fedora-44-gnome"), run_id="t", cold=True)
         self.assertIn(("provisioning", False), self.events)
 
+    def derived(self):
+        """A derived image whose build is BASE/xlu, with the source's settings (fedora-44-gnome)."""
+        from desk import config
+
+        definition = config.IMAGES / "xlu.toml"
+        definition.write_text('derived_from = "fedora-44-gnome"\n')
+        self.addCleanup(definition.unlink)
+        base = self.home / "base" / "xlu"
+        base.mkdir()
+        (base / "domain.xml").write_text("<domain>of xlu</domain>")
+        (base / "meta.json").write_text(json.dumps({"timezone": "Europe/Warsaw", "layout": "pl"}))
+        # Warm state of the source, which a derived image must not take for its own.
+        warm = self.home / "warm" / "xlu"
+        warm.mkdir(parents=True)
+        (warm / "memory.save").write_bytes(b"")
+        return config.load_image("xlu")
+
+    def test_a_derived_image_boots_cold_from_its_own_disk_and_is_not_provisioned_again(self):
+        spec = self.derived()
+        overlay = mock.Mock(side_effect=lambda backing, overlay: overlay.write_bytes(b""))
+        copied = mock.Mock(side_effect=lambda src, dst: dst.write_bytes(b""))
+        prepared = mock.Mock(return_value="<domain/>")
+        with mock.patch("desk.runs.qemu_img_overlay", overlay), mock.patch("desk.runs.reflink_copy", copied), \
+                mock.patch("desk.runs.prepare_domain_xml", prepared), mock.patch("sys.stdout") as out:
+            run = runs.up(spec, run_id="t")
+        base = (self.home / "base" / "xlu").resolve()
+        overlay.assert_called_once_with(base / "disk.qcow2", self.home / "runs" / "t" / "disk.qcow2")
+        copied.assert_called_once_with(base / "VARS.qcow2", self.home / "runs" / "t" / "VARS.qcow2")
+        self.assertEqual(prepared.call_args.args[0], "<domain>of xlu</domain>")
+        self.assertFalse(prepared.call_args.kwargs["keep_uuid"])
+        shown = "".join(c.args[0] for c in out.write.call_args_list)
+        self.assertIn("booting cold: a derived image has no warm state", shown)
+        self.assertNotIn("desk image warm", shown)
+        self.conn.restoreFlags.assert_not_called()
+        # Cold, but not provisioned: the disk holds what provisioning and the run it was saved from did.
+        self.assertEqual([e for e, _ in self.events],
+                         ["domain started", "waiting for the guest", "waiting for the session", "preparing"])
+        self.assertTrue(run.ready)
+        self.assertEqual(run.domain, "desk-t")
+        # The zone and layout of the guest as the build says, not config.toml's of today.
+        self.assertEqual((runs.load("t").timezone, runs.load("t").layout), ("Europe/Warsaw", "pl"))
+
+    def test_a_derived_image_with_the_usbvfiod_controller_says_why_it_boots_cold_once(self):
+        spec = self.derived()
+        overlay = mock.Mock(side_effect=lambda backing, overlay: overlay.write_bytes(b""))
+        prepared = mock.Mock(return_value="<domain/>")
+        held = lambda what: lambda *a, **k: self.events.append((what, False))  # noqa: E731
+        with mock.patch("desk.runs.qemu_img_overlay", overlay), mock.patch("desk.runs.prepare_domain_xml", prepared), \
+                mock.patch("sys.stdout") as out, \
+                mock.patch("desk.usbvfiod.start", side_effect=held("server started")), \
+                mock.patch("desk.usbvfiod.attach_controller", side_effect=held("controller added")):
+            runs.up(spec, run_id="t", usbvfiod=True)
+        self.assertEqual(overlay.call_args.args[0], (self.home / "base" / "xlu").resolve() / "disk.qcow2")
+        shown = "".join(c.args[0] for c in out.write.call_args_list)
+        self.assertIn("booting cold: a derived image has no warm state", shown)
+        self.assertNotIn("RAM is not shared memory", shown)
+        self.assertEqual([e for e, _ in self.events],
+                         ["server started", "domain started", "waiting for the guest", "waiting for the session",
+                          "preparing", "controller added"])
+        self.assertTrue(prepared.call_args.kwargs["shared_memory"])
+        self.conn.restoreFlags.assert_not_called()
+
+    def test_a_derived_image_asked_to_boot_cold_does_not_say_so(self):
+        spec = self.derived()
+        with mock.patch("sys.stdout") as out:
+            runs.up(spec, run_id="t", cold=True)
+        self.assertNotIn("booting cold", "".join(c.args[0] for c in out.write.call_args_list))
+        self.assertNotIn(("provisioning", False), self.events)
+
+    def test_a_derived_image_has_no_warm_state_to_restore_or_to_wait_for(self):
+        spec = self.derived()
+        self.assertEqual(runs.cold_reason(spec), "a derived image has no warm state")
+        self.assertEqual(runs.warm_meta(spec)["layout"], "pl")
+
+    def test_a_derived_image_whose_build_is_gone_says_so(self):
+        spec = self.derived()
+        shutil.rmtree(self.home / "base" / "xlu")
+        with self.assertRaisesRegex(DeskError, "the saved disk of xlu is missing.*desk image save makes a new one"):
+            runs.up(spec, run_id="t")
+
     def test_a_start_that_fails_gives_the_lock_back_too(self):
         from desk.config import load_image
 
@@ -565,6 +646,22 @@ class PruneVersions(unittest.TestCase):
                     mock.patch("desk.virt.backing_files", side_effect=lambda f: chains.get(f, [f])):
                 self.assertEqual(runs.prune_versions(verbose=False), [])
             self.assertTrue(old.exists())
+
+    def test_old_builds_of_a_derived_image_go_like_any_others_and_its_current_one_stays(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            old, new = (home / "base" / f"xlu.2026100{i}-000000" for i in (1, 2))
+            for d in (old, new):
+                d.mkdir(parents=True)
+                (d / "disk.qcow2").write_bytes(b"")
+            (home / "base" / "xlu").symlink_to(new)
+            with mock.patch("desk.runs.RUNS", home / "runs"), mock.patch("desk.runs.HOME", home), \
+                    mock.patch("desk.config.BASE", home / "base"), mock.patch("desk.config.WARM", home / "warm"), \
+                    mock.patch("desk.config.list_images", return_value=["xlu"]), \
+                    mock.patch("desk.runs.conn", return_value=mock.Mock(listAllDomains=lambda _f: [])):
+                self.assertEqual(runs.prune_versions(verbose=False), [str(old.resolve())])
+            self.assertFalse(old.exists())
+            self.assertTrue((new / "disk.qcow2").exists())
 
 
 class AbandonedWarmup(unittest.TestCase):

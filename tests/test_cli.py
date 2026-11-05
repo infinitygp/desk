@@ -248,6 +248,130 @@ class ImageCommands(unittest.TestCase):
         warm = config.WARM / "fedora-44-gnome-cockpit"
         self.assertIn(f"({warm}, {warm}.*)\n", out)
 
+    def derive(self, name: str = "xlu", source: str = "windows-11"):
+        """A derived image whose build is under a base of its own."""
+        import shutil
+        import tempfile
+        from pathlib import Path
+
+        self.assertEqual(self.desk("image", "add", source)[0], 0)
+        (self.images / f"{name}.toml").write_text(f'derived_from = "{source}"\n')
+        home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, home)
+        for target in ("desk.cli.BASE", "desk.config.BASE"):
+            patch = mock.patch(target, home / "base")
+            patch.start()
+            self.addCleanup(patch.stop)
+        for target in ("desk.cli.WARM", "desk.config.WARM"):
+            patch = mock.patch(target, home / "warm")
+            patch.start()
+            self.addCleanup(patch.stop)
+        return home
+
+    def test_a_derived_image_is_listed_with_where_it_comes_from_shown_and_removed(self):
+        import json
+        import time
+
+        home = self.derive()
+        build = home / "base" / "xlu.20261001-030000"
+        build.mkdir(parents=True)
+        (build / "domain.xml").write_text("<domain/>")
+        (build / "meta.json").write_text(json.dumps({"created": time.time(), "source_run": "xlu-run",
+                                                     "expires": time.time() + 5 * 86400}))
+        (home / "base" / "xlu").symlink_to(build.name)
+        code, out, _ = self.desk("image", "list")
+        self.assertEqual(code, 0)
+        self.assertRegex(out, r"(?m)^xlu +base +\d{4}-\d\d-\d\d +- +derived from windows-11 \(run xlu-run\); "
+                              r"licence ends in 5 days$")
+        self.assertNotRegex(out, r"builds without a definition")
+        code, out, _ = self.desk("image", "show", "xlu")
+        self.assertEqual(code, 0)
+        self.assertIn(f"# {self.images / 'xlu.toml'}: derived from windows-11, a disk saved from a run", out)
+        self.assertIn('derived_from = "windows-11"\n', out)
+        self.assertIn("family = \"windows\"\n", out)
+        # Its source goes first: a run of xlu needs its definition, which is said.
+        code, out, _ = self.desk("image", "rm", "windows-11")
+        self.assertEqual(code, 0)
+        self.assertIn("xlu derived from windows-11: a run of it takes its settings from that definition, so define it "
+                      "again before one starts (desk image add windows-11)", out)
+        code, out, _ = self.desk("image", "rm", "xlu")
+        self.assertEqual(code, 0)
+        base = home / "base" / "xlu"
+        self.assertIn(f"removed xlu; its builds stay until deleted by hand ({base}, {base}.*)\n", out)
+        self.assertEqual(list(self.images.iterdir()), [])
+        # The builds are left without a definition, as for any image.
+        code, out, _ = self.desk("image", "list")
+        self.assertRegex(out, r"(?m)^xlu +- +- +- +builds without a definition: delete them by hand$")
+
+    def test_a_derived_image_is_not_changed_built_or_warmed(self):
+        self.derive()
+        code, _, err = self.desk("image", "set", "xlu", "--memory", "8G")
+        self.assertEqual(code, 2)
+        self.assertIn("xlu is derived from windows-11 and has its settings", err)
+        with mock.patch("desk.cli.images.build") as build, mock.patch("desk.cli.images.warm") as warm, \
+                mock.patch("desk.cli.runs.image_lock") as lock:
+            for command in ("build", "warm"):
+                code, _, err = self.desk("image", command, "xlu", "--force")
+                self.assertEqual(code, 2)
+                self.assertIn(f"xlu is derived from windows-11: its disk was saved from a run, so desk image {command} "
+                              "does not apply to it (desk image save makes a new one from a run", err)
+        build.assert_not_called()
+        warm.assert_not_called()
+        lock.assert_not_called()
+
+    def test_save_takes_the_run_down_once_the_image_is_saved(self):
+        order = []
+        run = mock.Mock(id="r1")
+        with mock.patch("desk.cli.runs.resolve", return_value=run) as resolve, \
+                mock.patch("desk.derive.save", side_effect=lambda name, r: order.append(("save", name, r))), \
+                mock.patch("desk.cli._down", side_effect=lambda r: order.append(("down", r))):
+            code, _, _ = self.desk("image", "save", "xlu", "r1")
+            self.assertEqual(code, 0)
+            self.assertEqual(order, [("save", "xlu", run), ("down", run)])
+            resolve.assert_called_once_with("r1")
+        # A save that failed leaves the run as it is, for another try.
+        order.clear()
+        with mock.patch("desk.cli.runs.resolve", return_value=run), \
+                mock.patch("desk.derive.save", side_effect=cli.DeskError("qemu-img failed: no space")), \
+                mock.patch("desk.cli._down", side_effect=lambda r: order.append(("down", r))):
+            code, _, err = self.desk("image", "save", "xlu", "r1")
+        self.assertEqual((code, order), (2, []))
+        self.assertIn("qemu-img failed: no space", err)
+
+    def test_save_refuses_a_name_before_the_run_is_looked_at(self):
+        self.assertEqual(self.desk("image", "add", "windows-11")[0], 0)
+        with mock.patch("desk.cli.runs.resolve") as resolve, mock.patch("desk.derive.save") as save:
+            for name, said in (("windows-11", "windows-11 is defined already"), ("Bad Name", "image names are"),
+                               ("arch-gnome", "is the name of an image that blocks make")):
+                with self.subTest(name=name):
+                    code, _, err = self.desk("image", "save", name, "r1")
+                    self.assertEqual(code, 2)
+                    self.assertIn(said, err)
+        resolve.assert_not_called()
+        save.assert_not_called()
+
+    def test_save_of_a_run_that_does_not_exist(self):
+        code, _, err = self.desk("image", "save", "xlu", "nosuch")
+        self.assertEqual(code, 2)
+        self.assertIn("no run 'nosuch'", err)
+
+    def test_the_run_is_held_while_it_is_saved_so_that_idle_gc_leaves_it(self):
+        import tempfile
+        from pathlib import Path
+
+        from desk import runs
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch("desk.runs.RUNS", Path(tmp)):
+            run = runs.Run(id="r1", image="windows-11", domain="desk-r1", ssh_port=1, user="tester", created=1.0,
+                           last_used=1.0)
+            run.dir.mkdir()
+            run.save()
+            seen = []
+            with mock.patch("desk.derive.save", side_effect=lambda name, r: seen.append(r.in_use())), \
+                    mock.patch("desk.cli._down"):
+                self.assertEqual(self.desk("image", "save", "xlu", "r1")[0], 0)
+        self.assertEqual(seen, [True])
+
     def test_a_broken_definition_hides_no_other(self):
         self.assertEqual(self.desk("image", "add", "arch", "gnome")[0], 0)
         (self.images / "fedora-44-twm.toml").write_text('distro = "fedora-44"\ndesktop = "twm"\n')
