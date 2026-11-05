@@ -122,5 +122,21 @@ class UsbKeyboard(unittest.TestCase):
         self.assertEqual(self.keyboards("usb", "ps2", keep_uuid=True), ["usb", "ps2"])
 
 
+class SharedMemory(unittest.TestCase):
+    TEMPLATE = ("<domain><name>x</name><memory unit='KiB'>1024</memory><os><nvram>n</nvram></os>"
+                "<devices><disk device='disk'><source file='a'/></disk></devices></domain>")
+
+    def xml(self, **kw):
+        from desk.virt import prepare_domain_xml
+        return ET.fromstring(prepare_domain_xml(self.TEMPLATE, name="d", disk=Path("/d"), nvram=Path("/n"),
+                                                ssh_port=1, console_log=Path("/c"), **kw))
+
+    def test_guest_ram_is_a_shared_memfd_only_when_asked(self):
+        self.assertIsNone(self.xml().find("memoryBacking"))
+        backing = self.xml(shared_memory=True).find("memoryBacking")
+        self.assertEqual(backing.find("source").get("type"), "memfd")
+        self.assertEqual(backing.find("access").get("mode"), "shared")
+
+
 if __name__ == "__main__":
     unittest.main()

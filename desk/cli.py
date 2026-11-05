@@ -207,7 +207,7 @@ def cmd_up(args) -> None:
     for query in args.usb or []:
         usb.usable(query)
     run = runs.up(spec, run_id=args.name, cold=args.cold, force=args.force, label=args.label,
-                  displays=args.displays, resolution=resolution)
+                  displays=args.displays, resolution=resolution, shared_memory=args.shared_memory)
     try:
         if args.displays != 1 or resolution or args.scale:
             monitors.apply(run, spec, resolution=resolution, scale=args.scale)
@@ -1230,6 +1230,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "serial:SERIAL (repeatable; desk usb)")
     p.add_argument("--forward", action="append", type=_port_arg, metavar="PORT",
                    help="reach this guest port from the host (repeatable; desk forward)")
+    p.add_argument("--shared-memory", action="store_true",
+                   help="keep the guest's RAM in shared memory that host processes may map, as a vfio-user device "
+                        "(a USB controller of usbvfiod) needs")
     p.set_defaults(func=cmd_up)
 
     p = sub.add_parser("down", help="destroy a run and delete its files")

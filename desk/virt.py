@@ -85,7 +85,7 @@ def prepare_domain_xml(
     template: str, *, name: str, disk: Path, nvram: Path, ssh_port: int, console_log: Path,
     keep_uuid: bool = False, vnc_password: str | None = None, agent_ports: tuple[int, int] | None = None,
     sound: str | None = None, displays: int = 1, resolution: tuple[int, int] | None = None,
-    memory_mib: int | None = None, vcpus: int | None = None,
+    memory_mib: int | None = None, vcpus: int | None = None, shared_memory: bool = False,
 ) -> str:
     """Turn the golden image's domain XML into a per-run transient domain.
 
@@ -126,6 +126,17 @@ def prepare_domain_xml(
             os_el.remove(el)
     os_el.find("nvram").text = str(nvram)
 
+    if shared_memory:
+        # Guest RAM in a memfd that other processes may map: a vfio-user device (desk usb controller)
+        # does its DMA there. Only the backing changes; a save image's RAM loads into it as well.
+        backing = root.find("memoryBacking")
+        if backing is None:
+            backing = ET.SubElement(root, "memoryBacking")
+        for tag in ("source", "access"):
+            for el in backing.findall(tag):
+                backing.remove(el)
+        ET.SubElement(backing, "source", type="memfd")
+        ET.SubElement(backing, "access", mode="shared")
     devices = root.find("devices")
     for d in devices.findall("disk"):
         if d.get("device") == "disk":

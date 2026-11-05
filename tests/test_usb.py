@@ -137,7 +137,7 @@ class AddRemove(unittest.TestCase):
     def test_up_without_usb_does_not_probe_host_passthrough(self):
         args = SimpleNamespace(resolution=None, image="windows-11", memory=None, cpus=None, displays=1,
                                scale=None, disk=[], usb=[], name=None, cold=False, force=False, label=None,
-                               record=False, forward=[])
+                               record=False, forward=[], shared_memory=False)
         with mock.patch.object(doctor, "_qemu_devices", side_effect=AssertionError("USB probe on an ordinary run")), \
              mock.patch.object(cli, "load_image"), mock.patch("desk.monitors.check"), \
              mock.patch("desk.runs.up") as up, mock.patch("builtins.print"):

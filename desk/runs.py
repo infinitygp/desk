@@ -147,6 +147,8 @@ class Run:
     # (runs from before desk kept them).
     timezone: str = ""
     layout: str = ""
+    # Guest RAM shared with host processes (desk up --shared-memory), which vfio-user devices need.
+    shared_memory: bool = False
 
     @property
     def since(self) -> float:
@@ -610,7 +612,8 @@ def holder_alive(run: Run) -> bool:
 
 
 def up(spec: ImageSpec, run_id: str | None = None, cold: bool = False, force: bool = False,
-       displays: int = 1, resolution: tuple[int, int] | None = None, label: str | None = None) -> Run:
+       displays: int = 1, resolution: tuple[int, int] | None = None, label: str | None = None,
+       shared_memory: bool = False) -> Run:
     from .maintain import check_usable
 
     if run_id is not None:
@@ -643,7 +646,8 @@ def up(spec: ImageSpec, run_id: str | None = None, cold: bool = False, force: bo
                           file=sys.stderr, flush=True)
                     waiting = True
             else:
-                return _up(spec, run_id, cold, displays, resolution, label, started=lock.close)
+                return _up(spec, run_id, cold, displays, resolution, label, started=lock.close,
+                           shared_memory=shared_memory)
         # Runs idle past their time give their memory back; their reports take a while, which only
         # a start that needs the memory waits for.
         gc_idle()
@@ -661,7 +665,8 @@ def _gc_idle_in_background() -> subprocess.Popen:
 
 
 def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
-        resolution: tuple[int, int] | None = None, label: str | None = None, started=lambda: None) -> Run:
+        resolution: tuple[int, int] | None = None, label: str | None = None, started=lambda: None,
+        shared_memory: bool = False) -> Run:
     """`started` is called once the domain runs: from there on nothing is picked or checked that
     another command could take too, so the state lock is given back while the guest boots."""
     run_id = run_id or secrets.token_hex(3)
@@ -684,6 +689,11 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
         # The warm state was saved with the image's single monitor; other hardware boots fresh.
         print(f"[desk] {displays} display(s){f' at {resolution[0]}x{resolution[1]}' if resolution else ''}: "
               "booting cold (the warm state has one monitor)")
+        cold = True
+    if not cold and shared_memory:
+        # libvirt restores a saved state only into the memory backing it was saved with, and warm
+        # states are saved with the guest's RAM in anonymous memory.
+        print("[desk] booting cold: the warm state's RAM is not shared memory")
         cold = True
     if not cold:
         reason = cold_reason(spec, warm_dir)
@@ -712,7 +722,7 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
               user=spec.user, created=now, last_used=now, vnc_password=secrets.token_urlsafe(6)[:8],
               agent_port=free_port() if spec.agent_port else 0, displays=displays,
               resolution=list(resolution) if resolution else None,
-              label=label or auto_label, holder=holder,
+              label=label or auto_label, holder=holder, shared_memory=shared_memory,
               timezone=made.get("timezone", spec.timezone), layout=made.get("layout", spec.layout))
     run.save()
     # In use by this process until it ends: a scenario or selftest keeps its run through steps
@@ -735,7 +745,8 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
                                  keep_uuid=not cold, vnc_password=run.vnc_password,
                                  agent_ports=(run.agent_port, spec.agent_port) if spec.agent_port else None,
                                  sound=spec.sound, displays=displays, resolution=resolution,
-                                 memory_mib=spec.memory_mib, vcpus=spec.vcpus)
+                                 memory_mib=spec.memory_mib, vcpus=spec.vcpus,
+                                 shared_memory=shared_memory)
         if cold:
             dom = conn().createXML(xml, 0)
         else:

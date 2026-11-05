@@ -326,6 +326,22 @@ class Up(unittest.TestCase):
         self.assertEqual(self.events[0], ("domain started", True))
         self.assertEqual((prepared.call_args.kwargs["memory_mib"], prepared.call_args.kwargs["vcpus"]), (8192, 4))
 
+    def test_shared_memory_boots_cold_whatever_warm_state_there_is(self):
+        from desk.config import load_image
+
+        spec = load_image("fedora-44-gnome")
+        warm = self.home / "warm" / "fedora-44-gnome"
+        warm.mkdir(parents=True)
+        (warm / "memory.save").write_bytes(b"")
+        prepared = mock.Mock(return_value="<domain/>")
+        with mock.patch("desk.runs.prepare_domain_xml", prepared), mock.patch("sys.stdout") as out:
+            runs.up(spec, run_id="t", shared_memory=True)
+        self.assertIn("booting cold: the warm state's RAM is not shared memory",
+                      "".join(c.args[0] for c in out.write.call_args_list))
+        self.conn.restoreFlags.assert_not_called()
+        self.assertTrue(prepared.call_args.kwargs["shared_memory"])
+        self.assertTrue(runs.load("t").shared_memory)
+
     def test_a_run_that_provisions_keeps_the_images_zone_and_layout(self):
         from dataclasses import replace
 
