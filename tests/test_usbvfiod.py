@@ -83,15 +83,18 @@ class Binary(unittest.TestCase):
 
     def test_a_missing_binary_says_what_to_do(self):
         with mock.patch.dict(os.environ, {usbvfiod.ENV: ""}), mock.patch("shutil.which", return_value=None), \
-                self.assertRaisesRegex(DeskError, r"usbvfiod is not installed: .*cargo install --locked --path "
-                                                  r"CHECKOUT-OF-USBVFIOD.*\$DESK_USBVFIOD"):
+                self.assertRaisesRegex(DeskError, r"usbvfiod is not installed: install a release of the private fork: "
+                                                  r"`gh release download --repo infinitygp/usbvfiod --pattern "
+                                                  r"'usbvfiod-\*\.tar\.gz'`, unpack it and run its install\.sh.*"
+                                                  r"cargo install --locked --path CHECKOUT-OF-USBVFIOD.*\$DESK_USBVFIOD"):
             usbvfiod.binary()
 
     def test_a_named_file_that_cannot_run_is_not_replaced_by_the_one_in_path(self):
         with mock.patch.dict(os.environ, {usbvfiod.ENV: "/nonexistent/usbvfiod"}), \
                 mock.patch("shutil.which", return_value="/usr/bin/usbvfiod"), \
                 self.assertRaisesRegex(DeskError, r"\$DESK_USBVFIOD is '/nonexistent/usbvfiod', which is not an "
-                                                  "executable file"):
+                                                  r"executable file; install a release of the private fork: "
+                                                  r"`gh release download --repo infinitygp/usbvfiod"):
             usbvfiod.binary()
 
     def test_up_needs_a_qemu_with_vfio_user_pci(self):

@@ -81,7 +81,10 @@ desk -r usb1 usb rm 0fd9:008f                       # or at:5.1 (a hub too: ever
   that ends gives its host devices back to their drivers; for one that was killed or crashed,
   `desk down` binds them again and says so.
 - The server is `usbvfiod` from `$DESK_USBVFIOD` or `PATH`; `desk doctor` says whether it and QEMU's
-  `vfio-user-pci` are there. In a scenario, `usbvfiod = true` at the top starts the run with the
+  `vfio-user-pci` are there. A missing server is installed without root from a release of the
+  private fork: `gh release download --repo infinitygp/usbvfiod --pattern 'usbvfiod-*.tar.gz'`,
+  unpack it and run its `install.sh` (a static binary into `~/.local/bin`). A missing
+  `vfio-user-pci` is the system's QEMU: tell the user. In a scenario, `usbvfiod = true` at the top starts the run with the
   controller, and `usb_add` takes `at` and `hubs`, `usb_rm` takes `at:PORTPATH`.
 - The run's directory has `usbvfiod/usbvfiod.log` and `usbvfiod/usb.pcap` (what the guest's driver
   sent to the devices); the report keeps both.

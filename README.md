@@ -417,8 +417,11 @@ journalctl --user -u desk-maintain  # output of the last runs
   5-8 USB 2; hubs, which are virtual USB 2.0 hubs of up to 15 ports, stand on 5-8, five deep at
   most. The libvirt-managed `qemu-xhci` controller stays, so the run's keyboard, tablet and every
   other `desk usb` use keep working beside it.
-  - desk finds the binary in `$DESK_USBVFIOD`, else `usbvfiod` in `PATH` (the fork builds with
-    `cargo install --locked --path CHECKOUT`); a missing one is refused before a VM is started.
+  - desk finds the binary in `$DESK_USBVFIOD`, else `usbvfiod` in `PATH`; a missing one is refused
+    before a VM is started. A release of the private fork is one static binary:
+    `gh release download --repo infinitygp/usbvfiod --pattern 'usbvfiod-*.tar.gz'` (the newest),
+    unpack it and run its `install.sh`, which puts it in `~/.local/bin`. The fork also builds with
+    `cargo install --locked --path CHECKOUT`.
     It runs in a session of its own in the run's directory (`usbvfiod/`: the vfio-user socket
     QEMU connects to, the hotplug socket, `usbvfiod.log` at debug level and `usb.pcap`, the
     traffic of the guest's driver), so it outlives the command that started it; its PID and
