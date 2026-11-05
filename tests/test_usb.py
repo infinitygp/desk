@@ -15,6 +15,32 @@ def fake_sys(root: Path, name: str, **attrs) -> None:
         (d / k).write_text(f"{v}\n")
 
 
+class Rebind(unittest.TestCase):
+    """Drivers bound again to a device that a killed process left without them."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        fake_sys(self.root, "5-1", idVendor="2516", idProduct="01fe", busnum=5, devnum=12)
+        fake_sys(self.root / "5-1", "5-1:1.0", bInterfaceNumber="00")
+        (self.root / "5-1" / "5-1:1.0" / "driver").mkdir()  # usbhid has it
+        fake_sys(self.root / "5-1", "5-1:1.1", bInterfaceNumber="01")
+        self.asked = []
+
+    def connect(self, node, ifno):
+        self.asked.append((node, ifno))
+
+    def test_only_the_interfaces_without_a_driver_are_asked_for(self):
+        self.assertEqual(usb.rebind("5-1", 5, 12, self.root, self.connect), [1])
+        self.assertEqual(self.asked, [("/dev/bus/usb/005/012", 1)])
+
+    def test_a_port_with_another_device_now_is_left_alone(self):
+        self.assertEqual(usb.rebind("5-1", 5, 13, self.root, self.connect), [])
+        self.assertEqual(usb.rebind("5-2", 5, 12, self.root, self.connect), [])
+        self.assertEqual(self.asked, [])
+
+
 class Devices(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

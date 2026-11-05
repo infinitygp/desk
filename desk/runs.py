@@ -826,6 +826,10 @@ def down(run: Run, keep: bool = False) -> None:
         if not served:
             print(f"[desk] warning: usbvfiod of run {run.id} had ended before the run went down "
                   f"(log: {run.usbvfiod['log']}{'' if keep else ', and in the report'})", file=sys.stderr)
+        rebound = usbvfiod.give_back(run)
+        if rebound:
+            print(f"[desk] warning: usbvfiod of run {run.id} left USB devices without their drivers; desk "
+                  f"bound them again: {', '.join(rebound)}", file=sys.stderr)
     if not keep:
         shutil.rmtree(run.dir, ignore_errors=True)
 

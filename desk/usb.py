@@ -2,8 +2,10 @@
 USB controller as they are, while the host does without them. QEMU runs as the desk user
 (qemu:///session), so the user must be able to open the device node; a udev rule makes it so."""
 
+import fcntl
 import os
 import re
+import struct
 import sys
 import time
 import xml.etree.ElementTree as ET
@@ -49,6 +51,37 @@ def host_devices(sys_dir: Path = SYS) -> list[dict]:
                     "name": " ".join(filter(None, (_read(d, "manufacturer"), _read(d, "product")))),
                     "access": os.access(node, os.R_OK | os.W_OK)})
     return out
+
+
+# usbdevfs: _IOWR('U', 18, struct usbdevfs_ioctl) on a 64-bit host, and _IO('U', 23).
+USBDEVFS_IOCTL = 0xC0105512
+USBDEVFS_CONNECT = 0x5517
+
+
+def _connect(node: str, ifno: int) -> None:
+    fd = os.open(node, os.O_RDWR)
+    try:
+        fcntl.ioctl(fd, USBDEVFS_IOCTL, struct.pack("iiP", ifno, USBDEVFS_CONNECT, 0))
+    finally:
+        os.close(fd)
+
+
+def rebind(port: str, bus: int, dev: int, sys_dir: Path | None = None, connect=_connect) -> list[int]:
+    """Ask the kernel to bind drivers to the interfaces without one of the device at sysfs port
+    `port`, if it still has bus and device number `bus`.`dev`: what a process that detached the
+    drivers does when it lets the device go, and one that was killed does not. The interfaces
+    asked for are returned."""
+    d = (sys_dir or SYS) / port
+    if _read(d, "busnum") != str(bus) or _read(d, "devnum") != str(dev):
+        return []
+    asked = []
+    for intf in sorted(d.glob(f"{port}:*")):
+        number = _read(intf, "bInterfaceNumber")
+        if not number or (intf / "driver").exists():
+            continue
+        connect(f"/dev/bus/usb/{bus:03d}/{dev:03d}", int(number, 16))
+        asked.append(int(number, 16))
+    return asked
 
 
 def present(sys_dir: Path | None = None) -> set[tuple[int, int]]:

@@ -9,7 +9,8 @@ dies, so the device is never hot-removed and the server is stopped only after th
 (runs.down).
 
 What of it a run has is `run.usbvfiod` in run.json; the tree of hubs and devices is the
-controller's to say (desk/hotplug.py), desk keeps no copy of it."""
+controller's to say (desk/hotplug.py), desk keeps no copy of it. It notes only the host devices it
+handed over (`held`), to give them back to their drivers when usbvfiod ended without doing so."""
 
 import os
 import re
@@ -291,6 +292,8 @@ def attach(run, device: dict, at: str | None, wanted: dict[tuple[int, ...], hubs
             raise
         finally:
             os.close(fd)
+        _note_held(run, lambda h: (h["bus"], h["dev"]) != here,
+                   {"bus": here[0], "dev": here[1], "port": device.get("port", "")})
         # Looked at, not assumed: where the controller says the device is.
         placed = host_entries(hotplug.tree(sock)).get(here)
         if placed is None:
@@ -315,6 +318,8 @@ def remove(run, query: str) -> dict:
                 raise DeskError(f"run {run.id} has nothing at port path {m[1]} (desk usb ls)")
             below = [e for e in entries if e["path"].startswith(m[1] + ".")]
             hotplug.detach_at(sock, m[1])
+            gone = host_entries([there, *below])
+            _note_held(run, lambda h: (h["bus"], h["dev"]) not in gone)
             run.log_event(usb="remove", at=m[1], below=[e["path"] for e in below])
             return {"id": f"at:{m[1]}", "tree": True, "at": m[1], "name": describe_entry(there),
                     "below": [e["path"] for e in below]}
@@ -329,8 +334,36 @@ def remove(run, query: str) -> dict:
             raise DeskError(f"run {run.id} has no USB device {query} (desk usb ls)") from None
         at = held[(device["bus"], device["dev"])]["path"]
         hotplug.detach_at(sock, at)
+        _note_held(run, lambda h: (h["bus"], h["dev"]) != (device["bus"], device["dev"]))
         run.log_event(usb="remove", device=device["id"], address=f"{device['bus']}.{device['dev']}", at=at)
         return {**device, "at": at}
+
+
+def _note_held(run, keep, add: dict | None = None) -> None:
+    """Change the host devices the run notes as handed over: keep those `keep` says, and add `add`."""
+    with run.edit() as r:
+        state = dict(r.usbvfiod or {})
+        state["held"] = [h for h in state.get("held", []) if keep(h)] + ([add] if add else [])
+        r.usbvfiod = state
+
+
+def give_back(run) -> list[str]:
+    """After usbvfiod ended: bind the drivers of the host devices the run held again. usbvfiod
+    does so when it ends; one that was killed or crashed leaves them without a driver. Returns the
+    devices that needed it, or why it failed for one."""
+    from . import usb
+
+    out = []
+    for h in (run.usbvfiod or {}).get("held", []):
+        if not h.get("port"):
+            continue
+        name = f"{h['bus']}.{h['dev']} (port:{h['port']})"
+        try:
+            if usb.rebind(h["port"], h["bus"], h["dev"]):
+                out.append(name)
+        except OSError as e:
+            out.append(f"{name}: {e.strerror}")
+    return out
 
 
 def held_by_runs() -> tuple[dict[tuple[int, int], tuple[str, str]], list[dict]]:

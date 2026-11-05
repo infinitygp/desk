@@ -333,6 +333,26 @@ class Down(InRuns):
         self.assertEqual(events, ["domain destroyed", "server stopped"])
         self.assertFalse(self.run.dir.exists())
 
+    def test_devices_the_server_left_without_drivers_are_bound_again_after_it_stopped(self):
+        events = []
+        self.served()
+        with self.run.edit() as r:
+            r.usbvfiod = {**r.usbvfiod, "held": [{"bus": 5, "dev": 12, "port": "5-1"},
+                                                 {"bus": 5, "dev": 13, "port": "5-2"}]}
+
+        def rebind(port, bus, dev):
+            events.append(f"rebind {port} {bus}.{dev}")
+            return [0] if port == "5-1" else []
+
+        with mock.patch("desk.runs.lookup", return_value=self.domain(events)), \
+                mock.patch.object(usbvfiod, "stop", side_effect=lambda run: events.append("server stopped")), \
+                mock.patch.object(usb, "rebind", side_effect=rebind), mock.patch("sys.stderr") as err:
+            runs.down(self.run)
+        self.assertEqual(events, ["domain destroyed", "server stopped", "rebind 5-1 5.12", "rebind 5-2 5.13"])
+        printed = "".join(c.args[0] for c in err.write.call_args_list)
+        self.assertIn("usbvfiod of run r1 left USB devices without their drivers; desk bound them again: "
+                      "5.12 (port:5-1)\n", printed)
+
     def test_a_domain_that_will_not_be_destroyed_leaves_the_server_running(self):
         events = []
         self.served()
@@ -481,6 +501,21 @@ class Tree(WithController):
         self.assertEqual((got["id"], got["below"]), ("at:5.1", ["5.1.4"]))
         self.assertEqual(self.controller.paths(), ["5"])
         self.assertEqual([e for e in self.events() if e["usb"] == "remove"][0]["below"], ["5.1.4"])
+
+    def test_the_run_notes_the_host_devices_it_holds_until_they_are_taken_out(self):
+        other = {**self.deck, "dev": 13, "port": "5-2"}
+        usbvfiod.attach(self.run, self.deck, "5.1.4", {})
+        usbvfiod.attach(self.run, other, "5.2", {})
+
+        def held():
+            return [(h["bus"], h["dev"], h["port"]) for h in runs.load("r1").usbvfiod["held"]]
+
+        self.assertEqual(held(), [(5, 12, "5-1"), (5, 13, "5-2")])
+        usbvfiod.remove(self.run, "at:5.1")
+        self.assertEqual(held(), [(5, 13, "5-2")])
+        with mock.patch.object(usb, "host_devices", return_value=[other]):
+            usbvfiod.remove(self.run, "5.13")
+        self.assertEqual(held(), [])
 
     def test_a_port_path_with_nothing_is_said_so(self):
         with self.assertRaisesRegex(DeskError, r"run r1 has nothing at port path 5\.1 \(desk usb ls\)"):

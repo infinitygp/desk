@@ -77,7 +77,9 @@ desk -r usb1 usb rm 0fd9:008f                       # or at:5.1 (a hub too: ever
   running guest, so a restore would not have it).
 - `desk ls` says "usbvfiod ended" when the server is gone: the guest has lost the controller, and
   QEMU can abort the VM with it. The run cannot be repaired; `desk down` it (the report has the
-  server's log). Never kill the server (`usbvfiod`) of a run yourself while its VM runs.
+  server's log). Never kill the server (`usbvfiod`) of a run yourself while its VM runs. A server
+  that ends gives its host devices back to their drivers; for one that was killed or crashed,
+  `desk down` binds them again and says so.
 - The server is `usbvfiod` from `$DESK_USBVFIOD` or `PATH`; `desk doctor` says whether it and QEMU's
   `vfio-user-pci` are there. In a scenario, `usbvfiod = true` at the top starts the run with the
   controller, and `usb_add` takes `at` and `hubs`, `usb_rm` takes `at:PORTPATH`.
