@@ -46,7 +46,15 @@ def _resume(run, memory: Path) -> None:
                         f"time desk clock set ({unset}); set it again with desk clock")
 
 
+def _refuse_controller(run) -> None:
+    if run.usbvfiod:
+        raise DeskError(f"snapshots are not made of runs with the usbvfiod controller (run {run.id}): the controller "
+                        "was added to the running guest, so the domain definition a restore starts from does not hold "
+                        "it, the restored guest has lost it, and the save has already ended the connection to usbvfiod")
+
+
 def save(run, name: str, force: bool = False) -> float:
+    _refuse_controller(run)
     d = _dir(run, name)
     if d.exists() and not force:
         raise DeskError(f"snapshot {name} exists (--force to replace it)")
@@ -97,6 +105,7 @@ def save(run, name: str, force: bool = False) -> float:
 
 
 def restore(run, name: str) -> float:
+    _refuse_controller(run)
     d = _dir(run, name)
     if not (d / "meta.json").exists() or not (d / "memory.save").exists():
         raise DeskError(f"no snapshot {name} (desk snapshot list)")

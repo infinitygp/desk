@@ -195,7 +195,7 @@ def _resolution(text: str | None) -> tuple[int, int] | None:
 
 
 def cmd_up(args) -> None:
-    from . import disks, forward, monitors, usb
+    from . import disks, forward, monitors, usb, usbvfiod
 
     resolution = _resolution(args.resolution)
     spec = load_image(args.image)
@@ -204,10 +204,14 @@ def cmd_up(args) -> None:
     # Whatever can be refused without a VM is refused before one is started.
     monitors.check(spec, args.displays, resolution, args.scale)
     extra_disks = [disks.parse(item) for item in args.disk or []]
+    if args.usbvfiod:
+        usbvfiod.check()
     for query in args.usb or []:
-        usb.usable(query)
+        # With the controller of usbvfiod the guest needs no usb-host: the device node is all it takes.
+        usb.openable(query) if args.usbvfiod else usb.usable(query)
     run = runs.up(spec, run_id=args.name, cold=args.cold, force=args.force, label=args.label,
-                  displays=args.displays, resolution=resolution, shared_memory=args.shared_memory)
+                  displays=args.displays, resolution=resolution, shared_memory=args.shared_memory,
+                  usbvfiod=args.usbvfiod)
     try:
         if args.displays != 1 or resolution or args.scale:
             monitors.apply(run, spec, resolution=resolution, scale=args.scale)
@@ -225,7 +229,10 @@ def cmd_up(args) -> None:
         print(f"[desk] run {run.id} started, but setting it up failed; taking it down again", file=sys.stderr)
         runs.down(run)
         raise
-    print(f"run {run.id} up (image {run.image}, ssh port {run.ssh_port})" + (", recording" if args.record else ""))
+    print(f"run {run.id} up (image {run.image}, ssh port {run.ssh_port})" + (", recording" if args.record else "")
+          + (f", USB controller of usbvfiod on {run.usbvfiod['bus']}" if run.usbvfiod else ""))
+    if run.usbvfiod:
+        print(f"hotplug socket: {run.usbvfiod['hotplug']} (desk -r {run.id} usb socket)")
     for port, local in forwards:
         print(_forward_line(port, local))
     # Not DESK_RUN: exported, it points every command of the shell at this run, whichever run
@@ -337,8 +344,12 @@ def cmd_diff(args) -> None:
 
 
 def cmd_ls(args) -> None:
+    from . import usbvfiod
+
     for r in runs.all_runs():
         state = "running" if r.live_domain() is not None else "stopped"
+        if r.usbvfiod and not usbvfiod.alive(r):
+            state += ", usbvfiod ended"
         held = (r.label or "-") + ("" if not r.holder or runs.holder_alive(r) else " (agent gone)")
         print(f"{r.id}\t{r.image}\t{state}\tidle {r.idle() / 60:.0f} min\t{held}\tssh:{r.ssh_port}\t{r.dir}")
 
@@ -1016,26 +1027,41 @@ def cmd_disk(args) -> None:
 
 
 def cmd_usb(args) -> None:
-    from . import usb
+    from . import usb, usbvfiod
 
     if args.usb_cmd == "ls":
         for d in usb.listing():
+            if d.get("unread"):
+                print(f"-\t-\t-\t-\t{d['unread']}")
+                continue
             if d.get("gone"):
                 print(f"-\t{d['bus']}.{d['dev']}\t-\t-\tgone, still in run {d['run']} "
                       f"(desk -r {d['run']} usb rm {d['bus']}.{d['dev']}, or the next usb add takes it out)")
                 continue
-            where = f"in run {d['run']}" if d["run"] else ("free" if d["access"] else
-                                                          "free, but not yours to open (desk usb add says how)")
+            if d.get("tree"):
+                print(f"{d['id']}\t-\tat:{d['at']}\t{d['name']}\tin run {d['run']} at {d['at']}")
+                continue
+            where = (f"in run {d['run']}" + (f" at {d['at']}" if d.get("at") else "") if d["run"] else
+                     "free" if d["access"] else "free, but not yours to open (desk usb add says how)")
             print(f"{d['id']}\t{d['bus']}.{d['dev']}\tport:{d['port']}\t{d['name'] or '-'}\t{where}")
         return
     run = runs.resolve(args.run)
-    if args.usb_cmd == "add":
-        d = usb.add(run, args.device)
-        print(f"USB device {d['id']} {d['name']} handed to the guest (the host does without it until "
-              "desk usb rm or desk down)")
+    if args.usb_cmd == "socket":
+        print(usbvfiod.hotplug_socket(run))
+    elif args.usb_cmd == "add":
+        d = usb.add(run, args.device, at=args.at, hub_options=args.hub)
+        made = f", with the hubs {', '.join(d['hubs'])}" if d.get("hubs") else ""
+        print(f"USB device {d['id']} {d['name']} handed to the guest"
+              + (f" at port path {d['at']}{made}" if d.get("at") else "")
+              + " (the host does without it until desk usb rm or desk down)")
     else:
         d = usb.remove(run, args.device)
-        print(f"USB device {d['id']} back with the host")
+        if d.get("tree"):
+            below = f", with {', '.join(d['below'])} below it" if d.get("below") else ""
+            print(f"{d['id']} removed ({d['name']}{below})")
+        else:
+            print(f"USB device {d['id']} back with the host"
+                  + (f" (it was at port path {d['at']})" if d.get("at") else ""))
 
 
 def cmd_clock(args) -> None:
@@ -1232,7 +1258,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="reach this guest port from the host (repeatable; desk forward)")
     p.add_argument("--shared-memory", action="store_true",
                    help="keep the guest's RAM in shared memory that host processes may map, as a vfio-user device "
-                        "(a USB controller of usbvfiod) needs")
+                        "needs (boots cold)")
+    p.add_argument("--usbvfiod", action="store_true",
+                   help="give the guest a second USB controller, served by usbvfiod, where hubs and devices stand "
+                        "at port paths (desk usb add --at; implies --shared-memory, so it boots cold)")
     p.set_defaults(func=cmd_up)
 
     p = sub.add_parser("down", help="destroy a run and delete its files")
@@ -1448,9 +1477,20 @@ def build_parser() -> argparse.ArgumentParser:
     up_ = usub.add_parser("add", help="plug a host USB device into the guest (the host does without it)")
     up_.add_argument("device", help="VENDOR:PRODUCT (1209:0001), BUS.DEVICE (3.7), port:BUS-PORT (3-1.2) or "
                                       "serial:SERIAL, as desk usb ls shows")
+    up_.add_argument("--at", metavar="PORTPATH",
+                     help="on a run started with --usbvfiod: plug it in at this port path of the controller, dotted "
+                          "from the root port (5.1.4: port 4 of the hub on port 1 of the hub on root port 5), with "
+                          "hubs where none is; without it the device takes the first free root port that fits")
+    up_.add_argument("--hub", action="append", metavar="PORTPATH=[VENDOR:PRODUCT][/PORTS][/hs|/fs]",
+                     help="the hub at a port path on the way, e.g. 5=067b:2586/4/hs (default 0409:55aa, 8 ports, "
+                          "high speed; one that exists keeps what it is; repeatable)")
     up_ = usub.add_parser("rm", help="give a USB device back to the host")
-    up_.add_argument("device")
-    usub.add_parser("ls", help="host USB devices and the runs they are in")
+    up_.add_argument("device", help="as for add, or at:PORTPATH for what is at a port path of the usbvfiod "
+                                      "controller (a hub, and everything below it, too)")
+    usub.add_parser("ls", help="host USB devices and the runs they are in, and the hubs and devices of the "
+                    "usbvfiod controllers")
+    usub.add_parser("socket", help="the hotplug socket of the run's usbvfiod, for usbvfiod's remote and for "
+                    "a process that serves emulated devices on it")
     p.set_defaults(func=cmd_usb)
 
     p = sub.add_parser("clock", help="show or move the guest's clock (schedules, expiry, retention)")

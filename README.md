@@ -406,6 +406,59 @@ journalctl --user -u desk-maintain  # output of the last runs
   the device number changes; desk looks the number up each time it needs one and refuses a name
   that fits several devices. The scenario steps `usb_add` and `usb_rm` do what `desk usb add|rm`
   does between other steps; `usb_add` waits up to its `timeout` for a device that is coming back.
+- `desk up IMAGE --usbvfiod` (`desk/usbvfiod.py`, `desk/hotplug.py`, `desk/hubs.py`) gives a run a
+  second USB controller where hubs and devices stand at port paths, for products that identify
+  hardware by the hubs it sits behind (a base with modules) and for devices that another process
+  emulates instead of hardware. The controller is served by usbvfiod, a
+  private fork of a vfio-user server that emulates an xHCI controller for QEMU's `vfio-user-pci`
+  device (`desk doctor` says whether the binary and that QEMU device are here; neither is
+  required for anything else). A port path is the ports from the root port down:
+  `5.1.4` is port 4 of the hub on port 1 of the hub on root port 5. Root ports 1-4 are USB 3 and
+  5-8 USB 2; hubs, which are virtual USB 2.0 hubs of up to 15 ports, stand on 5-8, five deep at
+  most. The libvirt-managed `qemu-xhci` controller stays, so the run's keyboard, tablet and every
+  other `desk usb` use keep working beside it.
+  - desk finds the binary in `$DESK_USBVFIOD`, else `usbvfiod` in `PATH` (the fork builds with
+    `cargo install --locked --path CHECKOUT`); a missing one is refused before a VM is started.
+    It runs in a session of its own in the run's directory (`usbvfiod/`: the vfio-user socket
+    QEMU connects to, the hotplug socket, `usbvfiod.log` at debug level and `usb.pcap`, the
+    traffic of the guest's driver), so it outlives the command that started it; its PID and
+    those paths are in `run.json`, and `desk usb socket` prints the hotplug socket, for the
+    fork's `remote` and for a process that serves emulated devices on it (the protocol and an
+    example server: the fork's
+    [External Devices](https://github.com/infinitygp/usbvfiod/blob/main/docs/users/external-devices.md)).
+    It is started before the domain, and the controller is added with
+    QMP `device_add` once the guest is ready, on the highest free PCIe root port (libvirt hands
+    out the lowest, so extra disks added later do not meet it). It runs without
+    `--reconnect`, so it ends with its QEMU even when desk does not get to stop it.
+  - Two rules come from QEMU 11.1.3, which aborts the VM when a vfio-user device is removed with
+    `device_del` and can abort it when the server dies: desk never removes the controller, and
+    `runs.down` destroys the domain first and only then stops the server (by PID, after checking
+    that the PID still is a usbvfiod of that run's socket; SIGTERM, SIGKILL after 5 s). A server that
+    ended before is said so: `desk ls` shows "usbvfiod ended", every command that needs it names
+    it and its log, `desk down` warns, and the report has the section described under Evidence.
+  - The guest's RAM has to be shared memory, which usbvfiod maps for the controller's DMA
+    (`--shared-memory`, implied). libvirt restores a saved state only into the memory backing it
+    was saved with, and warm states are saved with anonymous memory (`unsupported configuration:
+    Target memoryBacking source 'memfd' doesn't match source memoryBacking source 'none'`), so
+    such a run boots cold: Windows 11 is ready in 20 s, a warm restore takes about 1 s. A
+    second warm state per image, saved with shared memory, would remove that; it costs 10-25
+    minutes of maintenance and a disk's worth of space per image, so nothing builds it unasked
+    (Optional stays optional) and desk does not offer it yet.
+  - `desk usb add DEVICE [--at PATH] [--hub PATH=[VID:PID][/PORTS][/hs|/fs]]…` opens the host
+    device's node itself and hands it to the controller. With `--at` the hubs on the way that do not
+    exist yet are made first, top down (by default 0409:55aa, 8 ports, high speed; `--hub` says
+    what a hub is, and one that exists keeps what it is); a device the controller refuses takes
+    the hubs made for it away again. Without `--at` the controller takes the first free root port
+    that fits the device's speed, and the tree says which. `desk usb rm DEVICE` or `at:PORTPATH`
+    (a hub too: everything below goes) detaches, `desk usb ls` adds the hubs and devices of every
+    controller's tree. The tree is read from the controller each time and desk keeps no copy:
+    other clients of the same socket make hubs of their own. A command is a connection with a limit of 10
+    s (usbvfiod gives a client 5 s) and a lock of the run orders desk's own commands. The scenario
+    steps `usb_add` (`at`, `hubs`) and `usb_rm` (`at:PORTPATH`) do the same between other steps,
+    with `usbvfiod = true` at the top of the scenario.
+  - Snapshots are refused: the controller is added to the running guest, so the domain definition
+    a restore starts from does not hold it (a raw `virsh save` and `restore` gave a guest with
+    the qemu-xhci controller only), and the save has already ended the server's connection.
 - `desk clock` (`desk/clock.py`) sets the guest's time through qemu-guest-agent with the guest's
   time sync off and keeps the offset in `run.json`, put back after snapshot restores and reboots
   (tried for 20 s, as the agent may answer a moment late after a restore). A moved clock that
@@ -505,6 +558,10 @@ they are and the report names them.
   UTC times made local) and the timeline with screenshots; `--diff` adds the files the run
   changed, from `virt-diff` against the image the run started from. What the guest could not be
   asked about says "NOT CHECKED" instead of counting nothing.
+- A run with the usbvfiod controller says in "Found automatically" whether its server runs or has
+  ended (and that the VM may have gone with it), how many warnings and errors its log has, and
+  the controller's tree at the end; `usbvfiod.log` and the pcap of the guest's USB traffic (up to
+  32 MiB) go into the report's directory.
 - One command at a time takes a run down; a second `desk down` of it is refused.
 - `desk gc` removes reports older than 14 days and takes down runs idle for `DESK_TTL` seconds
   (2 hours), writing their report first unless the owner comes back meanwhile. Every `desk up`

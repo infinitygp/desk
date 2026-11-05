@@ -50,6 +50,40 @@ optional feature. `usb add` and `up --usb` refuse early with install hints if QE
 advertise it or the capability probe fails; `up --usb` does so before starting a VM.
 `usb ls`, `usb rm` and ordinary runs still work without it.
 
+### Hubs and devices at port paths (usbvfiod)
+
+Some products tell hardware by the hubs it sits behind (a base with modules). For those, and for
+devices that an emulator serves instead of hardware (usbvfiod's external devices), a run can have
+a second USB controller where hubs and devices stand at **port paths**:
+
+```fish
+desk up windows-11 --usbvfiod --name usb1           # boots cold (Windows 11: ~20 s, a warm start is ~1 s)
+desk -r usb1 usb socket                             # the hotplug socket, for an emulator or usbvfiod's remote
+desk -r usb1 usb add 0fd9:008f --at 5.1.4 --hub 5=067b:2586/4/hs --hub 5.1=067b:2586/4/hs
+desk usb ls                                         # also the hubs and devices in each controller's tree
+desk -r usb1 usb rm 0fd9:008f                       # or at:5.1 (a hub too: everything below it goes)
+```
+
+- A port path is the ports from the root port down: `5.1.4` is port 4 of the hub on port 1 of the
+  hub on root port 5. Root ports 1-4 are USB 3, 5-8 USB 2; hubs stand on 5-8, at most five deep,
+  up to 15 ports each. `--hub PATH=[VID:PID][/PORTS][/hs|/fs]` says what a hub on the way is;
+  without it a missing hub is a 0409:55aa hub with 8 ports at high speed (a high speed device
+  needs high speed hubs, and a high speed hub cannot stand below a full speed one). A hub that
+  exists keeps what it is. Without `--at` the device takes the first free root port that fits its
+  speed; `desk usb ls` shows where.
+- The same rules as for any host device apply (give only the device the user named, the node must be
+  the user's to open, `desk usb rm` or `desk down` gives it back). `usb add --at` on a run without
+  the controller is refused, as is a snapshot of one with it (the controller is added to the
+  running guest, so a restore would not have it).
+- `desk ls` says "usbvfiod ended" when the server is gone: the guest has lost the controller, and
+  QEMU can abort the VM with it. The run cannot be repaired; `desk down` it (the report has the
+  server's log). Never kill the server (`usbvfiod`) of a run yourself while its VM runs.
+- The server is `usbvfiod` from `$DESK_USBVFIOD` or `PATH`; `desk doctor` says whether it and QEMU's
+  `vfio-user-pci` are there. In a scenario, `usbvfiod = true` at the top starts the run with the
+  controller, and `usb_add` takes `at` and `hubs`, `usb_rm` takes `at:PORTPATH`.
+- The run's directory has `usbvfiod/usbvfiod.log` and `usbvfiod/usb.pcap` (what the guest's driver
+  sent to the devices); the report keeps both.
+
 ## Guest clock
 
 For what depends on time (schedules, timers, expiry, retention): `desk clock +3d` (also `-2h30m`;

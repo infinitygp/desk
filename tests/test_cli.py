@@ -148,7 +148,7 @@ class Down(unittest.TestCase):
             (run_dir / "shots" / "0001.png").write_bytes(b"png")
             (run_dir / "log.jsonl").write_text(json.dumps({"t": time.time(), "shot": str(run_dir / "shots" / "0001.png")})
                                                + "\n")
-            run = mock.Mock(id="gone", dir=run_dir, image="fedora-44-gnome", created=time.time() - 60, ready=0.0)
+            run = mock.Mock(id="gone", dir=run_dir, image="fedora-44-gnome", created=time.time() - 60, ready=0.0, usbvfiod={})
             run.live_domain.return_value = None  # QEMU ended under it
             args = SimpleNamespace(id=None, run=None, all=False, keep=False, diff=False, no_report=False)
             with mock.patch.object(evidence, "REPORTS", Path(tmp) / "reports"), \

@@ -26,7 +26,8 @@ Read the file for your task before you start:
 - Cockpit plugins, also on phone-sized screens: [cockpit.md](cockpit.md)
 - OpenWrt packages and LuCI apps: [openwrt.md](openwrt.md)
 - Monitors (resolution, scaling, several displays), extra disks, host USB devices (hardware the
-  product talks to), the guest clock (timers, expiry, retention), surviving a Fedora upgrade:
+  product talks to) and hubs at port paths, the guest clock (timers, expiry, retention), surviving a
+  Fedora upgrade:
   [system.md](system.md)
 
 ## Loop
@@ -85,6 +86,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk browser console [--errors] [--all]` | Web console of every page since the run started (see Pitfalls) |
 | `desk record start [--fps N]`, `desk record stop`, `desk up --record` | Record the screen as a WebM video, kept with the report |
 | `desk usb ls`, `desk usb add VENDOR:PRODUCT\|BUS.DEVICE`, `desk usb rm ...`, `desk up IMAGE --usb ...` | Hand a host USB device to the guest ([system.md](system.md)) |
+| `desk up IMAGE --usbvfiod`, `desk usb add DEVICE --at PORTPATH [--hub ...]`, `desk usb rm at:PORTPATH`, `desk usb socket` | A USB controller where hubs and devices stand at port paths, and its hotplug socket for a process that serves emulated devices ([system.md](system.md)) |
 | `desk observe start PROVIDER`, `desk observe mark TEXT`, `desk observe stop`, `desk observe providers` | Record what a program does inside a Windows guest with its own tools (Process Monitor, ETW, pktmon, USBPcap, IPC listings, debugger servers); files copied, hashed and checked ([observe.md](observe.md)) |
 | `desk doctor` | What this host has: where desk keeps its files, which host tools are missing (with the command that installs them), which images are built |
 
@@ -313,7 +315,9 @@ viewport`; both take `browser = "chromium"` or `"firefox"`, else the browser in 
 `disk_add = "8G:data"`, `disk_rm = "data"` (top-level `disks = ["8G:data"]` plugs them in
 before the first step, `usb = ["0fd9:0084"]` hands host USB devices over), `usb_add = "port:9-2.2"`,
 `usb_rm = "port:9-2.2"` (hand a host USB device over or take it back mid-scenario, named as for
-`desk usb add`; `usb_add` waits `timeout`, 10 s, for a device that is coming back), `host =
+`desk usb add`; `usb_add` waits `timeout`, 10 s, for a device that is coming back; with
+`usbvfiod = true` at the top, `usb_add` takes `at = "5.1.4"` and `hubs = ["5=067b:2586/4/hs"]`, and
+`usb_rm = "at:5.1"` takes a hub out), `host =
 ["tool", "arg"]` (a program on the host, no shell, checked like `exec` with `timeout`, `rc`,
 `output`, `until`; it gets `DESK_RUN`, `DESK_RUN_DIR`, `DESK_SSH_PORT`; `save = "ADDR"` keeps its
 stdout for `{ADDR}` in later steps), `console_errors = 0` (at

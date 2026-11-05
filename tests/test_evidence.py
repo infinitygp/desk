@@ -123,7 +123,7 @@ class Report(unittest.TestCase):
                 {"t": 103.0, "step": 2, "action": "expect done", "ok": True, "detail": "", "seconds": 1.0},
             ]
             (run_dir / "log.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
-            run = mock.Mock(id="r1", dir=run_dir, image="fedora-44-gnome", created=99.0, ready=0.0)
+            run = mock.Mock(id="r1", dir=run_dir, image="fedora-44-gnome", created=99.0, ready=0.0, usbvfiod={})
             run.live_domain.return_value = None
             with mock.patch.object(evidence, "REPORTS", Path(tmp) / "reports"):
                 md = (evidence.collect(run) / "report.md").read_text()
@@ -153,7 +153,7 @@ class Report(unittest.TestCase):
                 {"t": 112.0, "step": 3, "action": "expect Saved", "ok": True, "detail": "", "seconds": 1.0},
             ]
             (run_dir / "log.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
-            run = mock.Mock(id="r1", dir=run_dir, image="fedora-44-gnome", created=99.0, ready=0.0)
+            run = mock.Mock(id="r1", dir=run_dir, image="fedora-44-gnome", created=99.0, ready=0.0, usbvfiod={})
             run.live_domain.return_value = None
             with mock.patch.object(evidence, "REPORTS", Path(tmp) / "reports"):
                 md = (evidence.collect(run) / "report.md").read_text()
@@ -178,7 +178,7 @@ class Report(unittest.TestCase):
                       {"t": 101.0, "step": 1, "action": "gui app", "ok": True, "detail": "", "seconds": 1.0},
                       {"t": 110.0, "scenario": "/x/a.toml", "steps": 1, "first": 1}]  # then --from 1
             (run_dir / "log.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
-            run = mock.Mock(id="r1", dir=run_dir, image="fedora-44-gnome", created=99.0, ready=0.0)
+            run = mock.Mock(id="r1", dir=run_dir, image="fedora-44-gnome", created=99.0, ready=0.0, usbvfiod={})
             run.live_domain.return_value = None
             with mock.patch.object(evidence, "REPORTS", Path(tmp) / "reports"):
                 md = (evidence.collect(run) / "report.md").read_text()
@@ -194,7 +194,7 @@ class DiffFailure(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             run_dir = Path(tmp) / "run"
             run_dir.mkdir()
-            run = mock.Mock(id="r1", dir=run_dir, image="fedora-44-gnome", created=99.0, ready=0.0)
+            run = mock.Mock(id="r1", dir=run_dir, image="fedora-44-gnome", created=99.0, ready=0.0, usbvfiod={})
             run.live_domain.return_value = None
             # cp --reflink=always on a file system without reflinks
             no_reflink = subprocess.CalledProcessError(1, ["cp", "--reflink=always"])
@@ -213,7 +213,7 @@ class DiffFailure(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             run_dir = Path(tmp) / "run"
             run_dir.mkdir()
-            run = mock.Mock(id="r1", dir=run_dir, created=time.time() - 60)
+            run = mock.Mock(id="r1", dir=run_dir, created=time.time() - 60, usbvfiod={})
             (Path(tmp) / "r1").mkdir()
             report = Path(tmp) / "r1" / "report.md"
             report.write_text("# a scenario's report, the run kept")
@@ -292,7 +292,7 @@ class Timeline(unittest.TestCase):
                 {"t": 102.0, "step": 1, "action": f"root {script}", "ok": False, "detail": "exit 1", "seconds": 1.0},
             ]
             (run_dir / "log.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
-            run = mock.Mock(id="r1", dir=run_dir, image="fedora-44-gnome", created=99.0, ready=0.0)
+            run = mock.Mock(id="r1", dir=run_dir, image="fedora-44-gnome", created=99.0, ready=0.0, usbvfiod={})
             run.live_domain.return_value = None
             with mock.patch.object(evidence, "REPORTS", Path(tmp) / "reports"):
                 md = (evidence.collect(run) / "report.md").read_text()

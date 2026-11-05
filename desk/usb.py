@@ -129,30 +129,64 @@ def attached(dom) -> list[tuple[int, int]]:
     return out
 
 
+def openable(query: str) -> dict:
+    """The host device `query` names, if this user can open its node: QEMU, and usbvfiod, run as it."""
+    device = pick(host_devices(), query)
+    if not device["access"]:
+        raise DeskError(f"{device['node']} ({device['id']} {device['name']}) cannot be opened by this user, "
+                        f"and the VM's USB runs as it; give it to the kvm group with a udev rule (fish, as you):\n"
+                        f"  {udev_hint(device)}")
+    return device
+
+
 def usable(query: str) -> dict:
-    """The host device `query` names, if this user can hand it over; refused before a VM starts."""
+    """The host device `query` names, if this user can hand it over to QEMU's usb-host; refused
+    before a VM starts."""
     from .doctor import USB_HOST, install_command
 
     if not USB_HOST.present():
         raise DeskError("QEMU usb-host is unavailable (or QEMU's device probe failed); host USB passthrough needs it: "
                         + install_command(None, [USB_HOST]))
-    device = pick(host_devices(), query)
-    if not device["access"]:
-        raise DeskError(f"{device['node']} ({device['id']} {device['name']}) cannot be opened by this user, "
-                        f"and QEMU runs as it; give it to the kvm group with a udev rule (fish, as you):\n"
-                        f"  {udev_hint(device)}")
-    return device
+    return openable(query)
 
 
-def add(run, query: str) -> dict:
-    from . import runs
+def holder(here: tuple[int, int]) -> str | None:
+    """The live run that has the host device `here`, behind its libvirt hostdev or in the tree of
+    its usbvfiod controller."""
+    from . import runs, usbvfiod
 
-    device = usable(query)
-    here = (device["bus"], device["dev"])
     for other in runs.all_runs():
         theirs = other.live_domain()
-        if theirs is not None and here in attached(theirs):
-            raise DeskError(f"USB device {device['id']} is in run {other.id} already (desk -r {other.id} usb rm)")
+        if theirs is None:
+            continue
+        if other.usbvfiod:
+            try:
+                if here in usbvfiod.host_entries(usbvfiod.tree(other, timeout=3)):
+                    return other.id
+            except DeskError:
+                continue  # its controller is down; nothing there to hold the device
+        elif here in attached(theirs):
+            return other.id
+    return None
+
+
+def add(run, query: str, at: str | None = None, hub_options: list[str] | None = None) -> dict:
+    from . import hubs, usbvfiod
+
+    if run.usbvfiod:
+        device = openable(query)
+        other = holder((device["bus"], device["dev"]))
+        if other and other != run.id:
+            raise DeskError(f"USB device {device['id']} is in run {other} already (desk -r {other} usb rm)")
+        return usbvfiod.attach(run, device, at, hubs.parse_hubs(hub_options))
+    if at or hub_options:
+        raise DeskError(f"--at and --hub place devices in the controller of usbvfiod, which run {run.id} does not "
+                        "have (desk up IMAGE --usbvfiod)")
+    device = usable(query)
+    here = (device["bus"], device["dev"])
+    other = holder(here)
+    if other:
+        raise DeskError(f"USB device {device['id']} is in run {other} already (desk -r {other} usb rm)")
     dom = run.dom()
     # Only numbers no device on the host has: one that is there, even in a reset, stays the guest's.
     for b, d in gone(dom):
@@ -171,6 +205,13 @@ def add(run, query: str) -> dict:
 
 
 def remove(run, query: str) -> dict:
+    from . import hubs, usbvfiod
+
+    if run.usbvfiod:
+        return usbvfiod.remove(run, query)
+    if hubs.AT.fullmatch(query):
+        raise DeskError(f"at:PORTPATH names what is in the controller of usbvfiod, which run {run.id} does not "
+                        "have (desk up IMAGE --usbvfiod)")
     dom = run.dom()
     here = attached(dom)
     devices = [d for d in host_devices() if (d["bus"], d["dev"]) in here]
@@ -191,14 +232,20 @@ def remove(run, query: str) -> dict:
 
 def listing() -> list[dict]:
     """Host devices, each with the run it is handed to, if any, then the entries of runs whose
-    device has left the host (`gone`)."""
-    from . import runs
+    device has left the host (`gone`), then the hubs and devices in the trees of usbvfiod's
+    controllers (`tree`)."""
+    from . import runs, usbvfiod
 
-    held, stale = {}, []
+    held, stale, at = {}, [], {}
     for r in runs.all_runs():
         dom = r.live_domain()
-        if dom is not None:
+        if dom is not None and not r.usbvfiod:
             held.update({addr: r.id for addr in attached(dom)})
             stale += [{"id": "", "bus": b, "dev": d, "node": "", "name": "", "access": False, "run": r.id,
                        "gone": True} for b, d in gone(dom)]
-    return [{**d, "run": held.get((d["bus"], d["dev"]))} for d in host_devices()] + stale
+    controlled, tree = usbvfiod.held_by_runs()
+    for key, (run_id, path) in controlled.items():
+        held[key], at[key] = run_id, path
+    return [{**d, "run": held.get((d["bus"], d["dev"])),
+             **({"at": at[(d["bus"], d["dev"])]} if (d["bus"], d["dev"]) in at else {})}
+            for d in host_devices()] + stale + tree

@@ -263,6 +263,14 @@ def timer_line() -> str:
             "--install-timer does it weekly)")
 
 
+def usbvfiod_line() -> str:
+    """Whether desk up --usbvfiod works here: the binary, and a QEMU with vfio-user-pci. Only
+    information: hosts that do not use it are not failed for lacking it."""
+    from . import usbvfiod
+
+    return usbvfiod.describe()
+
+
 def guest_settings() -> str:
     """The time zone and keyboard layout images get, and where they come from."""
     zone = ("config.toml" if config.LOCAL.get("timezone") else "the host's" if config.host_timezone()
@@ -310,5 +318,6 @@ def run() -> bool:
           "desk maintain --only NAME)")
     print("\n".join(image_lines))
     print(f"\nmaintenance (optional): {timer_line()}")
+    print(f"usbvfiod (optional): {usbvfiod_line()}")
     return not missing["to start runs"] and not kvm() and not connection_problem \
         and not any("not writable" in p for p in home_problems)

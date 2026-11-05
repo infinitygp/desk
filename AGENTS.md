@@ -49,6 +49,15 @@ guest; whatever talks to one is tried in one before it is committed:
   (`bin/desk ls`, `virsh -c qemu:///session list`).
 - Scenario files of the projects on the host that use desk (their `test/desk/*.toml`) must still
   pass `bin/desk scenario check`.
+- The usbvfiod controller (`desk/usbvfiod.py`, `hotplug.py`, `hubs.py`): the unit tests talk to a
+  fake server, so try the real one in a guest too: `DESK_USBVFIOD=PATH bin/desk up windows-11
+  --usbvfiod --name uv`, the controller and its root hub in `Get-PnpDevice` (status OK, problem
+  code 0); with the fork's `remote` on the socket (`remote --socket "$(bin/desk -r uv usb socket)"
+  --hub 5 --ports 4 --speed high`, then `--virtual-hid 5.1 --speed full`, or `--external` with its
+  `examples/external_hid.rs`), the hub and the device in `Get-PnpDevice` with their
+  `DEVPKEY_Device_LocationPaths`; `bin/desk down uv`, and `pgrep -x usbvfiod` shows nothing. A host
+  device only when the user named one: the host's controller often serves its keyboard and mouse
+  too.
 
 ### Blocks (`images/`)
 

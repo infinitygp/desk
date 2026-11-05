@@ -58,6 +58,7 @@ class FakeRun:
         self.id, self.dir, self.image = run_id, d, image
         self.created = time.time() - 60
         self.label, self.timezone, self.layout = "tests", "", ""
+        self.usbvfiod = {}
         self.events: list[dict] = []
         self.live = True
 

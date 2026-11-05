@@ -117,7 +117,7 @@ class AddRemove(unittest.TestCase):
         self.addCleanup(capability.stop)
 
     def test_missing_backend_refuses_add_before_touching_the_guest(self):
-        run = mock.Mock()
+        run = mock.Mock(usbvfiod={})
         with mock.patch.object(doctor, "_qemu_devices", return_value='name "qemu-xhci", bus PCI\n'), \
              mock.patch.object(usb, "host_devices") as devices, \
              self.assertRaisesRegex(DeskError, "QEMU usb-host.*qemu-hw-usb-host.*qemu-device-usb-host"):
@@ -127,7 +127,7 @@ class AddRemove(unittest.TestCase):
 
     def test_missing_backend_refuses_up_usb_before_starting_a_run(self):
         args = SimpleNamespace(resolution=None, image="windows-11", memory=None, cpus=None, displays=1,
-                               scale=None, disk=[], usb=["0fd9:0084"])
+                               scale=None, disk=[], usb=["0fd9:0084"], usbvfiod=False)
         with mock.patch.object(doctor, "_qemu_devices", return_value=""), \
              mock.patch.object(cli, "load_image"), mock.patch("desk.monitors.check"), \
              mock.patch("desk.runs.up") as up, self.assertRaisesRegex(DeskError, "QEMU usb-host"):
@@ -137,15 +137,49 @@ class AddRemove(unittest.TestCase):
     def test_up_without_usb_does_not_probe_host_passthrough(self):
         args = SimpleNamespace(resolution=None, image="windows-11", memory=None, cpus=None, displays=1,
                                scale=None, disk=[], usb=[], name=None, cold=False, force=False, label=None,
-                               record=False, forward=[], shared_memory=False)
+                               record=False, forward=[], shared_memory=False, usbvfiod=False)
         with mock.patch.object(doctor, "_qemu_devices", side_effect=AssertionError("USB probe on an ordinary run")), \
              mock.patch.object(cli, "load_image"), mock.patch("desk.monitors.check"), \
              mock.patch("desk.runs.up") as up, mock.patch("builtins.print"):
             cli.cmd_up(args)
         up.assert_called_once()
 
+    def test_up_with_the_controller_is_checked_before_a_vm_starts(self):
+        from desk import usbvfiod
+
+        args = SimpleNamespace(resolution=None, image="windows-11", memory=None, cpus=None, displays=1, scale=None,
+                               disk=[], usb=[], name=None, cold=False, force=False, label=None, record=False,
+                               forward=[], shared_memory=False, usbvfiod=True)
+        with mock.patch.object(usbvfiod, "check", side_effect=DeskError("usbvfiod is not installed")), \
+                mock.patch.object(cli, "load_image"), mock.patch("desk.monitors.check"), \
+                mock.patch("desk.runs.up") as up, self.assertRaisesRegex(DeskError, "usbvfiod is not installed"):
+            cli.cmd_up(args)
+        up.assert_not_called()
+
+    def test_up_with_the_controller_hands_devices_over_without_qemus_usb_host(self):
+        from desk import usbvfiod
+
+        args = SimpleNamespace(resolution=None, image="windows-11", memory=None, cpus=None, displays=1, scale=None,
+                               disk=[], usb=["0fd9:0084"], name=None, cold=False, force=False, label=None,
+                               record=False, forward=[], shared_memory=False, usbvfiod=True)
+        run = SimpleNamespace(id="u1", image="windows-11", ssh_port=2222,
+                              usbvfiod={"bus": "pci.14", "hotplug": "/r/u1/usbvfiod/hotplug.sock"},
+                              log_event=lambda **kw: None)
+        with mock.patch.object(usbvfiod, "check", return_value="/x/usbvfiod"), \
+                mock.patch.object(doctor, "_qemu_devices", side_effect=AssertionError("usb-host probe")), \
+                mock.patch.object(usb, "host_devices", return_value=[DECK]), \
+                mock.patch.object(cli, "load_image"), mock.patch("desk.monitors.check"), \
+                mock.patch("desk.runs.up", return_value=run) as up, \
+                mock.patch.object(usb, "add", return_value=DECK) as add, mock.patch("builtins.print") as out:
+            cli.cmd_up(args)
+        self.assertTrue(up.call_args.kwargs["usbvfiod"])
+        add.assert_called_once_with(run, "0fd9:0084")
+        printed = [c.args[0] for c in out.call_args_list]
+        self.assertIn("run u1 up (image windows-11, ssh port 2222), USB controller of usbvfiod on pci.14", printed)
+        self.assertIn("hotplug socket: /r/u1/usbvfiod/hotplug.sock (desk -r u1 usb socket)", printed)
+
     def test_listing_and_removal_do_not_need_the_backend(self):
-        run = mock.Mock(**{"dom.return_value": domain((3, 7))})
+        run = mock.Mock(usbvfiod={}, **{"dom.return_value": domain((3, 7))})
         with mock.patch.object(doctor, "_qemu_devices", side_effect=AssertionError("USB backend probe")), \
              mock.patch.object(usb, "host_devices", return_value=[DECK]), \
              mock.patch("desk.runs.all_runs", return_value=[]):
@@ -156,17 +190,17 @@ class AddRemove(unittest.TestCase):
     def test_refuses_a_node_this_user_cannot_open_and_says_how(self):
         with mock.patch.object(usb, "host_devices", return_value=[{**DECK, "access": False}]), \
              self.assertRaisesRegex(DeskError, 'ATTRS{idVendor}=="0fd9".*GROUP="kvm"'):
-            usb.add(mock.Mock(), "0fd9:0084")
+            usb.add(mock.Mock(usbvfiod={}), "0fd9:0084")
 
     def test_refuses_a_device_another_run_has(self):
-        other = SimpleNamespace(id="b2", live_domain=lambda: domain((3, 7)))
+        other = SimpleNamespace(id="b2", usbvfiod={}, live_domain=lambda: domain((3, 7)))
         with mock.patch.object(usb, "host_devices", return_value=[DECK]), \
              mock.patch("desk.runs.all_runs", return_value=[other]), \
              self.assertRaisesRegex(DeskError, "in run b2 already"):
-            usb.add(mock.Mock(), "0fd9:0084")
+            usb.add(mock.Mock(usbvfiod={}), "0fd9:0084")
 
     def test_plugs_in_by_address(self):
-        run = mock.Mock(**{"dom.return_value": domain()})
+        run = mock.Mock(usbvfiod={}, **{"dom.return_value": domain()})
         with mock.patch.object(usb, "host_devices", return_value=[DECK]), \
              mock.patch.object(usb, "present", return_value={(3, 7)}), \
              mock.patch("desk.runs.all_runs", return_value=[]):
@@ -175,7 +209,7 @@ class AddRemove(unittest.TestCase):
         self.assertIn("<address bus='3' device='7'/>", xml)
 
     def test_takes_back_a_device_gone_from_the_host_by_its_address(self):
-        run = mock.Mock(**{"dom.return_value": domain((3, 7))})
+        run = mock.Mock(usbvfiod={}, **{"dom.return_value": domain((3, 7))})
         with mock.patch.object(usb, "host_devices", return_value=[]):
             self.assertEqual(usb.remove(run, "3.7")["dev"], 7)
         run.dom.return_value.detachDeviceFlags.assert_called_once()
@@ -205,7 +239,7 @@ class Gone(unittest.TestCase):
     def test_add_takes_out_every_gone_entry_first_and_logs_it(self):
         stale = [(13, n) for n in range(13, 27)]
         dom = domain(*stale, (3, 8))
-        run = mock.Mock(**{"dom.return_value": dom})
+        run = mock.Mock(usbvfiod={}, **{"dom.return_value": dom})
         new = {**DECK, "bus": 13, "dev": 40, "node": "/dev/bus/usb/013/040"}
         with mock.patch.object(usb, "host_devices", return_value=[new]), \
              mock.patch.object(usb, "SYS", self.sys), mock.patch("desk.runs.all_runs", return_value=[]), \
@@ -221,7 +255,7 @@ class Gone(unittest.TestCase):
 
     def test_a_device_on_the_host_is_never_taken_out(self):
         dom = domain((3, 8))
-        run = mock.Mock(**{"dom.return_value": dom})
+        run = mock.Mock(usbvfiod={}, **{"dom.return_value": dom})
         new = {**DECK, "bus": 13, "dev": 40}
         with mock.patch.object(usb, "host_devices", return_value=[new]), \
              mock.patch.object(usb, "SYS", self.sys), mock.patch("desk.runs.all_runs", return_value=[]):
@@ -231,7 +265,7 @@ class Gone(unittest.TestCase):
     def test_a_failed_take_out_says_which_entry_and_adds_nothing(self):
         dom = domain((13, 13))
         dom.detachDeviceFlags.side_effect = usb.libvirt.libvirtError("busy")
-        run = mock.Mock(**{"dom.return_value": dom})
+        run = mock.Mock(usbvfiod={}, **{"dom.return_value": dom})
         with mock.patch.object(usb, "host_devices", return_value=[{**DECK, "bus": 13, "dev": 40}]), \
              mock.patch.object(usb, "SYS", self.sys), mock.patch("desk.runs.all_runs", return_value=[]), \
              self.assertRaisesRegex(DeskError, "13.13, gone from the host"):
@@ -239,7 +273,7 @@ class Gone(unittest.TestCase):
         dom.attachDeviceFlags.assert_not_called()
 
     def test_listing_shows_gone_entries_with_their_run(self):
-        other = SimpleNamespace(id="b2", live_domain=lambda: domain((13, 13), (13, 40)))
+        other = SimpleNamespace(id="b2", usbvfiod={}, live_domain=lambda: domain((13, 13), (13, 40)))
         present = {**DECK, "bus": 13, "dev": 40}
         with mock.patch.object(usb, "host_devices", return_value=[present]), \
              mock.patch.object(usb, "SYS", self.sys), mock.patch("desk.runs.all_runs", return_value=[other]):

@@ -11,6 +11,7 @@ from desk.config import DeskError
 class Run:
     """A run whose guest is a file: saving it writes the memory image, and nothing restores."""
     clock_offset = 0.0
+    usbvfiod = {}
 
     def __init__(self, d, save_fails: bool = False):
         self.dir, self.save_fails, self.destroyed = Path(d), save_fails, False

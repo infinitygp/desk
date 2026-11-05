@@ -342,6 +342,79 @@ class Up(unittest.TestCase):
         self.assertTrue(prepared.call_args.kwargs["shared_memory"])
         self.assertTrue(runs.load("t").shared_memory)
 
+    def test_the_usbvfiod_controller_boots_cold_with_shared_memory_and_comes_after_the_guest_is_ready(self):
+        from desk.config import load_image
+
+        spec = load_image("fedora-44-gnome")
+        warm = self.home / "warm" / "fedora-44-gnome"
+        warm.mkdir(parents=True)
+        (warm / "memory.save").write_bytes(b"")
+        prepared = mock.Mock(return_value="<domain/>")
+        held = lambda what: lambda *a, **k: self.events.append((what, False))  # noqa: E731
+        with mock.patch("desk.runs.prepare_domain_xml", prepared), mock.patch("sys.stdout") as out, \
+                mock.patch("desk.usbvfiod.start", side_effect=held("server started")) as start, \
+                mock.patch("desk.usbvfiod.attach_controller", side_effect=held("controller added")) as add:
+            run = runs.up(spec, run_id="t", usbvfiod=True)
+        self.assertEqual([e for e, _ in self.events],
+                         ["server started", "domain started", "waiting for the guest", "waiting for the session",
+                          "provisioning", "preparing", "controller added"])
+        start.assert_called_once_with(run)
+        self.assertEqual(add.call_args.args[0], run)
+        self.assertIn("booting cold: the warm state's RAM is not shared memory, which the usbvfiod controller needs",
+                      "".join(c.args[0] for c in out.write.call_args_list))
+        self.conn.restoreFlags.assert_not_called()
+        self.assertTrue(prepared.call_args.kwargs["shared_memory"])
+        self.assertTrue(runs.load("t").shared_memory)
+
+    def test_a_run_without_the_controller_never_touches_usbvfiod(self):
+        from desk.config import load_image
+
+        with mock.patch("sys.stdout"), mock.patch("desk.usbvfiod.start") as start, \
+                mock.patch("desk.usbvfiod.attach_controller") as add:
+            runs.up(load_image("fedora-44-gnome"), run_id="t")
+        start.assert_not_called()
+        add.assert_not_called()
+
+    @staticmethod
+    def noted(run, then=None):
+        """What usbvfiod.start does before it waits for the server: note it in run.json."""
+        with run.edit() as r:
+            r.usbvfiod = {"pid": 1, "vfio": "v", "hotplug": "h", "log": "l", "pcap": "p", "bus": ""}
+        if then:
+            raise then
+
+    def test_a_server_that_does_not_start_leaves_no_domain_and_no_server(self):
+        from desk.config import load_image
+
+        with mock.patch("sys.stdout"), mock.patch("sys.stderr"), mock.patch(
+                "desk.usbvfiod.start", side_effect=lambda run: self.noted(run, DeskError("usbvfiod ended"))), \
+                mock.patch("desk.usbvfiod.alive", return_value=False), \
+                mock.patch("desk.usbvfiod.stop") as stop, self.assertRaisesRegex(DeskError, "usbvfiod ended"):
+            runs.up(load_image("fedora-44-gnome"), run_id="t", usbvfiod=True)
+        self.conn.createXML.assert_not_called()
+        stop.assert_called_once()
+        self.assertTrue((self.home / "runs" / "t").exists())  # kept, with the log
+
+    def test_a_controller_that_cannot_be_added_takes_the_run_down_and_stops_the_server_after_the_domain(self):
+        from desk.config import load_image
+
+        order = []
+        dom = mock.Mock()
+        dom.isActive.return_value = True
+        dom.XMLDesc.return_value = str(self.home / "runs" / "t" / "disk.qcow2")
+        dom.destroy.side_effect = lambda: order.append("domain destroyed")
+        self.conn.createXML.return_value = dom
+        with mock.patch("sys.stdout"), mock.patch("sys.stderr"), mock.patch("desk.runs.lookup", return_value=dom), \
+                mock.patch("desk.usbvfiod.start", side_effect=self.noted), \
+                mock.patch("desk.usbvfiod.attach_controller", side_effect=DeskError("no PCIe port")), \
+                mock.patch("desk.display.screenshot", side_effect=DeskError("no screen")), \
+                mock.patch("desk.usbvfiod.stop", side_effect=lambda run: order.append("server stopped")), \
+                mock.patch("desk.usbvfiod.alive", return_value=True), \
+                mock.patch("desk.runs.Run.live_domain", return_value=dom), \
+                self.assertRaisesRegex(DeskError, "no PCIe port"):
+            runs.up(load_image("fedora-44-gnome"), run_id="t", usbvfiod=True)
+        self.assertEqual(order, ["domain destroyed", "server stopped"])
+
     def test_a_run_that_provisions_keeps_the_images_zone_and_layout(self):
         from dataclasses import replace
 

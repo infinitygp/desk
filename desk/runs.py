@@ -11,7 +11,7 @@ import sys
 import time
 import xml.etree.ElementTree as ET
 from contextlib import ExitStack, contextmanager
-from dataclasses import asdict, dataclass, fields, replace
+from dataclasses import asdict, dataclass, field, fields, replace
 from pathlib import Path
 
 import libvirt
@@ -149,6 +149,9 @@ class Run:
     layout: str = ""
     # Guest RAM shared with host processes (desk up --shared-memory), which vfio-user devices need.
     shared_memory: bool = False
+    # The usbvfiod that serves the run's USB controller (desk up --usbvfiod): its PID, sockets, log
+    # and pcap, and the PCIe root port the controller sits in; see desk/usbvfiod.py. Empty: none.
+    usbvfiod: dict = field(default_factory=dict)
 
     @property
     def since(self) -> float:
@@ -222,6 +225,10 @@ class Run:
     def dom(self) -> libvirt.virDomain:
         d = self.live_domain()
         if d is None:
+            from . import usbvfiod
+
+            if self.usbvfiod and not usbvfiod.alive(self):
+                raise DeskError(f"run {self.id} is not running: {usbvfiod.ended(self)}")
             raise DeskError(f"run {self.id} is not running (desk down {self.id} to clean up)")
         return d
 
@@ -375,6 +382,12 @@ def host_state(run: Run) -> str:
     parts.append(f"other runs: {', '.join(others) or 'none'}")
     vm = ("the VM is running but does not answer" if run.live_domain() is not None else
           f"the VM is no longer running (QEMU ended; coredumpctl and libvirt's log of {run.domain} may say why)")
+    if run.usbvfiod:
+        from . import usbvfiod
+
+        vm += ("; its usbvfiod runs" if usbvfiod.alive(run) else
+               f"; its usbvfiod has ended, so the guest has lost its USB controller, and QEMU can abort the VM with "
+               f"it ({run.usbvfiod['log']})")
     return f"{vm}; host: {'; '.join(parts)}"
 
 
@@ -613,7 +626,7 @@ def holder_alive(run: Run) -> bool:
 
 def up(spec: ImageSpec, run_id: str | None = None, cold: bool = False, force: bool = False,
        displays: int = 1, resolution: tuple[int, int] | None = None, label: str | None = None,
-       shared_memory: bool = False) -> Run:
+       shared_memory: bool = False, usbvfiod: bool = False) -> Run:
     from .maintain import check_usable
 
     if run_id is not None:
@@ -647,7 +660,7 @@ def up(spec: ImageSpec, run_id: str | None = None, cold: bool = False, force: bo
                     waiting = True
             else:
                 return _up(spec, run_id, cold, displays, resolution, label, started=lock.close,
-                           shared_memory=shared_memory)
+                           shared_memory=shared_memory, usbvfiod=usbvfiod)
         # Runs idle past their time give their memory back; their reports take a while, which only
         # a start that needs the memory waits for.
         gc_idle()
@@ -666,9 +679,11 @@ def _gc_idle_in_background() -> subprocess.Popen:
 
 def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
         resolution: tuple[int, int] | None = None, label: str | None = None, started=lambda: None,
-        shared_memory: bool = False) -> Run:
+        shared_memory: bool = False, usbvfiod: bool = False) -> Run:
     """`started` is called once the domain runs: from there on nothing is picked or checked that
     another command could take too, so the state lock is given back while the guest boots."""
+    # The controller's DMA is in the guest's RAM, which must then be shared memory.
+    shared_memory = shared_memory or usbvfiod
     run_id = run_id or secrets.token_hex(3)
     rd = RUNS / run_id
     if rd.exists():
@@ -693,7 +708,8 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
     if not cold and shared_memory:
         # libvirt restores a saved state only into the memory backing it was saved with, and warm
         # states are saved with the guest's RAM in anonymous memory.
-        print("[desk] booting cold: the warm state's RAM is not shared memory")
+        print("[desk] booting cold: the warm state's RAM is not shared memory"
+              + (", which the usbvfiod controller needs" if usbvfiod else ""))
         cold = True
     if not cold:
         reason = cold_reason(spec, warm_dir)
@@ -740,6 +756,11 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
             reflink_copy(warm_dir / "VARS.qcow2", nvram)
             template = saved_xml
         nvram.chmod(0o644)
+        if usbvfiod:
+            # Before the domain: the controller is added to the booted guest, to a server that listens.
+            from . import usbvfiod as controller
+
+            controller.start(run)
         xml = prepare_domain_xml(template, name=run.domain, disk=disk, nvram=nvram,
                                  ssh_port=run.ssh_port, console_log=rd / "console.log",
                                  keep_uuid=not cold, vnc_password=run.vnc_password,
@@ -767,6 +788,8 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
             steps.run_prepare(spec_for(run), run)
             with run.edit() as r:
                 r.ready = time.time()
+        if usbvfiod:
+            controller.attach_controller(run, dom)
     except BaseException:
         # What the screen showed is the best clue to a start that failed (prepare not finding
         # what it waits for, a session that did not come up).
@@ -785,7 +808,7 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
 
 
 def down(run: Run, keep: bool = False) -> None:
-    from . import forward, record
+    from . import forward, record, usbvfiod
 
     if not keep:
         record.kill(run)
@@ -794,8 +817,15 @@ def down(run: Run, keep: bool = False) -> None:
     except OSError as e:
         print(f"[desk] warning: stopping port forwards of {run.id}: {e}", file=sys.stderr)
     dom = run.live_domain()
+    served = run.usbvfiod and usbvfiod.alive(run)
     if dom is not None:
         dom.destroy()
+    # Only now: QEMU aborts the VM when the server of its vfio-user device dies.
+    if run.usbvfiod:
+        usbvfiod.stop(run)
+        if not served:
+            print(f"[desk] warning: usbvfiod of run {run.id} had ended before the run went down "
+                  f"(log: {run.usbvfiod['log']}{'' if keep else ', and in the report'})", file=sys.stderr)
     if not keep:
         shutil.rmtree(run.dir, ignore_errors=True)
 

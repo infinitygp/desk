@@ -450,6 +450,10 @@ def collect(run, diff: bool = False) -> Path:
         md.append("")
     md.append("## Found automatically")
     md.append("")
+    if run.usbvfiod:
+        from . import usbvfiod
+
+        md.append(usbvfiod.report(run, out))
     if not live:
         md.append("- the VM was not running, so no guest logs were collected")
     elif "error" in problems:

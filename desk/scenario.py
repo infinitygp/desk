@@ -14,7 +14,7 @@ import tomllib
 from datetime import UTC
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
-from . import a11y, browser, clock, disks, display, evidence, guest, record, runs, usb, winagent
+from . import a11y, browser, clock, disks, display, evidence, guest, hubs, record, runs, usb, usbvfiod, winagent
 from .config import DeskError, NotDone, load_image
 from .steps import Steps
 
@@ -24,7 +24,7 @@ ACTIONS = {"root", "exec", "gui", "focus", "click", "type", "key", "expect", "ex
            "observe_start", "observe_stop", "mark", "set_text", "move", "drag", "scroll", "press", "release", "win",
            "pull", "offline", "usb_add", "usb_rm", "host"}
 OPTIONS = {"role", "exact", "timeout", "output", "rc", "name", "soft", "env", "step", "until", "anywhere", "browser",
-           "button", "window", "state", "text", "double", "to", "save"}
+           "button", "window", "state", "text", "double", "to", "save", "at", "hubs"}
 # The options each action reads, besides name and soft; any other would be ignored without a word.
 READS = {
     "root": {"timeout", "output", "rc", "until"}, "exec": {"timeout", "output", "rc", "until"},
@@ -36,7 +36,7 @@ READS = {
     "press": {"role", "exact", "timeout", "window", "button"}, "release": {"role", "exact", "timeout", "window"},
     "expect": {"role", "exact", "timeout", "window", "state"}, "expect_absent": {"role", "exact", "timeout", "window"},
     "reboot": {"timeout"}, "wait": {"timeout"}, "clock": {"step", "timeout"}, "disk_rm": {"timeout"},
-    "open": {"timeout", "browser"}, "viewport": {"browser"}, "usb_add": {"timeout"},
+    "open": {"timeout", "browser"}, "viewport": {"browser"}, "usb_add": {"timeout", "at", "hubs"},
     "host": {"timeout", "rc", "output", "env", "until", "save"},
 }
 # {NAME} in a step: the stdout a host step before it kept with save = "NAME".
@@ -56,6 +56,14 @@ def _pixels(v, n: int) -> bool:
                                                        for x in v)
 
 
+def _valid(parse, value) -> bool:
+    try:
+        parse(value)
+    except DeskError:
+        return False
+    return True
+
+
 def _texts(v) -> bool:
     return _text(v) or (isinstance(v, list) and bool(v) and all(_text(x) for x in v))
 
@@ -67,7 +75,12 @@ VALUES = {
     "click": (lambda v: _text(v) or _pixels(v, 2), "a name, or [x, y] in screen pixels"),
     "win": (_text, "what follows desk win, e.g. \"taskbar --align left\""),
     "pull": (_text, "a file in the guest"),
-    **{a: (lambda v: _text(v) and usb.is_query(v), f"a USB device, {usb.QUERY}") for a in ("usb_add", "usb_rm")},
+    "usb_add": (lambda v: _text(v) and usb.is_query(v), f"a USB device, {usb.QUERY}"),
+    "usb_rm": (lambda v: _text(v) and (usb.is_query(v) or hubs.AT.fullmatch(v) is not None),
+               f"a USB device, {usb.QUERY}, or at:PORTPATH"),
+    "at": (lambda v: _text(v) and _valid(hubs.parse_path, v), "a port path like 5.1.4"),
+    "hubs": (lambda v: isinstance(v, list) and bool(v) and all(_text(x) for x in v)
+             and _valid(hubs.parse_hubs, v), f"a list of hubs, {hubs.HUB_FORMAT}"),
     "offline": (lambda v: isinstance(v, bool) or (isinstance(v, list) and bool(v) and all(
         isinstance(p, int) and not isinstance(p, bool) and 0 < p < 65536 for p in v)),
                 "true (every outgoing connection but DNS refused), a list of ports ([443]) or false"),
@@ -164,7 +177,7 @@ def load(path: Path) -> dict:
         raise DeskError(f"{path}: {e.strerror}") from None
     except tomllib.TOMLDecodeError as e:
         raise DeskError(f"{path}: not valid TOML: {e}") from None
-    unknown = set(data) - {"image", "record", "build", "disks", "usb", "step", "observe", "browser"}
+    unknown = set(data) - {"image", "record", "build", "disks", "usb", "step", "observe", "browser", "usbvfiod"}
     if unknown:
         raise DeskError(f"{path}: unknown keys {sorted(unknown)}")
     if not _text(data.get("image")):
@@ -173,6 +186,8 @@ def load(path: Path) -> dict:
         raise DeskError(f"{path}: browser is the image of the machine whose browser opens the guest's pages")
     if not isinstance(data.get("record", False), bool):
         raise DeskError(f"{path}: record is true or false")
+    if not isinstance(data.get("usbvfiod", False), bool):
+        raise DeskError(f"{path}: usbvfiod is true or false (the run gets the USB controller of usbvfiod)")
     if not isinstance(data.get("disks", []), list) or not all(isinstance(d, str) for d in data.get("disks", [])):
         raise DeskError(f"{path}: disks is a list like [\"8G:data\"]")
     for d in data.get("disks", []):
@@ -227,6 +242,8 @@ def load(path: Path) -> dict:
             raise DeskError(f"{path}: step {i}: {{guest:PORT}} takes a port 1-65535")
         if action == "pull" and "to" not in step:
             raise DeskError(f"{path}: step {i}: pull names the file in the guest; to = \"dir/\" is where it goes")
+        if action == "usb_add" and "hubs" in step and "at" not in step:
+            raise DeskError(f"{path}: step {i}: hubs go with at, the port path they lead to")
         if action == "set_text" and "text" not in step:
             raise DeskError(f"{path}: step {i}: set_text names the field; text = \"...\" is what it gets")
         if action == "gui" and not {"rc", "output"} & set(step) and {"timeout", "until"} & set(step):
@@ -243,6 +260,12 @@ def load(path: Path) -> dict:
                 continue  # known only when the step runs, where what reads it checks it
             if not check(value):
                 raise DeskError(f"{path}: step {i}: {key} takes {takes} (got {value!r})")
+        if action == "usb_add" and "at" in step and not SAVED.search(json.dumps([step["at"], step.get("hubs", [])])):
+            _checked_hubs(path, i, step)
+        if (("at" in step and action == "usb_add") or (action == "usb_rm" and hubs.AT.fullmatch(str(step[action])))) \
+                and not data.get("usbvfiod"):
+            raise DeskError(f"{path}: step {i}: port paths are the USB controller of usbvfiod's, which needs "
+                            "usbvfiod = true at the top of the scenario")
         if action == "disk_add":
             _checked(path, f"step {i}", disks.parse, step[action])
         if action == "clock" and step[action] != "reset":
@@ -251,6 +274,15 @@ def load(path: Path) -> dict:
             _checked(path, f"step {i}", clock.duration, step["step"])
     observations(path, data)
     return data
+
+
+def _checked_hubs(path: Path, i: int, step: dict) -> None:
+    """What a usb_add step with `at` can be refused for without a guest: a hub option off the way or
+    a port beyond a hub (the plan on an empty tree)."""
+    try:
+        hubs.plan(hubs.parse_path(step["at"]), hubs.parse_hubs(step.get("hubs")), [])
+    except DeskError as e:
+        raise DeskError(f"{path}: step {i}: {e}") from None
 
 
 def _check_build(path: Path, build, where: str) -> None:
@@ -767,10 +799,13 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
     elif action == "usb_add":
         # A device that is still coming back (re-enumerating, a reset) gets the step's timeout.
         usb.wait_present(value, 10 if timeout is None else timeout)
-        d = usb.add(run, value)
-        return f"USB device {d['id']} {d['name']} ({d['bus']}.{d['dev']}) handed to the guest"
+        d = usb.add(run, value, at=step.get("at"), hub_options=step.get("hubs"))
+        return (f"USB device {d['id']} {d['name']} ({d['bus']}.{d['dev']}) handed to the guest"
+                + (f" at port path {d['at']}" if d.get("at") else ""))
     elif action == "usb_rm":
         d = usb.remove(run, value)
+        if d.get("tree"):
+            return f"{d['id']} removed" + (f", with {', '.join(d['below'])} below it" if d.get("below") else "")
         return f"USB device {d['id']} ({d['bus']}.{d['dev']}) back with the host"
     elif action == "disk_rm":
         disks.remove(run, value, timeout=timeout or 30)
@@ -817,9 +852,13 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None, no_bu
     bspec = browser_machine(data)
     _warn(data)
     base = _base(path, data)
+    if data.get("usbvfiod"):
+        # Before the build: a scenario that needs the controller should not build its product to learn it is missing.
+        usbvfiod.check()
     artifacts, built = _build(data, base, skip=no_build)
     agent, _ = runs.agent_process()
-    run = runs.up(spec, label=f"scenario {base.name}/{path.name}" + (f" ({agent})" if agent else ""))
+    run = runs.up(spec, label=f"scenario {base.name}/{path.name}" + (f" ({agent})" if agent else ""),
+                  usbvfiod=bool(data.get("usbvfiod")))
     print(f"run {run.id} ({spec.name})", flush=True)
     ok, brun = True, None
     try:

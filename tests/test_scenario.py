@@ -259,10 +259,42 @@ usb_add = "0fd9:008f"
             got = scenario._step(run, SimpleNamespace(), None, {"usb_add": "port:9-2.2", "timeout": 30})
             self.assertEqual(got, "USB device 0fd9:008f Stream Deck XL (9.31) handed to the guest")
             present.assert_called_once_with("port:9-2.2", 30)
-            add.assert_called_once_with(run, "port:9-2.2")
+            add.assert_called_once_with(run, "port:9-2.2", at=None, hub_options=None)
             got = scenario._step(run, SimpleNamespace(), None, {"usb_rm": "port:9-2.2"})
             self.assertEqual(got, "USB device 0fd9:008f (9.31) back with the host")
             remove.assert_called_once_with(run, "port:9-2.2")
+
+    def test_usb_steps_place_devices_at_port_paths_and_take_them_out_there(self):
+        deck = {"id": "0fd9:008f", "name": "Stream Deck XL", "bus": 9, "dev": 31, "at": "5.1.4"}
+        run = SimpleNamespace()
+        hubs = ["5=067b:2586/4/hs", "5.1=067b:2586/4/hs"]
+        with mock.patch("desk.usb.wait_present"), mock.patch("desk.usb.add", return_value=deck) as add, \
+             mock.patch("desk.usb.remove", return_value={"id": "at:5.1", "tree": True, "at": "5.1",
+                                                          "below": ["5.1.4"]}) as remove:
+            got = scenario._step(run, SimpleNamespace(), None, {"usb_add": "port:9-2.2", "at": "5.1.4", "hubs": hubs})
+            self.assertEqual(got, "USB device 0fd9:008f Stream Deck XL (9.31) handed to the guest at port path 5.1.4")
+            add.assert_called_once_with(run, "port:9-2.2", at="5.1.4", hub_options=hubs)
+            got = scenario._step(run, SimpleNamespace(), None, {"usb_rm": "at:5.1"})
+            self.assertEqual(got, "at:5.1 removed, with 5.1.4 below it")
+            remove.assert_called_once_with(run, "at:5.1")
+
+    def test_port_paths_need_the_usbvfiod_controller_and_are_checked_without_a_guest(self):
+        steps = '[[step]]\nusb_add = "port:9-2.2"\nat = "5.1.4"\nhubs = ["5=067b:2586/4", "5.1=/4"]\n'
+        data = scenario.load(write('image = "a"\nusbvfiod = true\n' + steps))
+        self.assertTrue(data["usbvfiod"])
+        for text, message in (
+                ('image = "a"\n' + steps, "usbvfiod = true"),
+                ('image = "a"\n[[step]]\nusb_rm = "at:5.1"', "usbvfiod = true"),
+                ('image = "a"\nusbvfiod = 1\n', "usbvfiod is true or false"),
+                ('image = "a"\nusbvfiod = true\n[[step]]\nusb_add = "port:9-2.2"\nhubs = ["5=/4"]', "hubs go with at"),
+                ('image = "a"\nusbvfiod = true\n[[step]]\nusb_add = "port:9-2.2"\nat = "1.4"', "takes a port path"),
+                ('image = "a"\nusbvfiod = true\n[[step]]\nusb_add = "port:9-2.2"\nat = "5.1.9"\n'
+                 'hubs = ["5.1=/4"]', "has 4 ports"),
+                ('image = "a"\nusbvfiod = true\n[[step]]\nusb_add = "port:9-2.2"\nat = "5.1"\n'
+                 'hubs = ["6=/4"]', "not on the way"),
+                ('image = "a"\nusbvfiod = true\n[[step]]\nusb_rm = "at:5.1"\nat = "5.1"', "does not use at")):
+            with self.subTest(text), self.assertRaisesRegex(DeskError, message):
+                scenario.load(write(text))
 
     def test_host_steps_take_a_program_and_save_for_later_steps(self):
         data = scenario.load(write('''image = "a"
@@ -491,7 +523,7 @@ class LostConnection(unittest.TestCase):
         from desk import runs
 
         with tempfile.TemporaryDirectory() as tmp:
-            run = SimpleNamespace(id="r1", dir=Path(tmp), domain="desk-r1", live_domain=lambda: None)
+            run = SimpleNamespace(id="r1", dir=Path(tmp), domain="desk-r1", live_domain=lambda: None, usbvfiod={})
             with mock.patch("desk.runs.all_runs", return_value=[run]):
                 said = runs.host_state(run)
             self.assertTrue(said.startswith("the VM is no longer running (QEMU ended; coredumpctl and libvirt's "
