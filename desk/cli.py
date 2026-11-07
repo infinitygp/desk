@@ -795,7 +795,7 @@ def cmd_scenario(args) -> None:
                     print(f"  also for {other}: NOT CHECKED here ({e})")
                     continue
                 skipped = sum(not scenario.is_for(st, other) for st in data.get("step", []))
-                print(f"  also for {other}" + (f", {skipped} steps skipped" if skipped else ""))
+                print(f"  also for {other}" + (f", {skipped} step{'s' * (skipped > 1)} skipped" if skipped else ""))
         if scenario.browser_machine(data):
             print(f"  browser machine: {data['browser']} (the steps that are not commands go to it)")
         for label, t in scenario.observations(path, data).items():

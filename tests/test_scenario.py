@@ -992,12 +992,26 @@ class SeveralImages(unittest.TestCase):
             ('image = "fedora-44-gnome"\nimages = ["arch-gnome"]\n[[step]]\nexec = "true"\nonly = ["kde"]',
              "step 1: only names kde, which none of the scenario's images"),
             ('image = "fedora-44-gnome"\nimages = ["arch-gnome"]\n[[step]]\nexec = "true"\nonly = ["arch"]',
-             "every step has an only that leaves out fedora-44-gnome"),
+             "every step has an only that leaves out fedora-44-gnome: nothing would be checked"),
             ('image = "fedora-44-gnome"\nimages = ["arch-gnome", "debian-13-gnome"]\n[build]\nrun = "make"\n'
              '[build.image.arch-gnome]\nrun = "make DISTRO=arch"', r"add a \[build.image.debian-13-gnome\] table"),
         ):
             with self.subTest(bad=bad), self.assertRaisesRegex(DeskError, said):
                 scenario.load(write(bad))
+
+    def test_an_image_of_no_step_is_refused_before_a_run_starts(self):
+        data = scenario.load(write(self.FILE))
+        # --image of one the file does not list: no step but the first is for it, and --from 2 leaves none.
+        with mock.patch("desk.scenario.runs.up") as up, \
+                self.assertRaisesRegex(DeskError, "every step from 2 on has an only that leaves out windows-11"):
+            scenario._some_step_for(data, "windows-11", 2)
+        scenario._some_step_for(data, "windows-11")  # step 1 has no only
+        only_kde = write('image = "fedora-44-gnome"\nimages = ["fedora-44-kde"]\n[[step]]\nexec = "true"\n'
+                         'only = ["gnome"]\n[[step]]\nexec = "true"\nonly = ["kde"]\n')
+        with mock.patch("desk.scenario.runs.up") as up, \
+                self.assertRaisesRegex(DeskError, "leaves out windows-11: nothing would be checked"):
+            scenario.run_scenario(only_kde, image="windows-11")
+        up.assert_not_called()
 
     def test_a_step_for_other_images_is_logged_as_skipped_not_run(self):
         run = mock.Mock()

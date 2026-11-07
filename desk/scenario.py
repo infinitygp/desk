@@ -310,6 +310,15 @@ def is_for(step: dict, image: str) -> bool:
     return "only" not in step or bool(set(step["only"]) & image_blocks(image))
 
 
+def _some_step_for(data: dict, image: str, first: int = 1) -> None:
+    """Before a run starts: steps first.. that `only` all leave out on `image` (one given with --image
+    that the file does not list) would pass having checked nothing."""
+    steps = data.get("step", [])[first - 1:]
+    if steps and not any(is_for(st, image) for st in steps):
+        raise DeskError(f"every step{f' from {first} on' if first > 1 else ''} has an only that leaves out "
+                        f"{image}: nothing would be checked there")
+
+
 def _check_only(path: Path, data: dict) -> None:
     """A name in `only` that none of the file's images has would skip its step on every one of them,
     and an image that every step skips would pass having checked nothing."""
@@ -321,9 +330,10 @@ def _check_only(path: Path, data: dict) -> None:
             raise DeskError(f"{path}: step {i}: only names {', '.join(wrong)}, which none of the scenario's images "
                             f"({', '.join(images)}) is or is made of")
     for image in images:
-        if data.get("step") and not any(is_for(st, image) for st in data["step"]):
-            raise DeskError(f"{path}: every step has an only that leaves out {image}, which would pass having "
-                            "checked nothing")
+        try:
+            _some_step_for(data, image)
+        except DeskError as e:
+            raise DeskError(f"{path}: {e}") from None
 
 
 def _checked_hubs(path: Path, i: int, step: dict) -> None:
@@ -898,6 +908,7 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None, no_bu
     data = load(path)
     spec = load_image(image or data["image"])
     data = for_image(data, spec.name)
+    _some_step_for(data, spec.name)
     check_observations(data, spec)
     bspec = browser_machine(data)
     _warn(data)
@@ -995,6 +1006,7 @@ def continue_scenario(path: Path, run, first: int, image: str | None = None) -> 
     total = len(data.get("step", []))
     if not 1 <= first <= total:
         raise DeskError(f"--from {first}: the scenario has steps 1 to {total}")
+    _some_step_for(data, spec.name, first)
     _warn(data)
     machine = None
     if browser_machine(data):
