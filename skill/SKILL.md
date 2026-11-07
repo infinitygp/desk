@@ -187,8 +187,8 @@ it). An image with an addon runs on the install of the one without (`-cockpit` o
 run still starts, cold, in ~20 s. `desk image blocks` lists what images can be made of,
 `desk image show NAME` the settings an image ends up with.
 
-`fedora-44-gnome` is the default; `fedora-45-gnome` is the next Fedora release (beta until it is
-out); `fedora-44-gnome-cockpit` has Cockpit open in Firefox, logged in as tester with
+`fedora-44-gnome` is the default; `fedora-45-gnome` is the newest Fedora
+release; `fedora-44-gnome-cockpit` has Cockpit open in Firefox, logged in as tester with
 administrative access (its Chromium trusts Cockpit's certificate too, logged out); `arch-gnome` is
 Arch Linux (rolling, pacman, no SELinux) with the newest GNOME and libraries; `debian-13-gnome` is
 Debian 13 (apt, GNOME 48, Firefox ESR); `ubuntu-26.04-gnome` is Ubuntu 26.04 LTS with Ubuntu's own

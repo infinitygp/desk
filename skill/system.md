@@ -124,4 +124,4 @@ then `reboot = "dnf offline reboot -y"` with `timeout = 3600`. After the reboot 
 session is back: programs open before it have to be started again; on `fedora-44-gnome-cockpit` a
 `prepare = true` step (or `desk prepare`) opens Firefox logged in to Cockpit again. The upgrade itself
 takes about 10 minutes (download ~2 min, offline upgrade and boot ~7 min).
-`fedora-45-gnome` is the next release itself (a beta until it is out).
+`fedora-45-gnome` is the newest release.

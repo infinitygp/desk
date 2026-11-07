@@ -68,7 +68,7 @@ the same on every host, and `desk up` of an image the host has not defined print
 | Block | Kind | Install, or what it adds | Notes |
 |---|---|---|---|
 | `fedora-44` | distro | kickstart over the network, the system without a desktop | |
-| `fedora-45` | distro | kickstart, the beta's installer tree, the release's packages | next release; follows it once it is out |
+| `fedora-45` | distro | kickstart over the network (fedora-44's), the system without a desktop | |
 | `arch` | distro | official cloud image: users by cloud-init (NoCloud seed), the rest by `install.sh` | rolling; no Secure Boot, no Firefox |
 | `debian-13` | distro | official cloud image (generic: the genericcloud one's kernel drives no display), likewise | Firefox ESR |
 | `ubuntu-26.04` | distro | official cloud image, likewise | Firefox from Mozilla's repository; no Chromium (Ubuntu has only its snap) |
@@ -388,8 +388,8 @@ build and no warm build.
 
 `desk maintain` reinstalls an image family (a base image and its variants) when
 
-- the base is a day short of `rebuild_days` old (`fedora-44-gnome`, `arch-gnome`: 14 days;
-  `fedora-45-gnome`: 7),
+- the base is a day short of `rebuild_days` old (`fedora-44-gnome`, `fedora-45-gnome`,
+  `arch-gnome`: 14 days),
 - its install definition changed, or
 - its licence (`expiry`, the Windows evaluation) has less than 14 days left,
 

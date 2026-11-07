@@ -1,16 +1,14 @@
-# Fedora 45, the next release, installed over the network with a kickstart. The
-# installer comes from the beta's tree, the packages from the release's mirrors (ks.cfg), so it
-# follows the release once it is out; then point location at releases/45 (the beta tree goes away
-# eventually).
+# Fedora 45, installed over the network with a kickstart (fedora-44's, with this release).
+# libosinfo on this host has no fedora45 entry yet; fedora43 gives the same device defaults.
 os_variant = "fedora43"
 memory_mib = 4096
 vcpus = 4
 disk_gb = 40
-location = "https://dl.fedoraproject.org/pub/fedora/linux/releases/test/45_Beta/Everything/x86_64/os/"
+location = "https://dl.fedoraproject.org/pub/fedora/linux/releases/45/Everything/x86_64/os/"
 kickstart = "../fedora-44/ks.cfg"
 release = "45"
 user = "tester"
 agent_wrapper = ["/usr/local/libexec/desk-ga-run"]
-# A pre-release moves fast.
-rebuild_days = 7
+# `desk maintain` reinstalls it this often, so tests run against current updates.
+rebuild_days = 14
 desktops = ["gnome"]
