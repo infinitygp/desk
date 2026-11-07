@@ -13,5 +13,5 @@ user_data = "user-data"
 install = ["install.sh"]
 user = "tester"
 # `desk maintain` reinstalls it this often, so tests run against current updates.
-rebuild_days = 14
+rebuild_days = 28
 desktops = ["gnome", "kde", "xfce", "cinnamon", "hyprland"]

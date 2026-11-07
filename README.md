@@ -388,8 +388,9 @@ build and no warm build.
 
 `desk maintain` reinstalls an image family (a base image and its variants) when
 
-- the base is a day short of `rebuild_days` old (`fedora-44-gnome`, `fedora-45-gnome`,
-  `arch-gnome`: 14 days),
+- the base is a day short of `rebuild_days` old (the Fedora, Debian and Ubuntu images: 28 days,
+  four weekly runs, since a stable release's updates are mostly security fixes; `arch-gnome`,
+  rolling: 14),
 - its install definition changed, or
 - its licence (`expiry`, the Windows evaluation) has less than 14 days left,
 

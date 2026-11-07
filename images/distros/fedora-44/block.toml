@@ -11,5 +11,5 @@ user = "tester"
 # Prefix for `desk exec --agent`; see the wrapper in ks.cfg.
 agent_wrapper = ["/usr/local/libexec/desk-ga-run"]
 # `desk maintain` reinstalls it this often, so tests run against current updates.
-rebuild_days = 14
+rebuild_days = 28
 desktops = ["gnome", "kde", "xfce", "cinnamon"]
