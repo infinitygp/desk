@@ -9,13 +9,14 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 import time
 import tomllib
 from datetime import UTC
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from . import a11y, browser, clock, disks, display, evidence, guest, hubs, record, runs, usb, usbvfiod, winagent
-from .config import DeskError, NotDone, load_image
+from .config import DeskError, NotDone, derived_from, load_image, parse_name
 from .steps import Steps
 
 # Exactly one per step; the value is the action's argument.
@@ -24,8 +25,10 @@ ACTIONS = {"root", "exec", "gui", "focus", "click", "type", "key", "expect", "ex
            "observe_start", "observe_stop", "mark", "set_text", "move", "drag", "scroll", "press", "release", "win",
            "pull", "offline", "usb_add", "usb_rm", "host"}
 OPTIONS = {"role", "exact", "timeout", "output", "rc", "name", "soft", "env", "step", "until", "anywhere", "browser",
-           "button", "window", "state", "text", "double", "to", "save", "at", "hubs"}
-# The options each action reads, besides name and soft; any other would be ignored without a word.
+           "button", "window", "state", "text", "double", "to", "save", "at", "hubs", "only"}
+# What every step takes besides its action: a name, soft, and only (the images it is for).
+COMMON = {"name", "soft", "only"}
+# The options each action reads, besides COMMON; any other would be ignored without a word.
 READS = {
     "root": {"timeout", "output", "rc", "until"}, "exec": {"timeout", "output", "rc", "until"},
     "gui": {"env", "rc", "output", "timeout", "until"}, "type": {"anywhere"},
@@ -122,6 +125,8 @@ VALUES = {
              "a program and its arguments, [\"program\", \"arg\"] (no shell)"),
     "save": (lambda v: isinstance(v, str) and re.fullmatch(r"[A-Z][A-Z0-9_]*", v) is not None,
              "a NAME in capitals, used as {NAME} by later steps"),
+    "only": (lambda v: isinstance(v, list) and bool(v) and all(_text(x) for x in v),
+             "a list of images or their blocks, e.g. [\"kde\"] or [\"arch\", \"fedora-44-gnome\"]"),
 }
 # What an [[observe]] table takes: a session started before the first step (start = "before") or
 # by an observe_start step (start = "step"), stopped by an observe_stop step or when the run ends.
@@ -177,11 +182,17 @@ def load(path: Path) -> dict:
         raise DeskError(f"{path}: {e.strerror}") from None
     except tomllib.TOMLDecodeError as e:
         raise DeskError(f"{path}: not valid TOML: {e}") from None
-    unknown = set(data) - {"image", "record", "build", "disks", "usb", "step", "observe", "browser", "usbvfiod"}
+    unknown = set(data) - {"image", "images", "record", "build", "disks", "usb", "step", "observe", "browser",
+                           "usbvfiod"}
     if unknown:
         raise DeskError(f"{path}: unknown keys {sorted(unknown)}")
     if not _text(data.get("image")):
         raise DeskError(f"{path}: no image")
+    others = data.get("images", [])
+    if not (isinstance(others, list) and all(_text(x) for x in others)) or len(set(others)) != len(others) \
+            or data["image"] in others:
+        raise DeskError(f"{path}: images is a list of the other images the scenario is for (desk scenario run "
+                        f"--all), each once and without image itself, {data['image']!r}")
     if "browser" in data and not _text(data["browser"]):
         raise DeskError(f"{path}: browser is the image of the machine whose browser opens the guest's pages")
     if not isinstance(data.get("record", False), bool):
@@ -202,6 +213,10 @@ def load(path: Path) -> dict:
         raise DeskError(f"{path}: [build.image.NAME] tables give the build of another image")
     for name, variant in variants.items():
         _check_build(path, variant, f"[build.image.{name}]")
+    if variants and set(others) - set(variants):
+        raise DeskError(f"{path}: [build] is for {data['image']} and {', '.join(sorted(variants))}; add a "
+                        + ", ".join(f"[build.image.{x}]" for x in sorted(set(others) - set(variants)))
+                        + " table for the images it lists")
     if not isinstance(data.get("step", []), list) or not all(isinstance(s, dict) for s in data.get("step", [])):
         raise DeskError(f"{path}: steps are [[step]] tables")
     held = 0  # the step whose press is not released yet
@@ -249,9 +264,9 @@ def load(path: Path) -> dict:
         if action == "gui" and not {"rc", "output"} & set(step) and {"timeout", "until"} & set(step):
             raise DeskError(f"{path}: step {i}: a gui step waits for the program only with rc or output, "
                             "and timeout and until go with them")
-        unread = set(step) - {action, "name", "soft"} - READS.get(action, set())
+        unread = set(step) - {action} - COMMON - READS.get(action, set())
         if unread:
-            takes = sorted(READS.get(action, set()) | {"name", "soft"})
+            takes = sorted(READS.get(action, set()) | COMMON)
             raise DeskError(f"{path}: step {i}: {action} does not use {', '.join(sorted(unread))} "
                             f"(it takes {', '.join(takes)})")
         for key, value in step.items():
@@ -272,8 +287,43 @@ def load(path: Path) -> dict:
             _checked(path, f"step {i}", clock.parse, step[action], 0.0, UTC)  # whether it reads, in any zone
         if "step" in step:
             _checked(path, f"step {i}", clock.duration, step["step"])
+    _check_only(path, data)
     observations(path, data)
     return data
+
+
+def image_blocks(name: str) -> set[str]:
+    """What `only` matches an image by: its name and the blocks it is made of (distro, desktop,
+    addons), those of the image it was saved from for a derived one. Read from the names alone, so
+    an image this host has not defined is matched as on a host that has."""
+    found: set[str] = set()
+    while name and name not in found:
+        found.add(name)
+        parts = parse_name(name)
+        if parts:
+            found |= {parts[0], *([parts[1]] if parts[1] else []), *parts[2]}
+        name = derived_from(name)
+    return found
+
+
+def is_for(step: dict, image: str) -> bool:
+    return "only" not in step or bool(set(step["only"]) & image_blocks(image))
+
+
+def _check_only(path: Path, data: dict) -> None:
+    """A name in `only` that none of the file's images has would skip its step on every one of them,
+    and an image that every step skips would pass having checked nothing."""
+    images = [data["image"], *data.get("images", [])]
+    known = set().union(*map(image_blocks, images))
+    for i, step in enumerate(data.get("step", []), 1):
+        wrong = [x for x in step.get("only", []) if x not in known]
+        if wrong:
+            raise DeskError(f"{path}: step {i}: only names {', '.join(wrong)}, which none of the scenario's images "
+                            f"({', '.join(images)}) is or is made of")
+    for image in images:
+        if data.get("step") and not any(is_for(st, image) for st in data["step"]):
+            raise DeskError(f"{path}: every step has an only that leaves out {image}, which would pass having "
+                            "checked nothing")
 
 
 def _checked_hubs(path: Path, i: int, step: dict) -> None:
@@ -904,6 +954,35 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None, no_bu
     return ok
 
 
+def run_all(path: Path, keep: bool = False, no_build: bool = False) -> int:
+    """The scenario on its image and then on each of `images`, one after the other (desk up waits for
+    room on the host anyway, and the output of several would interleave). The exit code: 1 when any
+    image failed a step, a finding even if others could not be checked; else 2 when desk could not
+    run or finish one; 0 only when every image passed."""
+    data = load(path)
+    images = [data["image"], *data.get("images", [])]
+    results: list[tuple[str, str]] = []
+    for name in images:
+        print(f"== {name}", flush=True)
+        try:
+            ok = run_scenario(path, keep=keep, image=name, no_build=no_build)
+            results.append((name, "passed" if ok else "FAILED"))
+        except DeskError as e:
+            print(f"desk: {e}", flush=True)
+            results.append((name, f"NOT CHECKED: {e}"))
+    width = max(map(len, images))
+    print(f"scenario {path.name} on {len(images)} images:")
+    for name, said in results:
+        print(f"  {name:<{width}}  {said}")
+    if any(said == "FAILED" for _, said in results):
+        return 1
+    unchecked = [name for name, said in results if said.startswith("NOT CHECKED")]
+    if unchecked:
+        print(f"desk: not checked on {', '.join(unchecked)}: see above for why", file=sys.stderr)
+        return 2
+    return 0
+
+
 def continue_scenario(path: Path, run, first: int, image: str | None = None) -> bool:
     """Steps `first`.. of the file in a run that is already there (left by --keep): no build, no
     new run. While a scenario is being written, a fixed step is tried again without the ones before
@@ -968,6 +1047,12 @@ def _run_steps(run, spec, data: dict, first: int = 1, observed: dict | None = No
                 continue
             action, arg = describe(step)
             label = step_label(step)
+            if "only" in step and not is_for(step, spec.name):
+                # Logged and shown, never counted as passed.
+                why = f"only on {', '.join(step['only'])}"
+                run.log_event(step=i, action=label, skipped=why)
+                print(f"SKIP  {i:>2}. {label[:60]:<60}         {why}", flush=True)
+                continue
             t0 = time.monotonic()
             lost = None
             target, tspec, tsteps = on_browser if on_browser and action not in GUEST_ACTIONS else (run, spec, steps)

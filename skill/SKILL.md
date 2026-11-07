@@ -65,7 +65,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk up IMAGE --resolution WxH --scale N --displays N`, `desk display [--resolution WxH] [--scale N]` | Monitors: mode, scaling in percent, several displays ([system.md](system.md)) |
 | `desk up IMAGE --memory 8G --cpus N` | Memory and vCPUs of this run instead of the image's (4 GB and 4 on the desktop images, 6 GB on Windows); other than its warm state's, the run boots cold (~25 s) |
 | `desk focus NAME` | Bring a window to the front by application or title (keys go to the focused window); on Windows it fails when Windows keeps the window behind the one in front |
-| `desk scenario run FILE [--keep] [--no-build]`, `desk scenario check FILE` | Run a repeatable test from a TOML file (see below) |
+| `desk scenario run FILE [--keep] [--no-build] [--all]`, `desk scenario check FILE` | Run a repeatable test from a TOML file (see below) |
 | `desk wait [--change] [--timeout S]` | Until the screen is still; `--change` first waits for it to change at all |
 | `desk wait --until-exec CMD [--root] [--timeout S]` | Run CMD in the guest every 2 s until it exits 0 (a service up, a file written; default 120 s), instead of a polling loop |
 | `desk reboot [--shot] [--prepare]` | Reboot and return when the new session is ready; reports apps that blocked shutdown; `--prepare` then redoes the image's preparation (Cockpit logged in again) |
@@ -241,7 +241,17 @@ runs), as a full disk ends a VM; the report (and the video with `record = true`)
 in its timeline. The same steps on other images (`--image`) with a build of their own: a
 `[build.image.NAME]` table (`run`, `artifacts`, `dir`) over `[build]` for that image, e.g.
 `[build.image.arch-gnome]` with `artifacts = ["dist/foo-*.pkg.tar.zst"]`; a file with such tables
-refuses an image it has none for (exit 2) rather than copy another's packages. A guest without a
+refuses an image it has none for (exit 2) rather than copy another's packages. One file for several
+distributions and desktops: `images = ["arch-gnome", "fedora-44-kde"]` at the top lists the images
+besides `image`; a plain `scenario run` still runs `image` only, `--all` runs it and then each of
+`images` one after the other, prints a line per image and exits 1 when any failed a step, else 2
+when any could not be checked (not built here, the guest lost: `NOT CHECKED` and why), 0 only when
+all passed (no `--image` or `--from` with it). A step with `only = ["kde"]` runs on the images that
+are or are made of one of those names, the exact block names (`arch`, `fedora-44`, `kde`,
+`cockpit`) or whole image names; elsewhere it shows as `SKIP` and in the report as skipped, never
+passed. `scenario check` refuses an `only` name none of the file's images has and an image every
+step leaves out. `only` is for a few steps that differ (a title bar, a tray); a scenario that
+differs in most of its steps stays a file of its own. A guest without a
 desktop whose web pages need checking (an OpenWrt router's LuCI) gets a browser machine:
 `browser = "fedora-44-gnome"` at the top starts that desktop next to it, and every step that is not
 a command of the guest (`exec`, `root`, `reboot`, `pull`, `offline`, `clock`, `disk_*`, `prepare`,

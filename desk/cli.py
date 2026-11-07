@@ -783,8 +783,19 @@ def cmd_scenario(args) -> None:
         print(f"{path}: image {image}, {len(data.get('step', []))} steps"
               + (f"; build: {build['run']}" if build.get("run") else ""))
         for i, step in enumerate(data.get("step", []), 1):
-            print(f"  {i:>2}. {scenario.step_label(step)}")
+            print(f"  {i:>2}. {scenario.step_label(step)}"
+                  + (f"  [only {', '.join(step['only'])}]" if "only" in step else ""))
         scenario.check_observations(data, load_image(image))
+        if not args.image:
+            for other in data.get("images", []):
+                try:
+                    scenario.check_observations(data, load_image(other))
+                except DeskError as e:
+                    # An image this host has not defined is not an error here; it is not checked either.
+                    print(f"  also for {other}: NOT CHECKED here ({e})")
+                    continue
+                skipped = sum(not scenario.is_for(st, other) for st in data.get("step", []))
+                print(f"  also for {other}" + (f", {skipped} steps skipped" if skipped else ""))
         if scenario.browser_machine(data):
             print(f"  browser machine: {data['browser']} (the steps that are not commands go to it)")
         for label, t in scenario.observations(path, data).items():
@@ -793,6 +804,10 @@ def cmd_scenario(args) -> None:
         for w in scenario.fixed_waits(data):
             print(f"warning: {w}")
         return
+    if args.all:
+        if args.image or args.from_step is not None:
+            raise DeskError("--all runs the file's image and every one of its images; it takes no --image or --from")
+        sys.exit(scenario.run_all(path, keep=args.keep, no_build=args.no_build))
     if args.from_step is not None:
         run = runs.resolve(args.run)
         sys.exit(0 if scenario.continue_scenario(path, run, args.from_step, image=args.image) else 1)
@@ -1477,6 +1492,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--keep", action="store_true",
                    help="leave the run running afterwards (report written), to go on testing by hand")
     p.add_argument("--image", help="another image than the file names")
+    p.add_argument("--all", action="store_true",
+                   help="run on the file's image and then on each of its images, one after the other")
     p.add_argument("--no-build", action="store_true",
                    help="skip [build] run and take the newest files matching artifacts as they are")
     p.add_argument("--from", dest="from_step", type=int, metavar="N",

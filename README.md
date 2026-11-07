@@ -608,6 +608,17 @@ gives another image its own build over `[build]`, and a file that has such table
 it has none for rather than copy another's packages; `--no-build` takes the newest artifacts as
 they are and the report names them.
 
+Several images: `images` lists the others a file is for and `--all` runs them one after the other
+(`scenario.run_all`), not side by side, since `desk up` waits for room on the host anyway and the
+output of several would interleave; the default stays one image, so the whole set is run when asked
+for. A step's `only` names blocks or images, matched by the image's name and the blocks it is made
+of (`scenario.image_blocks`, read from the names, so an image this host has not defined matches as
+on one that has). A skipped step is logged with `skipped`, not `ok`, so the report counts it apart
+and never as passed; a name in `only` that none of the images has, or an image that every step
+skips, is refused when the file loads, as either would pass having checked nothing. `--all` exits
+1 when any image failed a step, as that is a finding about the product whatever the others did,
+else 2 when desk could not check one.
+
 ## Evidence
 
 - `desk down` writes `reports/<run>/report.md`: failed units, unit failures from the journal since

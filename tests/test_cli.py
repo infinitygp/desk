@@ -90,7 +90,8 @@ class Exec(unittest.TestCase):
 
 class ScenarioFrom(unittest.TestCase):
     def test_from_0_is_refused_not_a_fresh_run(self):
-        args = SimpleNamespace(file="a.toml", action="run", from_step=0, run=None, image=None, keep=False)
+        args = SimpleNamespace(file="a.toml", action="run", from_step=0, run=None, image=None, keep=False,
+                               all=False)
         data = {"image": "a", "step": [{}]}
         with mock.patch("desk.cli.runs.resolve", return_value=mock.Mock(image="a")), \
                 mock.patch("desk.scenario.load", return_value=data), \
@@ -100,6 +101,14 @@ class ScenarioFrom(unittest.TestCase):
             image.return_value.name = "a"
             cli.cmd_scenario(args)
         fresh.assert_not_called()
+
+    def test_all_takes_no_image_or_from(self):
+        for extra in ({"image": "b", "from_step": None}, {"image": None, "from_step": 2}):
+            args = SimpleNamespace(file="a.toml", action="run", run=None, keep=False, no_build=False, all=True, **extra)
+            with self.subTest(extra=extra), mock.patch("desk.scenario.run_all") as every, \
+                    self.assertRaisesRegex(cli.DeskError, "--all .* takes no --image or --from"):
+                cli.cmd_scenario(args)
+            every.assert_not_called()
 
 
 class Failures(unittest.TestCase):

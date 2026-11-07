@@ -325,3 +325,30 @@ class PruneReports(unittest.TestCase):
             with mock.patch.object(evidence, "REPORTS", Path(tmp)), mock.patch.object(Path, "stat", vanishing):
                 evidence.prune_reports(verbose=False)
             self.assertEqual(sorted(p.name for p in Path(tmp).iterdir()), ["gone", "new"])
+
+
+class SkippedSteps(unittest.TestCase):
+    def test_a_step_only_for_other_images_shows_and_is_not_counted_as_passed(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+
+        from desk import evidence
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp) / "run"
+            run_dir.mkdir()
+            events = [
+                {"t": 100.0, "scenario": "/x/a.toml", "steps": 3},
+                {"t": 101.0, "step": 1, "action": "gui app", "ok": True, "detail": "", "seconds": 1.0},
+                {"t": 101.5, "step": 2, "action": "click Close", "skipped": "only on kde"},
+                {"t": 102.0, "step": 3, "action": "expect Saved", "ok": True, "detail": "", "seconds": 1.0},
+            ]
+            (run_dir / "log.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
+            run = mock.Mock(id="r1", dir=run_dir, image="fedora-44-gnome", created=99.0, ready=0.0, usbvfiod={})
+            run.live_domain.return_value = None
+            with mock.patch.object(evidence, "REPORTS", Path(tmp) / "reports"):
+                md = (evidence.collect(run) / "report.md").read_text()
+        self.assertIn("result: passed, 2 of 3 steps passed, 1 skipped on fedora-44-gnome (only)", md)
+        self.assertIn("step 2 skipped: click Close → only on kde", md)

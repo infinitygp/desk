@@ -435,14 +435,17 @@ def collect(run, diff: bool = False) -> Path:
         # Each step's last attempt; the timeline below keeps every one.
         last = sorted({ev["step"]: ev for ev in stepped}.values(), key=lambda ev: ev["step"])
         failed = [ev for ev in last if not ev["ok"]]
+        # Steps `only` leaves out on this image: shown, and not counted as passed.
+        skipped = {ev["step"] for ev in events if "step" in ev and "skipped" in ev} - {ev["step"] for ev in last}
         total = scenario.get("steps", len(last))
         md += ["## Scenario", "", f"- file: `{scenario['scenario']}`"]
         # The start that copied the artifacts; `--from N` goes on without a build of its own.
         built = next((ev["build"] for ev in events if "build" in ev), None)
         if built:
             md.append(f"- build: {built}")
-        md.append(f"- result: {'FAILED' if failed or len(last) < total else 'passed'}, "
-                  f"{len(last) - len(failed)} of {total} steps passed")
+        md.append(f"- result: {'FAILED' if failed or len(last) + len(skipped) < total else 'passed'}, "
+                  f"{len(last) - len(failed)} of {total} steps passed"
+                  + (f", {len(skipped)} skipped on {run.image} (only)" if skipped else ""))
         for ev in failed:
             first, _, rest = ev["detail"].partition("\n")
             md.append(f"- failed at step {ev['step']} ({one_line(ev['action'])}): {first}"
@@ -530,6 +533,8 @@ def collect(run, diff: bool = False) -> Path:
             detail = ev["detail"].split("\n", 1)[0]
             md.append(f"- {stamp} step {ev['step']} {mark}: {one_line(ev['action'])} ({ev['seconds']} s)"
                       + (f" → {detail}" if detail else ""))
+        elif "step" in ev and "skipped" in ev:
+            md.append(f"- {stamp} step {ev['step']} skipped: {one_line(ev['action'])} → {ev['skipped']}")
         elif "clock" in ev:
             step = ev.get("clock_step") or (ev.get("step") if "ok" not in ev else None)
             md.append(f"- {stamp} clock {ev['clock']}" + (f" in steps of {step}" if step else ""))

@@ -961,3 +961,70 @@ class SplitWindows(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SeveralImages(unittest.TestCase):
+    FILE = ('image = "fedora-44-gnome"\nimages = ["arch-gnome", "fedora-44-kde"]\n'
+            '[[step]]\nexec = "true"\n[[step]]\nclick = "Close"\nonly = ["gnome"]\n'
+            '[[step]]\nkey = "alt+f4"\nonly = ["kde", "arch-gnome"]\n')
+
+    def test_only_matches_an_image_by_its_name_and_blocks(self):
+        self.assertEqual(scenario.image_blocks("fedora-44-gnome-cockpit"),
+                         {"fedora-44-gnome-cockpit", "fedora-44", "gnome", "cockpit"})
+        self.assertEqual(scenario.image_blocks("windows-11"), {"windows-11"})
+        data = scenario.load(write(self.FILE))
+        close, quit_ = data["step"][1], data["step"][2]
+        self.assertTrue(scenario.is_for(close, "arch-gnome"))
+        self.assertFalse(scenario.is_for(close, "fedora-44-kde"))
+        self.assertTrue(scenario.is_for(quit_, "fedora-44-kde") and scenario.is_for(quit_, "arch-gnome"))
+        self.assertFalse(scenario.is_for(quit_, "fedora-44-gnome"))
+        # Exact block names: "fedora" is no block of fedora-44.
+        self.assertFalse(scenario.is_for({"only": ["fedora"]}, "fedora-44-gnome"))
+
+    def test_mistakes_are_refused_before_anything_runs(self):
+        for bad, said in (
+            ('image = "a"\nimages = "b"', "images is a list"),
+            ('image = "a"\nimages = ["b", "b"]', "each once"),
+            ('image = "a"\nimages = ["a"]', "without image itself"),
+            ('image = "a"\n[[step]]\nexec = "true"\nonly = "a"', "only takes a list"),
+            ('image = "a"\n[[step]]\nexec = "true"\nonly = []', "only takes a list"),
+            # A typo would skip the step on every image.
+            ('image = "fedora-44-gnome"\nimages = ["arch-gnome"]\n[[step]]\nexec = "true"\nonly = ["kde"]',
+             "step 1: only names kde, which none of the scenario's images"),
+            ('image = "fedora-44-gnome"\nimages = ["arch-gnome"]\n[[step]]\nexec = "true"\nonly = ["arch"]',
+             "every step has an only that leaves out fedora-44-gnome"),
+            ('image = "fedora-44-gnome"\nimages = ["arch-gnome", "debian-13-gnome"]\n[build]\nrun = "make"\n'
+             '[build.image.arch-gnome]\nrun = "make DISTRO=arch"', r"add a \[build.image.debian-13-gnome\] table"),
+        ):
+            with self.subTest(bad=bad), self.assertRaisesRegex(DeskError, said):
+                scenario.load(write(bad))
+
+    def test_a_step_for_other_images_is_logged_as_skipped_not_run(self):
+        run = mock.Mock()
+        spec = SimpleNamespace(name="fedora-44-gnome", family="linux")
+        data = {"step": [{"exec": "true"}, {"key": "alt+f4", "only": ["kde"]}, {"exec": "true"}]}
+        with mock.patch("desk.scenario._step", return_value="") as step, mock.patch("desk.scenario.Steps"), \
+                mock.patch("sys.stdout") as out:
+            self.assertTrue(scenario._run_steps(run, spec, data))
+        self.assertEqual(step.call_count, 2)
+        self.assertIn(mock.call(step=2, action="key alt+f4", skipped="only on kde"), run.log_event.call_args_list)
+        self.assertRegex("".join(c.args[0] for c in out.write.call_args_list), r"SKIP   2\. key alt\+f4 .*only on kde")
+
+    def run_all(self, outcomes) -> tuple[int, str]:
+        path = write(self.FILE)
+        with mock.patch("desk.scenario.run_scenario", side_effect=outcomes) as each, \
+                mock.patch("sys.stdout") as out, mock.patch("sys.stderr"):
+            code = scenario.run_all(path)
+        self.assertEqual([c.kwargs["image"] for c in each.call_args_list],
+                         ["fedora-44-gnome", "arch-gnome", "fedora-44-kde"])
+        return code, "".join(c.args[0] for c in out.write.call_args_list)
+
+    def test_all_runs_every_image_and_a_finding_comes_before_what_was_not_checked(self):
+        self.assertEqual(self.run_all([True, True, True])[0], 0)
+        code, said = self.run_all([True, DeskError("base image arch-gnome not built yet (desk image build "
+                                                   "arch-gnome)"), False])
+        self.assertEqual(code, 1)
+        self.assertRegex(said, r"arch-gnome +NOT CHECKED: base image arch-gnome not built yet")
+        self.assertRegex(said, r"fedora-44-kde +FAILED")
+        # Never green when one could not be checked, and never 1 for desk's own failure.
+        self.assertEqual(self.run_all([True, DeskError("no SSH connection"), True])[0], 2)
