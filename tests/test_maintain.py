@@ -78,10 +78,10 @@ class Due(unittest.TestCase):
         d = self.home / "base" / "fedora-44-gnome.20261001-030000"
         d.mkdir(parents=True)
         (d / "disk.qcow2").write_bytes(b"")
-        (d / "meta.json").write_text(json.dumps({"created": time.time() - 20 * DAY,
+        (d / "meta.json").write_text(json.dumps({"created": time.time() - 30 * DAY,
                                                  "fingerprint": images.install_fingerprint(fedora)}))
         images.promote(self.home / "base" / "fedora-44-gnome", d)
-        self.assertEqual(maintain.base_reasons(fedora), ["base is 20 days old"])
+        self.assertEqual(maintain.base_reasons(fedora), ["base is 30 days old"])
 
     def test_licence(self):
         self.build("base", fingerprint=images.install_fingerprint(self.spec))
