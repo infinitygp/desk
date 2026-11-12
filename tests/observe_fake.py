@@ -1,8 +1,8 @@
 """A Windows guest in memory for the observation tests: it answers the helper's operations
 (desk/observe/helper.ps1) as the guest would, with tools simulated by the tests. Command lines
 go through the helper's argument string and back with Windows' own splitting rules, so the
-quoting is tested along the way. Nothing here says the real tools behave so: that is for the
-Windows checks in docs/observe/validation.md."""
+quoting is tested along the way. Nothing here says the real tools behave so: that is for a
+Windows guest, with the workload and scenarios in tests/fixtures/observe/."""
 
 import hashlib
 import struct

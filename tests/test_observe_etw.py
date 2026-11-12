@@ -1,6 +1,7 @@
 """ETW through WPR and logman, with the guest in memory: the command lines desk builds, the trace
 sessions it owns by name, and what it says of lost events. Whether WPR and logman take these
-command lines on Windows 11 is for docs/observe/validation.md (WIN-ETW-*)."""
+command lines on Windows 11 is for a Windows guest (tests/fixtures/observe/) and the Windows
+runner (scripts/observe_windows_ci.py)."""
 
 import shutil
 import tempfile

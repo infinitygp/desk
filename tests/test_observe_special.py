@@ -1,6 +1,6 @@
 """The specialist providers with the guest in memory: packet capture (pktmon, netsh trace), IPC
-endpoints, USBPcap and debugger servers. Their tools' real behaviour on Windows is for
-docs/observe/validation.md (WIN-NET-*, WIN-IPC-*, HW-USB-*, WIN-DBG-*)."""
+endpoints, USBPcap and debugger servers. Their tools' real behaviour on Windows is for a Windows
+guest (tests/fixtures/observe/) and the Windows runner (scripts/observe_windows_ci.py)."""
 
 import base64
 import json

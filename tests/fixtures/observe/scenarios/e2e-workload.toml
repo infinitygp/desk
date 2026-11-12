@@ -1,4 +1,4 @@
-# WIN-E2E-01: every provider that can run together, while the screen is recorded: Process Monitor
+# Every provider that can run together, while the screen is recorded: Process Monitor
 # (with CSV), a logman session of Kernel-Process (with tracerpt), pktmon and the IPC listings; the
 # workload's every step in the desktop session, holding a pipe and a listener for a mark (900 s:
 # under these four captures one desk observe call took up to 80 s); Notepad typed into.
@@ -11,7 +11,7 @@
 image = "windows-11"
 record = true
 [build]
-artifacts = ["docs/observe/fixtures/workload.ps1"]
+artifacts = ["tests/fixtures/observe/workload.ps1"]
 [[observe]]
 provider = "procmon"
 label = "pm"

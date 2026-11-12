@@ -1,6 +1,6 @@
 """The observation framework and Process Monitor, with a Windows guest in memory
 (tests/observe_fake.py). These decide what desk does with what a guest answers; whether ProcMon
-answers so is for the Windows checks (docs/observe/validation.md)."""
+answers so is for a Windows guest (tests/fixtures/observe/)."""
 
 import base64
 import io

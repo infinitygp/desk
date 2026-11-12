@@ -1,8 +1,8 @@
-# WIN-ETW-02: WPR's GeneralProfile under desk's instance name, stopped into one ETL, with tracerpt's
+# WPR's GeneralProfile under desk's instance name, stopped into one ETL, with tracerpt's
 # summary. Checks the WPR flags desk uses (-filemode, -recordtempto, -instancename) on this build.
 image = "windows-11"
 [build]
-artifacts = ["docs/observe/fixtures/workload.ps1"]
+artifacts = ["tests/fixtures/observe/workload.ps1"]
 [[observe]]
 provider = "wpr"
 label = "gp"

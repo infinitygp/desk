@@ -2,17 +2,17 @@
 """Whether a capture holds what workload.ps1 did: the events named in its manifest, looked for in
 the files `desk observe stop` copied to the host (or the report's observe/ folder).
 
-    python3 docs/observe/fixtures/expect.py manifest.json --procmon-csv observe/s1/procmon.csv
-    python3 docs/observe/fixtures/expect.py manifest.json --tracerpt-csv observe/s2/events.csv
-    python3 docs/observe/fixtures/expect.py manifest.json --pcapng observe/s3/net*.pcapng
-    python3 docs/observe/fixtures/expect.py manifest.json --ipc-dir observe/s4
-    python3 docs/observe/fixtures/expect.py --usb-pcap observe/s5/usb.pcap --usb-id 0fd9:0084
+    python3 tests/fixtures/observe/expect.py manifest.json --procmon-csv observe/s1/procmon.csv
+    python3 tests/fixtures/observe/expect.py manifest.json --tracerpt-csv observe/s2/events.csv
+    python3 tests/fixtures/observe/expect.py manifest.json --pcapng observe/s3/net*.pcapng
+    python3 tests/fixtures/observe/expect.py manifest.json --ipc-dir observe/s4
+    python3 tests/fixtures/observe/expect.py --usb-pcap observe/s5/usb.pcap --usb-id 0fd9:0084
 
 One line per expectation, PASS, FAIL or SKIP (the manifest has no such step); exit 1 when one
 failed, 2 when the files cannot be read. The text matched in ProcMon's CSV are its operation names
 as its UI shows them; in tracerpt's CSV only the PIDs, image names and marker names, as its column
 layout differs between event types. Where a check proves too strict or too loose on real
-captures, the validation record (docs/observe/validation.md) says so and this file is fixed."""
+captures, this file is fixed."""
 
 import argparse
 import csv

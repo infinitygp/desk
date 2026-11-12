@@ -1,9 +1,9 @@
-# WIN-ETW-04: a logman session of Microsoft-Windows-Kernel-Process (process keyword 0x10) sees the
+# A logman session of Microsoft-Windows-Kernel-Process (process keyword 0x10) sees the
 # workload's child processes, and desk's marker provider records the marks; tracerpt turns the
 # trace into CSV. Afterwards: expect.py MANIFEST --tracerpt-csv REPORT/observe/s1/events.csv
 image = "windows-11"
 [build]
-artifacts = ["docs/observe/fixtures/workload.ps1"]
+artifacts = ["tests/fixtures/observe/workload.ps1"]
 [[observe]]
 provider = "etw"
 label = "kp"

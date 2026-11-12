@@ -2,7 +2,7 @@
 # carrying one token, and writes a manifest of what it did and when (UTC ms), so expect.py on the
 # host can look for exactly those events in a capture rather than for the capture's mere existence.
 #
-#   desk -r RUN push docs/observe/fixtures/workload.ps1 C:/desk/workload.ps1
+#   desk -r RUN push tests/fixtures/observe/workload.ps1 C:/desk/workload.ps1
 #   desk -r RUN exec -- powershell -NoProfile -ExecutionPolicy Bypass -File C:\desk\workload.ps1 -Token ab12cd34
 #   desk -r RUN pull C:/desk/observe/workload/ab12cd34/manifest.json ./manifest.json
 #

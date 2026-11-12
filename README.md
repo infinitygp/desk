@@ -44,11 +44,11 @@ same blocks, so switching between them rebuilds nothing.
 
 ```text
 bin/desk             entry point of a checkout (the system's python3 with the distribution's libvirt bindings)
-scripts/             build.py makes desk.pyz, the release; pyz_main.py is its entry point
+scripts/             build.py makes desk.pyz, the release; pyz_main.py is its entry point;
+                     observe_windows_ci.py the desk observe checks on a Windows runner
 skill/               agent skill: SKILL.md, and a file per task it points to
 desk/                harness code (guest_a11y.py runs inside the guest)
-tests/               unit tests
-docs/observe/        desk observe: what was checked in a Windows 11 guest, the workload and its checker
+tests/               unit tests; fixtures/observe/ a Windows workload, scenarios that capture it, its checker
 images/              blocks images are made of: distros/, desktops/, addons/; shared/ what desktops share
 <home>/              base/, warm/, runs/, reports/, maintain/, cache/, logs/, keys/, ssh/  (see Host setup)
 ```
@@ -707,8 +707,11 @@ orchestration (`desk/observe/__init__.py`) keeps the session and its guarantees:
   restore says which captures went back to the snapshot's moment, which were never there, and
   brings a capture that was collected since back as a session of its own.
 
-What was checked in a Windows 11 guest, how, and what is still open:
-[docs/observe/validation.md](docs/observe/validation.md).
+To check the providers in a Windows 11 guest: the workload in `tests/fixtures/observe/`
+(`workload.ps1`) does a fixed set of things and writes a manifest of them, its scenarios capture
+it with each provider (`bin/desk scenario run tests/fixtures/observe/scenarios/... --keep`), and
+`expect.py` looks for the manifest's events in the captures. The guest side without a VM runs on
+GitHub's Windows runner (`.github/workflows/observe-windows.yml`, started by hand).
 
 ## Exit codes, locks, limits
 

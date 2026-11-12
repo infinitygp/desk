@@ -1,8 +1,8 @@
-# WIN-IPC-02: the IPC listings taken at a mark see the pipe and the TCP listener the workload holds
+# The IPC listings taken at a mark see the pipe and the TCP listener the workload holds
 # open, with the workload's PID. Afterwards: expect.py MANIFEST --ipc-dir REPORT/observe/s1
 image = "windows-11"
 [build]
-artifacts = ["docs/observe/fixtures/workload.ps1"]
+artifacts = ["tests/fixtures/observe/workload.ps1"]
 [[observe]]
 provider = "ipc"
 label = "ipc"

@@ -1,6 +1,6 @@
-"""The validation fixtures stay usable: the scenarios load as desk reads them, and expect.py finds
-(and misses) what a workload's manifest names in captures made up here. Real captures of the
-workload are docs/observe/validation.md's."""
+"""The observation fixtures (tests/fixtures/observe/) stay usable: the scenarios load as desk reads
+them, and expect.py finds (and misses) what a workload's manifest names in captures made up here.
+Real captures of the workload come from running the scenarios in a Windows guest."""
 
 import json
 import shutil
@@ -15,7 +15,7 @@ from desk import scenario
 from desk.config import load_image
 from tests.observe_fake import pcap_bytes
 
-FIXTURES = Path(__file__).resolve().parent.parent / "docs" / "observe" / "fixtures"
+FIXTURES = Path(__file__).resolve().parent / "fixtures" / "observe"
 EXPECT = FIXTURES / "expect.py"
 
 MANIFEST = {"token": "ab12", "pid": 500, "steps": {

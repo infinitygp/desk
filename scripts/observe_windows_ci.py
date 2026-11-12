@@ -3,7 +3,8 @@
 helper.ps1's operations and the providers' command lines, run by the same Python code desk runs
 against a guest, through `LocalGuest` instead of SSH. Every check says PASS, FAIL or SKIP (the
 tool is not on this Windows), and the results go to --out as JSON; the exit code is 1 when one
-failed. Checks are named CI-* in docs/observe/validation.md.
+failed. Checks are named CI-H-* (the helper's operations), CI-P-* (the providers' command lines)
+and CI-W-* (the workload).
 
 What this does not show: anything of a desk run (SSH, the guest's session 0, warm states,
 snapshots), Windows 11 itself (runners are Windows Server), Process Monitor (its licence terms
@@ -36,8 +37,8 @@ from desk.observe.session import Session  # noqa: E402
 
 SPEC = ImageSpec(name="windows-ci", dir=ROOT, os_variant="", memory_mib=0, vcpus=0, disk_gb=0, user="runner",
                  ready="", family="windows")
-WORKLOAD = ROOT / "docs" / "observe" / "fixtures" / "workload.ps1"
-EXPECT = ROOT / "docs" / "observe" / "fixtures" / "expect.py"
+WORKLOAD = ROOT / "tests" / "fixtures" / "observe" / "workload.ps1"
+EXPECT = ROOT / "tests" / "fixtures" / "observe" / "expect.py"
 results: list[dict] = []
 
 
