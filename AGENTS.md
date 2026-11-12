@@ -20,6 +20,9 @@ changing desk itself.
   are Arch Linux and Fedora and what is built on them: a host requirement gets its package name
   for both in `desk/doctor.py` (checked with `pacman -Qo` and `dnf repoquery --whatprovides`) and
   in the README's table.
+- **Nothing of the projects that use desk.** Their apps, emulators, rigs and scenarios stay out of
+  code, tests, docs and commit messages; a feature is described for what it does, and examples
+  use neutral names.
 - **Optional stays optional.** Images, warm states and the maintenance timer exist where
   somebody asked for them. No command builds, warms or schedules anything unasked, and their
   absence is not an error.
