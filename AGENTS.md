@@ -53,7 +53,8 @@ guest; whatever talks to one is tried in one before it is committed:
   fake server, so try the real one in a guest too: `DESK_USBVFIOD=PATH bin/desk up windows-11
   --usbvfiod --name uv`, the controller and its root hub in `Get-PnpDevice` (status OK, problem
   code 0); with the fork's `remote` on the socket (`remote --socket "$(bin/desk -r uv usb socket)"
-  --hub 5 --ports 4 --speed high`, then `--virtual-hid 5.1 --speed full`, or `--external` with its
+  --hub 5 --ports 4 --speed high --vid 0409 --pid 55aa`, then `--virtual-hid 5.1 --speed full`, or
+  `--external` with its
   `examples/external_hid.rs`), the hub and the device in `Get-PnpDevice` with their
   `DEVPKEY_Device_LocationPaths`; `bin/desk down uv`, and `pgrep -x usbvfiod` shows nothing. A host
   device only when the user named one: the host's controller often serves its keyboard and mouse
