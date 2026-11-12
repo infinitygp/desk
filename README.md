@@ -39,7 +39,7 @@ desk update       # later: the newest release, skill included
 ```
 
 `desk update` downloads from the repository the release was built from. When HTTPS does not
-reach it (a private fork), it falls back to `gh release download`, logged in with `gh auth login`.
+reach it (a repository that needs a login), it falls back to `gh release download`, logged in with `gh auth login`.
 
 On its first start a release unpacks itself into `~/.cache/desk/<build>/` and runs from there,
 so the blocks and the helpers it starts or copies into guests are ordinary files;
@@ -770,7 +770,7 @@ libvirt bindings to run.
 |---|---|---|
 | To start runs | `libvirt` `libvirt-python` `qemu-system-x86` `qemu-hw-display-virtio-vga` `qemu-img` `edk2-ovmf` `passt` `openssh` | `libvirt-daemon-driver-qemu` `python3-libvirt` `qemu-system-x86-core` `qemu-device-display-virtio-vga` `qemu-img` `edk2-ovmf` `passt` `openssh-clients` |
 | To build images | `virt-install` `openssh`; cloud images (`arch`, `debian-13`, `ubuntu-26.04`): `curl` `openssl`; `openwrt-*`: `curl` `gzip` `gptfdisk` `parted` `libguestfs`; `windows-11`: `curl` `7zip` `libisoburn` | `virt-install` `openssh`; cloud images (`arch`, `debian-13`, `ubuntu-26.04`): `curl` `openssl`; `openwrt-*`: `curl` `gzip` `gdisk` `parted` `libguestfs`; `windows-11`: `curl` `7zip` `xorriso` |
-| Single features | `python-pillow` (crops, several monitors), `qemu-hw-display-virtio-gpu-pci` (`--resolution`, `--displays`), `qemu-hw-usb-host` (`usb add`, `up --usb`), `guestfs-tools` (`desk diff`), `gstreamer` `gst-plugins-base` `gst-plugins-good` (`desk record`), `github-cli` (`desk update` from a private fork) | `python3-pillow`, `qemu-device-display-virtio-gpu-pci`, `qemu-device-usb-host`, `guestfs-tools`, `gstreamer1` `gstreamer1-plugins-base` `gstreamer1-plugins-good`, `gh` |
+| Single features | `python-pillow` (crops, several monitors), `qemu-hw-display-virtio-gpu-pci` (`--resolution`, `--displays`), `qemu-hw-usb-host` (`usb add`, `up --usb`), `guestfs-tools` (`desk diff`), `gstreamer` `gst-plugins-base` `gst-plugins-good` (`desk record`), `github-cli` (`desk update` from a repository that needs a login) | `python3-pillow`, `qemu-device-display-virtio-gpu-pci`, `qemu-device-usb-host`, `guestfs-tools`, `gstreamer1` `gstreamer1-plugins-base` `gstreamer1-plugins-good`, `gh` |
 
 The user needs `/dev/kvm` (the `kvm` group where it is not open to everybody); VMs run under
 `qemu:///session`, so nothing runs as root.

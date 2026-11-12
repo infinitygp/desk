@@ -122,7 +122,7 @@ FEATURES = [
          "qemu-hw-display-virtio-gpu-pci", "qemu-device-display-virtio-gpu-pci"),
     USB_HOST,
     Need("virt-diff", "desk diff, desk down --diff", tool("virt-diff"), "guestfs-tools", "guestfs-tools"),
-    Need("gh", "desk update from a private fork", tool("gh"), "github-cli", "gh"),
+    Need("gh", "desk update from a repository that needs a login", tool("gh"), "github-cli", "gh"),
     Need("GStreamer with VP9, WebM, PNG and text overlay", "desk record",
          lambda: tool("gst-launch-1.0")() and gst_elements("multifilesrc", "pngdec", "videobox", "timeoverlay", "vp9enc",
                                                          "webmmux")(),
