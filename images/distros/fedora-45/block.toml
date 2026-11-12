@@ -1,5 +1,5 @@
 # Fedora 45, installed over the network with a kickstart (fedora-44's, with this release).
-# libosinfo on this host has no fedora45 entry yet; fedora43 gives the same device defaults.
+# fedora43, as an older libosinfo has no fedora45 entry; it gives the same device defaults.
 os_variant = "fedora43"
 memory_mib = 4096
 vcpus = 4
