@@ -18,20 +18,17 @@ Agent instructions: [skill/SKILL.md](skill/SKILL.md).
 ## Installing
 
 A host that only uses desk needs no checkout: a release is one file, `desk.pyz`, which runs on
-the system's `python3` with the distribution's libvirt bindings (see Host setup). In fish:
+the system's `python3` with the distribution's libvirt bindings (see Host setup):
 
-```fish
-mkdir -p ~/.local/bin
-gh release download --repo infinitygp/desk --pattern desk.pyz --output ~/.local/bin/desk
+```sh
+curl --create-dirs -fLo ~/.local/bin/desk https://github.com/infinitygp/desk/releases/latest/download/desk.pyz
 chmod +x ~/.local/bin/desk
 desk install      # the skill into ~/.agents/skills/desk (and ~/.claude/skills/desk), then desk doctor
 desk update       # later: the newest release, skill included
 ```
 
-The repository is private, so the release is downloaded with `gh`, logged in (`gh auth login`); a
-plain `curl` of `https://github.com/infinitygp/desk/releases/latest/download/desk.pyz` gets 404.
-`desk update` tries HTTPS first and falls back to `gh` the same way. A public fork can use `curl
---create-dirs -fLo ~/.local/bin/desk https://github.com/OWNER/desk/releases/latest/download/desk.pyz`.
+`desk update` downloads from the repository the release was built from. When HTTPS does not
+reach it (a private fork), it falls back to `gh release download`, logged in with `gh auth login`.
 
 On its first start a release unpacks itself into `~/.cache/desk/<build>/` and runs from there,
 so the blocks and the helpers it starts or copies into guests are ordinary files;
@@ -747,7 +744,7 @@ libvirt bindings to run.
 |---|---|---|
 | To start runs | `libvirt` `libvirt-python` `qemu-system-x86` `qemu-hw-display-virtio-vga` `qemu-img` `edk2-ovmf` `passt` `openssh` | `libvirt-daemon-driver-qemu` `python3-libvirt` `qemu-system-x86-core` `qemu-device-display-virtio-vga` `qemu-img` `edk2-ovmf` `passt` `openssh-clients` |
 | To build images | `virt-install` `openssh`; cloud images (`arch`, `debian-13`, `ubuntu-26.04`): `curl` `openssl`; `openwrt-*`: `curl` `gzip` `gptfdisk` `parted` `libguestfs`; `windows-11`: `curl` `7zip` `libisoburn` | `virt-install` `openssh`; cloud images (`arch`, `debian-13`, `ubuntu-26.04`): `curl` `openssl`; `openwrt-*`: `curl` `gzip` `gdisk` `parted` `libguestfs`; `windows-11`: `curl` `7zip` `xorriso` |
-| Single features | `python-pillow` (crops, several monitors), `qemu-hw-display-virtio-gpu-pci` (`--resolution`, `--displays`), `qemu-hw-usb-host` (`usb add`, `up --usb`), `guestfs-tools` (`desk diff`), `gstreamer` `gst-plugins-base` `gst-plugins-good` (`desk record`), `github-cli` (installing and `desk update` from a private repository) | `python3-pillow`, `qemu-device-display-virtio-gpu-pci`, `qemu-device-usb-host`, `guestfs-tools`, `gstreamer1` `gstreamer1-plugins-base` `gstreamer1-plugins-good`, `gh` |
+| Single features | `python-pillow` (crops, several monitors), `qemu-hw-display-virtio-gpu-pci` (`--resolution`, `--displays`), `qemu-hw-usb-host` (`usb add`, `up --usb`), `guestfs-tools` (`desk diff`), `gstreamer` `gst-plugins-base` `gst-plugins-good` (`desk record`), `github-cli` (`desk update` from a private fork) | `python3-pillow`, `qemu-device-display-virtio-gpu-pci`, `qemu-device-usb-host`, `guestfs-tools`, `gstreamer1` `gstreamer1-plugins-base` `gstreamer1-plugins-good`, `gh` |
 
 The user needs `/dev/kvm` (the `kvm` group where it is not open to everybody); VMs run under
 `qemu:///session`, so nothing runs as root.

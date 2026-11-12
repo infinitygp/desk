@@ -106,8 +106,8 @@ bin/desk -r host exec --timeout 3000 -- 'cd ~/desk && bin/desk image add openwrt
 
 ## Releases
 
-A release is the single file `desk.pyz`; hosts that only use desk install and update it with
-`gh` (README, "Installing"). The chain, run whole when a release is asked for:
+A release is the single file `desk.pyz`; hosts that only use desk download it and update it with
+`desk update` (README, "Installing"). The chain, run whole when a release is asked for:
 
 1. Choose the version from what changed since the last tag (`git log $(git describe --tags --abbrev=0)..`):
    `vX.Y.Z`, minor for new commands or behaviour, patch for fixes. The tag is the only place the

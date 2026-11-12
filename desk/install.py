@@ -94,8 +94,7 @@ def _fetch(url: str, out: Path, limit: float = 300) -> None:
 
 
 def _download(repo: str, out: Path) -> None:
-    """The newest release into `out`: over HTTPS, else with gh, which reaches a private repository
-    too."""
+    """The newest release into `out`: over HTTPS, else with gh, which reaches a private fork too."""
     try:
         _fetch(RELEASE_URL.format(repo=repo), out)
         return
@@ -103,7 +102,7 @@ def _download(repo: str, out: Path) -> None:
         https = str(e)
     if not shutil.which("gh"):
         raise DeskError(f"downloading the newest release of {repo} failed: {https} "
-                        "(for a private repository install gh and run gh auth login)")
+                        "(for a private fork install gh and run gh auth login)")
     r = subprocess.run(["gh", "release", "download", "--repo", repo, "--pattern", "desk.pyz",
                         "--output", str(out), "--clobber"], capture_output=True, text=True, timeout=300)
     if r.returncode != 0:
