@@ -3,7 +3,20 @@
 `desk`: disposable desktop VMs that an agent drives through screenshots and real
 mouse/keyboard input, for testing desktop apps and system packages end to end.
 
-- Nested KVM, libvirt `qemu:///session` (no root), passt networking.
+It is made for AI coding agents: an agent starts a Linux, Windows 11 or OpenWrt guest, installs
+what it built, uses it the way a person would and judges the result from screenshots and the
+accessibility tree, instead of trusting unit tests alone. The agent learns the commands from a
+skill, [skill/SKILL.md](skill/SKILL.md), which `desk install` puts where agents look for skills
+(`~/.agents/skills`, `~/.claude/skills`). People can run the same commands by hand.
+
+- Host: x86-64 Arch Linux or Fedora, or a distribution built on them, with KVM; Python 3.11 or
+  newer as `/usr/bin/python3`. Each image takes 5-25 GiB. Details: Host setup.
+- Status: maintained by one author; releases are 0.x, so commands and the scenario format can
+  still change between them. Issues are welcome (Contributing).
+
+How it works:
+
+- KVM (nested KVM in a VM works too), libvirt `qemu:///session` (no root), passt networking.
 - Out of band: screenshots through libvirt, pointer and keyboard through QMP, so it works
   regardless of what runs in the guest (login screen, Wayland, polkit, crashes).
 - In band: SSH as the desktop user, qemu-guest-agent as root.
@@ -12,8 +25,6 @@ mouse/keyboard input, for testing desktop apps and system packages end to end.
 - Golden image -> provisioned disk -> warm state (saved RAM of a logged-in desktop) -> per-run
   qcow2 overlay.
   `desk up` restores in seconds, `desk down` discards everything.
-
-Agent instructions: [skill/SKILL.md](skill/SKILL.md).
 
 ## Installing
 
@@ -39,6 +50,22 @@ To work on desk, clone the repository instead; `bin/desk install` links `bin/des
 `~/.local/bin` and the skill directory into `~/.agents/skills/desk`, so edits show at once, and
 leaves a desk that is already there alone. A checkout and a release of the same commit see the
 same blocks, so switching between them rebuilds nothing.
+
+## First run
+
+```sh
+desk doctor                           # what the host lacks, and the command that installs it
+desk image add fedora-44 gnome        # define the image fedora-44-gnome on this host
+desk maintain --only fedora-44-gnome  # build, warm and selftest it: 10-25 minutes, needs network
+desk up fedora-44-gnome               # a run from the warm state, ready in seconds
+desk exec --gui -- gnome-calculator   # start an app in the desktop session
+desk wait --change                    # until its window has appeared and settled
+desk a11y                             # the focused window as text, with refs to click
+desk shot                             # a screenshot; prints its path
+desk down                             # destroy the run and write its report (screenshots, logs)
+```
+
+What an agent does in a run, and the scenario files that repeat it: [skill/SKILL.md](skill/SKILL.md).
 
 ## Layout
 
@@ -157,11 +184,7 @@ the shipped desktops get from `images/shared/desktop.sh`. A name is in one of th
 only; a name desk cannot use (in both places, a desktop's or an addon's with a '-', a distro's
 that with a '-' begins another's) fails only the images that use it, and `desk image blocks`
 says why. A block moved from one to the other keeps its builds: fingerprints name files within
-their root, as they do for a checkout and a release of the same commit. A desk before
-blocks kept a directory per image in `~/.config/desk/images/`; desk refuses those until their
-files are in an addon and the image is added again, and `desk image list` shows builds left without
-a definition. Their builds are installed again once by `desk maintain`, as fingerprints name files
-by the block they are in now.
+their root, as they do for a checkout and a release of the same commit.
 
 ### Provisioning
 
@@ -731,11 +754,11 @@ GitHub's Windows runner (`.github/workflows/observe-windows.yml`, started by han
 ## Checks
 
 ```bash
-/usr/bin/python3 -m unittest discover -s tests -t .   # unit tests, no VM
+/usr/bin/python3 -m unittest discover -s tests -t .   # unit tests, no VM (Python's libvirt bindings)
 bin/desk selftest fedora-44-gnome --reboot            # end to end in a real run, ~1 min
 ```
 
-Which checks a change needs: `AGENTS.md`.
+Which checks a change needs: [AGENTS.md](AGENTS.md).
 
 ## Host setup
 
@@ -769,6 +792,13 @@ layout = "pl"                # us (the default) or pl
 Snapshots, warm-ups and `desk diff` copy disks as reflinks; on a file system without them every
 copy is a full one and `desk diff` does not work (`desk doctor` says which it is). With SELinux
 enforcing (Fedora) the default home works as it is: libvirt labels what its VMs use.
+
+## Contributing
+
+Issues are welcome: a bug report with the command, its output, `desk --version` and what
+`desk doctor` says. Open an issue before a pull request, so the change is agreed on first. How
+desk is changed and checked (what must stay true, which checks a change needs, how a release is
+made): [AGENTS.md](AGENTS.md).
 
 ## Licence
 
