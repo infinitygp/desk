@@ -462,7 +462,9 @@ journalctl --user -u desk-maintain  # output of the last runs
   second USB controller where hubs and devices stand at port paths, for products that identify
   hardware by the hubs it sits behind (a base with modules) and for devices that another process
   emulates instead of hardware. The controller is served by usbvfiod, a
-  private fork of a vfio-user server that emulates an xHCI controller for QEMU's `vfio-user-pci`
+  vfio-user server that emulates an xHCI controller, in its fork
+  [infinitygp/usbvfiod](https://github.com/infinitygp/usbvfiod) of cyberus-technology/usbvfiod,
+  which adds the hubs, devices served by another process and QEMU's `vfio-user-pci`
   device (`desk doctor` says whether the binary and that QEMU device are here; neither is
   required for anything else). A port path is the ports from the root port down:
   `5.1.4` is port 4 of the hub on port 1 of the hub on root port 5. Root ports 1-4 are USB 3 and
@@ -470,10 +472,11 @@ journalctl --user -u desk-maintain  # output of the last runs
   most. The libvirt-managed `qemu-xhci` controller stays, so the run's keyboard, tablet and every
   other `desk usb` use keep working beside it.
   - desk finds the binary in `$DESK_USBVFIOD`, else `usbvfiod` in `PATH`; a missing one is refused
-    before a VM is started. A release of the private fork is one static binary:
-    `gh release download --repo infinitygp/usbvfiod --pattern 'usbvfiod-*.tar.gz'` (the newest),
-    unpack it and run its `install.sh`, which puts it in `~/.local/bin`. The fork also builds with
-    `cargo install --locked --path CHECKOUT`.
+    before a VM is started. A release of the fork holds static binaries (`usbvfiod-*.tar.gz` on
+    its [releases page](https://github.com/infinitygp/usbvfiod/releases), or `gh release download
+    --repo infinitygp/usbvfiod --pattern 'usbvfiod-*.tar.gz'` for the newest): unpack it and run its
+    `install.sh`, which puts them in `~/.local/bin`. The fork also builds with
+    `cargo install --locked --git https://github.com/infinitygp/usbvfiod usbvfiod`.
     It runs in a session of its own in the run's directory (`usbvfiod/`: the vfio-user socket
     QEMU connects to, the hotplug socket, `usbvfiod.log` at debug level and `usb.pcap`, the
     traffic of the guest's driver), so it outlives the command that started it; its PID and

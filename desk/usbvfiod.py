@@ -37,11 +37,14 @@ SOCKET_PATH_MAX = 100
 # The servers this process started, to reap them: one that ended is a zombie until its parent looks.
 _children: dict[int, subprocess.Popen] = {}
 HOST_ID = re.compile(r"host (\d+):(\d+)")
-# The private fork's releases carry a static binary; `gh release download` without a tag takes the newest.
+# The fork of cyberus-technology/usbvfiod that desk needs (hubs at port paths, QEMU's vfio-user-pci).
+# Its releases carry static binaries; `gh release download` without a tag takes the newest.
 FORK = "infinitygp/usbvfiod"
-BUILD_HINT = (f"install a release of the private fork: `gh release download --repo {FORK} --pattern "
-              "'usbvfiod-*.tar.gz'`, unpack it and run its install.sh (a static binary into ~/.local/bin); "
-              "or build the fork with `cargo install --locked --path CHECKOUT-OF-USBVFIOD` (it lands in ~/.cargo/bin); "
+BUILD_HINT = (f"install a release of the fork {FORK} (https://github.com/{FORK}/releases), with gh: "
+              f"`gh release download --repo {FORK} --pattern 'usbvfiod-*.tar.gz'`, unpack it and run its "
+              "install.sh (static binaries into ~/.local/bin); "
+              f"or build it with `cargo install --locked --git https://github.com/{FORK} usbvfiod` "
+              "(it lands in ~/.cargo/bin); "
               f"or name the binary in ${ENV}")
 
 
