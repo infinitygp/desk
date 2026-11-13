@@ -65,8 +65,8 @@ def current(link: Path) -> Path | None:
 
 # Image settings that do not change what ends up in the guest (the files the URLs lead to are
 # named, version included, by virtio_win_iso and openssh_msi).
-NOT_IN_GUEST = ("name", "dir", "base_version", "warm_version", "rebuild_days", "expiry", "cloud_image_sums",
-                "virtio_win_url", "virtio_win_sha256", "openssh_msi_url", "openssh_msi_sha256")
+NOT_IN_GUEST = ("name", "dir", "base_version", "warm_version", "rebuild_days", "expiry", "calm_seconds",
+                "cloud_image_sums", "virtio_win_url", "virtio_win_sha256", "openssh_msi_url", "openssh_msi_sha256")
 
 
 def _named(path: Path) -> str:
@@ -774,7 +774,7 @@ def warm(spec: ImageSpec, force: bool = False, promote_it: bool = True) -> str:
             steps.run_prepare(spec, target)
         if spec.idle:
             _log("waiting for the guest to settle")
-            guest.ssh_run(port, spec.root_user, spec.cmd(spec.idle), capture=True, timeout=420)
+            _settle(spec, port)
         # The first session start keeps drawing for a while (shell, extensions, indexers).
         time.sleep(15)
         _, stable = display.wait_stable(dom, timeout=60, frames=8, interval=0.5)
@@ -810,6 +810,23 @@ def warm(spec: ImageSpec, force: bool = False, promote_it: bool = True) -> str:
         promote(link, wd)
     _log(f"warm state ready: {wd}")
     return vspec.warm_version
+
+
+IDLE_TIMEOUT = 960
+
+
+def _settle(spec: ImageSpec, port: int) -> None:
+    """Run the image's `idle` script; a warm state saved from a guest that did not settle would
+    hand every run its background work."""
+    try:
+        r = guest.ssh_run(port, spec.root_user, spec.cmd(spec.idle), capture=True, timeout=IDLE_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        raise DeskError(f"the guest did not settle before the warm state was saved: the idle script did not "
+                        f"finish within {IDLE_TIMEOUT} s") from None
+    if r.returncode != 0:
+        err = r.stderr.decode(errors="replace").strip().splitlines()
+        raise DeskError(f"the guest did not settle before the warm state was saved: the idle script "
+                        f"exited {r.returncode}" + (f": {err[-1]}" if err else ""))
 
 
 def _read_expiry(spec: ImageSpec, port: int) -> float | None:

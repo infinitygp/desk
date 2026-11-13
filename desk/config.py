@@ -220,6 +220,9 @@ class ImageSpec:
     sync: str = "sync"
     # Run before saving the warm state; returns once the guest has settled down.
     idle: str | None = None
+    # Seconds after a start for which the guest must stay calm (desk/calm.py): `desk selftest`
+    # checks it, and a cold start of the image is handed over once the guest is calm.
+    calm_seconds: int | None = None
     reboot: str = "systemctl reboot --check-inhibitors=no"
     # Ends the warm-up's first boot, after provisioning, with a clean shutdown.
     poweroff: str = "systemctl poweroff --check-inhibitors=no"

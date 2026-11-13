@@ -161,6 +161,7 @@ The settings that shape a run:
   the automatic login); a change is a new install. The installers put down only the system
   without a desktop (Fedora's kickstart; cloud-init makes the users), so a script that fails says
   why at once instead of leaving the install to time out.
+- `calm_seconds`: for how long after a start the guest must stay calm (`windows-11`: 180); see Windows.
 - `rebuild_days`, `expiry`, `install_marker`: see Builds and maintenance.
 
 An image whose addons only add to the warm state (provisioning, files, a prepare script) is a
@@ -321,7 +322,23 @@ What else differs from Firefox:
 - Provisioning turns the IANA time zone into Windows' id with ICU's `ucal_getWindowsTimeZoneID`
   (`icu.dll`, part of Windows), and the layout into the en-US input method (00000409 or 00000415).
 - Before the warm state is saved, `idle` empties the standby list, the file cache that would make
-  up almost half of the saved memory.
+  up almost half of the saved memory. A warm-up fails when `idle` exits with an error or does not
+  finish within 16 minutes: a guest that did not settle would hand its background work to every run.
+- A guest that was just started or restored may work in the background for minutes, and a test
+  started meanwhile shares the CPU with it.
+  `calm_seconds` asks for a guest that stays calm, which `desk/calm.py` measures from the host
+  without asking the guest: the CPU time libvirt reports for the run's QEMU process (the vCPUs and
+  the device emulation done for the guest), sampled every 3 s. Calm is under 1 vCPU on average
+  and under 2 in any 15 s. `desk selftest` watches the guest for `calm_seconds` after its start,
+  and the step fails otherwise, naming the processes whose CPU time grew most meanwhile (read
+  with `Get-Process`; a process that ended meanwhile is missed, and when the guest cannot list
+  them the step says so and fails all the same), so `desk maintain` does not switch to such a
+  build. A start of the image, restored or booted, waits until the last 15 s averaged under
+  1 vCPU, 5 minutes at most, and warns when the guest is still working then: a restored guest
+  finds its clock moved on by the age of the warm state and starts what its schedule has overdue.
+  The number
+  counts all work done for the guest, and depends on the host's speed and load; a guest that is
+  waiting for its disk is not busy, and bursts shorter than 15 s are not seen.
 
 UI Automation and programs on the desktop, which SSH sessions cannot see, go through an agent in
 the logged-in session (`images/distros/windows-11/agent/agent.ps1`, its port forwarded like SSH):
@@ -360,7 +377,7 @@ always boots cold, so software installed in it would be installed again in every
 ```bash
 bin/desk up windows-11 --usbvfiod --name prep      # install and set up what the tests need
 bin/desk image save windows-11-xlu prep            # shuts the guest down, copies the disk, takes the run down
-bin/desk up windows-11-xlu --usbvfiod              # cold in ~25 s (Windows), with everything installed
+bin/desk up windows-11-xlu --usbvfiod              # cold in ~25 s (Windows) and until the guest is calm, with everything installed
 ```
 
 - NAME is a name of its own: lower-case letters, digits and `-`, not defined yet, not the name
@@ -416,7 +433,8 @@ build and no warm build.
 
 and re-warms the images whose definition changed. New builds are selftested next to the current
 ones and become current only when every member of the family passes; otherwise the current builds
-stay, and `desk up` and `desk image list` show the failure. Reports and screenshots of failures go
+stay, and `desk up` and `desk image list` show the failure. An image with `calm_seconds` must also
+stay calm for that long after its start (Windows). Reports and screenshots of failures go
 to `<home>/maintain/<date>/`; an install that hangs leaves `logs/build-<image>-stuck.png` and its
 serial console in `logs/build-<image>.log`. An install counts as stuck after 3 hours, and is kept
 only if it powered off by itself and, where the image names an `install_marker` (Windows:

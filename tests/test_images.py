@@ -74,6 +74,13 @@ class Fingerprints(unittest.TestCase):
         self.assertEqual(images.warm_fingerprint(spec), images.warm_fingerprint(replace(spec, expiry=None)))
         self.assertNotEqual(images.warm_fingerprint(spec), images.warm_fingerprint(replace(spec, sound=None)))
 
+    def test_the_calm_check_is_not_guest_state(self):
+        spec = load_image("windows-11")
+        self.assertEqual(spec.calm_seconds, 180)
+        for other in (replace(spec, calm_seconds=None), replace(spec, calm_seconds=60)):
+            self.assertEqual(images.warm_fingerprint(spec), images.warm_fingerprint(other))
+            self.assertEqual(images.install_fingerprint(spec), images.install_fingerprint(other))
+
     def test_install_scripts_are_part_of_the_install(self):
         from unittest import mock
 
@@ -249,6 +256,30 @@ class InstallProblem(unittest.TestCase):
         self.assertIn("did not finish", install_problem(spec, boot))
         # Images without a marker are judged by powering off alone, as before.
         self.assertIsNone(install_problem(load_image("fedora-44-gnome"), ""))
+
+
+class Settle(unittest.TestCase):
+    spec = load_image("windows-11")
+
+    def settle(self, **ssh):
+        with mock.patch("desk.images.guest.ssh_run", **ssh) as run:
+            images._settle(self.spec, 22)
+        return run
+
+    def test_a_script_that_succeeds_has_960_seconds(self):
+        run = self.settle(return_value=subprocess.CompletedProcess([], 0, b"", b""))
+        self.assertEqual(run.call_args.kwargs["timeout"], 960)
+
+    def test_a_script_that_fails_is_a_warm_up_that_fails(self):
+        done = subprocess.CompletedProcess([], 5, b"", b"warming up\nNtSetSystemInformation failed\n")
+        with self.assertRaisesRegex(DeskError, "did not settle.*exited 5: NtSetSystemInformation failed$"):
+            self.settle(return_value=done)
+        with self.assertRaisesRegex(DeskError, "did not settle.*exited 1$"):
+            self.settle(return_value=subprocess.CompletedProcess([], 1, b"", b""))
+
+    def test_a_script_that_does_not_finish_is_a_warm_up_that_fails(self):
+        with self.assertRaisesRegex(DeskError, "did not settle.*did not finish within 960 s"):
+            self.settle(side_effect=subprocess.TimeoutExpired("ssh", 960))
 
 
 class Derived(unittest.TestCase):

@@ -29,6 +29,8 @@ HOST_RESERVE_MIB = 1024
 THRASH_PERCENT = 5.0
 # How long `desk up` waits for other runs to give memory back before it gives up.
 MEMORY_WAIT = 600
+# How long a start of an image with calm_seconds waits for the guest to calm down.
+CALM_WAIT = 300
 
 
 # How long a command waits for another one's lock before it gives up and names the holder. The
@@ -800,6 +802,17 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
             from . import steps
 
             steps.run_prepare(spec_for(run), run)
+        if spec.calm_seconds:
+            # After a boot, and after a restore too: the clock moved on by the warm state's age,
+            # and the guest starts what its schedule finds overdue.
+            from . import calm
+
+            busy = calm.wait(dom, CALM_WAIT)
+            if busy is not None:
+                print(f"[desk] warning: the guest is still working ({busy:.1f} vCPUs over the last "
+                      f"{calm.WINDOW} s) after {CALM_WAIT} s, so the first steps share the CPU with it",
+                      file=sys.stderr)
+        if cold:
             with run.edit() as r:
                 r.ready = time.time()
         if usbvfiod:

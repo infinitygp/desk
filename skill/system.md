@@ -57,7 +57,7 @@ devices that an emulator serves instead of hardware (usbvfiod's external devices
 a second USB controller where hubs and devices stand at **port paths**:
 
 ```fish
-desk up windows-11 --usbvfiod --name usb1           # boots cold (Windows 11: ~20 s, a warm start is ~1 s)
+desk up windows-11 --usbvfiod --name usb1           # boots cold (Windows 11: ~20 s, then until the guest is calm; a warm start is ~1 s)
 desk -r usb1 usb socket                             # the hotplug socket, for an emulator or usbvfiod's remote
 desk -r usb1 usb add 0fd9:008f --at 5.1.4 --hub 5=067b:2586/4/hs --hub 5.1=067b:2586/4/hs
 desk usb ls                                         # also the hubs and devices in each controller's tree
@@ -77,10 +77,10 @@ desk -r usb1 usb rm 0fd9:008f                       # or at:5.1 (a hub too: ever
   running guest, so a restore would not have it).
 - To keep a prepared guest of such a run (software installed, settings made), save its disk as an
   image instead: `desk image save windows-11-xlu usb1` shuts the guest down, copies the disk and
-  takes the run down. `desk up windows-11-xlu --usbvfiod` then boots cold (~25 s for Windows) with
-  everything installed, no provisioning again. The image is a full copy (about the size of the
-  used disk, ~13 GiB for Windows), `desk maintain` never rebuilds it, and for a Windows evaluation
-  image it keeps the licence clock of the image it came from.
+  takes the run down. `desk up windows-11-xlu --usbvfiod` then boots cold (~25 s for Windows, then
+  until the guest is calm) with everything installed, no provisioning again. The image is a full
+  copy (about the size of the used disk, ~13 GiB for Windows), `desk maintain` never rebuilds it,
+  and for a Windows evaluation image it keeps the licence clock of the image it came from.
 - `desk ls` says "usbvfiod ended" when the server is gone: the guest has lost the controller, and
   QEMU can abort the VM with it. The run cannot be repaired; `desk down` it (the report has the
   server's log). Never kill the server (`usbvfiod`) of a run yourself while its VM runs. A server

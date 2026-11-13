@@ -37,7 +37,7 @@ changing desk itself.
 /usr/bin/python3 -m unittest discover -s tests -t .   # no VM, a second; uses a home of its own
 bin/desk doctor                                       # what this host has
 bin/desk selftest fedora-44-gnome --reboot            # the harness end to end, ~1 min
-bin/desk selftest windows-11 --reboot                 # the Windows paths (agent, UI Automation)
+bin/desk selftest windows-11 --reboot                 # the Windows paths (agent, UI Automation), 3 min of calm
 ```
 
 Run the unit tests after every change, and the selftest of an image of each kind the change

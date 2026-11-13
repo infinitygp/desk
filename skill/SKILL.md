@@ -63,7 +63,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk key COMBO...` | `super`, `enter`, `esc`, `tab`, `ctrl+alt+t`, `shift+f10`, `alt+f4`, `f5`, letters |
 | `desk snapshot save NAME`, `desk snapshot restore NAME`, `desk snapshot list`, `desk snapshot delete NAME` | Save the running guest (~3-5 s) and go back to it (~1-3 s) |
 | `desk up IMAGE --resolution WxH --scale N --displays N`, `desk display [--resolution WxH] [--scale N]` | Monitors: mode, scaling in percent, several displays ([system.md](system.md)) |
-| `desk up IMAGE --memory 8G --cpus N` | Memory and vCPUs of this run instead of the image's (4 GB and 4 on the desktop images, 6 GB on Windows); other than its warm state's, the run boots cold (~25 s) |
+| `desk up IMAGE --memory 8G --cpus N` | Memory and vCPUs of this run instead of the image's (4 GB and 4 on the desktop images, 6 GB on Windows); other than its warm state's, the run boots cold (~25 s; Windows: until the guest is calm, at most 5 minutes more) |
 | `desk focus NAME` | Bring a window to the front by application or title (keys go to the focused window); on Windows it fails when Windows keeps the window behind the one in front |
 | `desk scenario run FILE [--keep] [--no-build] [--all]`, `desk scenario check FILE` | Run a repeatable test from a TOML file (see below) |
 | `desk wait [--change] [--timeout S]` | Until the screen is still; `--change` first waits for it to change at all |
@@ -85,7 +85,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk browser viewport WxH\|reset [--browser chromium]` | Pages at WxH CSS pixels (a phone: `390x700`) through Firefox's responsive design mode or Chromium's device mode (DevTools docked in its window, the page at 100 %); prints the `desk shot --region` of the page area |
 | `desk browser console [--errors] [--all]` | Web console of every page since the run started (see Pitfalls) |
 | `desk record start [--fps N]`, `desk record stop`, `desk up --record` | Record the screen as a WebM video, kept with the report |
-| `desk image save NAME RUN` | Keep the disk of a prepared run as the new image NAME and take the run down: the guest is shut down cleanly first, the disk copied in full (about the size of its used part, ~13 GiB for Windows). `desk up NAME` boots cold (~25 s for Windows) with everything installed; it is what replaces a snapshot for runs with the usbvfiod controller ([system.md](system.md)) |
+| `desk image save NAME RUN` | Keep the disk of a prepared run as the new image NAME and take the run down: the guest is shut down cleanly first, the disk copied in full (about the size of its used part, ~13 GiB for Windows). `desk up NAME` boots cold (~25 s for Windows, then until the guest is calm) with everything installed; it is what replaces a snapshot for runs with the usbvfiod controller ([system.md](system.md)) |
 | `desk usb ls`, `desk usb add VENDOR:PRODUCT\|BUS.DEVICE`, `desk usb rm ...`, `desk up IMAGE --usb ...` | Hand a host USB device to the guest ([system.md](system.md)) |
 | `desk up IMAGE --usbvfiod`, `desk usb add DEVICE --at PORTPATH [--hub ...]`, `desk usb rm at:PORTPATH`, `desk usb socket` | A USB controller where hubs and devices stand at port paths, and its hotplug socket for a process that serves emulated devices ([system.md](system.md)) |
 | `desk observe start PROVIDER`, `desk observe mark TEXT`, `desk observe stop`, `desk observe providers` | Record what a program does inside a Windows guest with its own tools (Process Monitor, ETW, pktmon, USBPcap, IPC listings, debugger servers); files copied, hashed and checked ([observe.md](observe.md)) |
@@ -212,10 +212,10 @@ NAME RUN` turns a prepared run into an image: it shuts the guest down, copies th
 the run down (a guest that does not answer is left running, and the command says so). Ask for a
 name that says what is in it (`windows-11-xlu`: lower-case letters, digits, `-`), and tell the user
 the copy takes the space of the used disk (~13 GiB for Windows). `desk up NAME [--usbvfiod]` then
-boots cold (~25 s for Windows) with everything installed and is not provisioned again. It has the
-settings of the image it came from, `desk maintain` never rebuilds it (a Windows evaluation licence
-keeps running out on its source's clock: when `desk up` says it is, the user renews the source and
-saves a new image), and `desk image rm NAME` removes it.
+boots cold (~25 s for Windows, then until the guest is calm) with everything installed and is not
+provisioned again. It has the settings of the image it came from, `desk maintain` never rebuilds
+it (a Windows evaluation licence keeps running out on its source's clock: when `desk up` says it
+is, the user renews the source and saves a new image), and `desk image rm NAME` removes it.
 
 ## Snapshots
 
@@ -438,6 +438,10 @@ then (`runs/<id>/failed-start.png`).
   started in parallel wait in line that way instead of slowing each other down. Runs idle for 2 h
   are destroyed by the next `desk up` or `desk gc` (`DESK_TTL` seconds to change), their report
   written first.
+- A start of `windows-11`, restored or cold, waits until the guest is calm (a restore then takes
+  ~17 s, at most 5 minutes more). When Windows is still working then, `desk up` warns on stderr ("the guest
+  is still working (N vCPUs over the last 15 s) after 300 s, so the first steps share the CPU with
+  it"): the first steps compete with that work, and what they measure or wait for may be slowed.
 - The image is a clean Workstation install: anything the product needs beyond its declared
   dependencies is missing there, exactly as on a user's machine. Report that rather than
   silently installing it; install it afterwards only to continue the test.

@@ -9,7 +9,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from . import a11y, display, guest, runs
+from . import a11y, calm, display, guest, runs
 from .config import Busy, DeskError, ImageSpec, load_image
 
 
@@ -112,6 +112,27 @@ def _node(run, role: str) -> dict:
     hits = [n for n in a11y.snapshot(run)["nodes"] if n["role"] == role and n.get("value") is not None]
     _check(bool(hits), f"no {role} with a value in the focused window")
     return hits[0]
+
+
+def _calm(run, spec: ImageSpec) -> str:
+    """The guest stays calm for `spec.calm_seconds` after its start, measured from the host; when
+    it does not, the guest names the processes that worked."""
+    before = reason = None
+    try:
+        before = calm.processes(run, spec)
+    except DeskError as e:
+        reason = e
+    average, peak = calm.watch(run.dom(), spec.calm_seconds)
+    if average < calm.AVERAGE and peak < calm.PEAK:
+        return f"{average:.2f} vCPUs on average, {peak:.2f} in its busiest {calm.WINDOW} s"
+    if reason is None:
+        try:
+            worked = calm.busiest(before, calm.processes(run, spec))
+        except DeskError as e:
+            reason = e
+    note = f"busiest in the guest: {worked}" if reason is None else f"the guest did not say what worked: {reason}"
+    raise Failed(f"{average:.2f} vCPUs on average (limit {calm.AVERAGE:.1f}), {peak:.2f} in its busiest "
+                 f"{calm.WINDOW} s (limit {calm.PEAK:.1f}); {note}")
 
 
 def run_selftest(image: str, reboot: bool = False, keep: bool = False, spec: ImageSpec | None = None,
@@ -267,6 +288,8 @@ def run_selftest(image: str, reboot: bool = False, keep: bool = False, spec: Ima
 
     try:
         if step("up (cold boot)" if expect_cold else "up (warm restore)", start):
+            if spec.calm_seconds:
+                step(f"calm for {spec.calm_seconds} s", lambda: _calm(run, spec))
             step("screenshot", screen)
             step("exec over SSH", ssh)
             step("exec through guest agent", agent)
