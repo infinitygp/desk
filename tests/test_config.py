@@ -92,7 +92,7 @@ class Composition(HostFiles):
         for blocks, said in ((("windows-11", "gnome", []), "comes with its desktop"),
                              (("fedora-44", None, []), "needs one of the desktops gnome"),
                              (("fedora-44", "twm", []), "needs one of the desktops gnome"),
-                             (("arch", "gnome", ["cockpit"]), "cockpit works on fedora-44, not on arch"),
+                             (("arch", "gnome", ["cockpit"]), "cockpit works on fedora-44, fedora-45, not on arch"),
                              (("fedora-44", "gnome", ["cockpit", "cockpit"]), "an addon named twice"),
                              (("plan9", None, []), "no distro 'plan9'")):
             with self.subTest(blocks=blocks), self.assertRaisesRegex(DeskError, said):

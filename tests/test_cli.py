@@ -462,7 +462,7 @@ class ImageCommands(unittest.TestCase):
                               r"    fedora-44 +desktops: gnome, kde, xfce, cinnamon\n    fedora-45 +desktops: gnome\n")
         self.assertRegex(out, r"\n  debian +Debian: .*\(desktops: gnome, kde\b.*\)\n    debian-13\n")
         self.assertNotRegex(out, r"\n  fedora-44 ")
-        self.assertRegex(out, r"addons\n(  .*\n)*  cockpit +Cockpit.*\(distros: fedora-44\)")
+        self.assertRegex(out, r"addons\n(  .*\n)*  cockpit +Cockpit.*\(distros: fedora-44, fedora-45\)")
         own = config.CONFIG_DIR / "addons" / "my-lang"
         own.mkdir(parents=True)
         self.addCleanup(own.rmdir)
