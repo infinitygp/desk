@@ -110,3 +110,72 @@ if (-not (Test-Path "$vive\ViVeTool.exe")) {
 # 59213768: taskbar position (bottom, top, left, right); 61090762: taskbar size (default, small).
 & "$vive\ViVeTool.exe" /enable /id:59213768,61090762 | Out-Null
 if ($LASTEXITCODE) { throw "ViVeTool failed ($LASTEXITCODE)" }
+
+# Nothing of Windows' own works in the background while a test runs: it takes the CPU from the app under test,
+# and a run restored from the warm state, its clock moved on by the state's age, would find it all due. Each of
+# these was seen keeping an otherwise idle guest busy.
+# Automatic Maintenance, after some minutes without input: defrag, disk and component cleanup and .NET
+# compilation, 2-3 vCPU for 3 minutes, then Defender's scheduled scan, 1.5 vCPU for over 13 minutes. The Task
+# Scheduler reads this when it starts, so it holds from the reboot after provisioning.
+$maint = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Schedule\Maintenance'
+if (-not (Test-Path $maint)) { New-Item $maint -Force | Out-Null }
+New-ItemProperty $maint -Name MaintenanceDisabled -Value 1 -PropertyType DWord -Force | Out-Null
+# The inventory and compatibility appraisal (CompatTelRunner), 8 minutes after boot, is for upgrades and telemetry.
+Set-Service InventorySvc -StartupType Disabled
+# OneDrive, off by policy (firstboot.ps1), still updates itself through its own tasks.
+Get-ScheduledTask -TaskName 'OneDrive *' | Disable-ScheduledTask | Out-Null
+# Windows Update scans despite NoAutoUpdate (firstboot.ps1): 15 minutes after the first logon its orchestrator
+# installs Store updates (AutoDownload notwithstanding), and a clock moved on, as at every restore, finds its scans
+# and the Store's overdue, 1.5-4 vCPU for 4 minutes. An update server of its own where nothing listens, and none of
+# Microsoft's, make them fail at once; the Store and winget's Store source lose their server too, Defender takes
+# its definitions from its own download site.
+$wupolicy = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate'
+if (-not (Test-Path "$wupolicy\AU")) { New-Item "$wupolicy\AU" -Force | Out-Null }
+$nowhere = 'http://127.0.0.1:8530'
+New-ItemProperty $wupolicy -Name WUServer -Value $nowhere -PropertyType String -Force | Out-Null
+New-ItemProperty $wupolicy -Name WUStatusServer -Value $nowhere -PropertyType String -Force | Out-Null
+New-ItemProperty $wupolicy -Name DoNotConnectToWindowsUpdateInternetLocations -Value 1 -PropertyType DWord -Force | Out-Null
+New-ItemProperty "$wupolicy\AU" -Name UseWUServer -Value 1 -PropertyType DWord -Force | Out-Null
+# What still started: when the clock moves on, the orchestrator's tasks, the Store's scans and the language
+# components' and Setup's tasks, which set off component servicing (TiWorker), 4 vCPU together with the other
+# overdue tasks; after the first logon the expedited updates and the language components' installer (15
+# minutes), the DirectX database update (10). So those tasks are off, and the orchestrator and Windows Update
+# cannot start. Delivery Optimization, switched off by firstboot.ps1, had set itself back to automatic.
+$tasks = @{
+    '\Microsoft\Windows\InstallService\' = 'ScanForUpdates', 'ScanForUpdatesAsUser', 'SmartRetry'
+    '\Microsoft\Windows\LanguageComponentsInstaller\' = 'Installation', 'ReconcileLanguageResources'
+    '\Microsoft\Windows\Setup\' = @('PITRTask')
+    '\Microsoft\Windows\DirectX\' = @('DirectXDatabaseUpdater')
+}
+foreach ($path in $tasks.Keys) { $tasks[$path] | ForEach-Object { Disable-ScheduledTask -TaskPath $path -TaskName $_ | Out-Null } }
+New-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\DoSvc' -Name Start -Value 4 -PropertyType DWord -Force | Out-Null
+# The orchestrator's tasks and services refuse the administrator, so a one-shot task does this as SYSTEM.
+$uso = '\Microsoft\Windows\UpdateOrchestrator\'
+$tasks[$uso] = 'Schedule Scan', 'Schedule Scan Static Task', 'Start Oobe Expedite Work', 'StartOobeAppsScanAfterUpdate',
+    'StartOobeAppsScan_LicenseAccepted', 'UIEOrchestrator'
+$asSystem = @($tasks[$uso] | ForEach-Object { "schtasks /Change /TN `"$uso$_`" /Disable" }) +
+    'sc config UsoSvc start= disabled', 'sc config wuauserv start= disabled'
+$a = New-ScheduledTaskAction -Execute cmd.exe -Argument "/c $($asSystem -join ' & ')"
+Register-ScheduledTask desk-as-system -Action $a -User SYSTEM -RunLevel Highest -Force | Out-Null
+Start-ScheduledTask desk-as-system
+$deadline = (Get-Date).AddMinutes(2)
+# 0x41301: running; 0x41303: not started yet.
+while ((Get-ScheduledTaskInfo desk-as-system).LastTaskResult -in 0x41301, 0x41303) {
+    if ((Get-Date) -gt $deadline) { throw 'the task that runs as SYSTEM did not finish within 2 minutes' }
+    Start-Sleep 1
+}
+Unregister-ScheduledTask desk-as-system -Confirm:$false
+$loud = @()
+foreach ($path in $tasks.Keys) {
+    $loud += Get-ScheduledTask -TaskPath $path | Where-Object { $_.TaskName -in $tasks[$path] -and $_.State -ne 'Disabled' } |
+        ForEach-Object { $path + $_.TaskName }
+}
+$loud += Get-Service UsoSvc, wuauserv | Where-Object StartType -ne Disabled | ForEach-Object Name
+if ((Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\DoSvc').Start -ne 4) { $loud += 'DoSvc' }
+if ((Get-ItemProperty $maint).MaintenanceDisabled -ne 1) { $loud += 'Automatic Maintenance' }
+if ((Get-Service InventorySvc).StartType -ne 'Disabled') { $loud += 'InventorySvc' }
+$p = Get-ItemProperty $wupolicy
+if ($p.WUServer -ne $nowhere -or $p.WUStatusServer -ne $nowhere -or $p.DoNotConnectToWindowsUpdateInternetLocations -ne 1 -or
+    (Get-ItemProperty "$wupolicy\AU").UseWUServer -ne 1) { $loud += 'Windows Update scans' }
+$loud += Get-ScheduledTask -TaskName 'OneDrive *' | Where-Object State -ne Disabled | ForEach-Object TaskName
+if ($loud) { throw "still enabled: $($loud -join ', ')" }

@@ -83,6 +83,11 @@ Part of the desk skill ([SKILL.md](SKILL.md)); the commands and pitfalls there a
   turned off", and file search is unindexed. Say so in the report when the app depends on either.
 - Defender is on but skips `C:\Users`, the program folders, `C:\ProgramData` and Windows' `Temp`
   and `Installer`: a detection or slowdown it would cause users does not show here.
+- Windows does none of its own background work during a run: Automatic Maintenance, Windows
+  Update (services disabled, no update server), the Store's scans and OneDrive's updater are off.
+  So optional features and language packs cannot be added (`Add-WindowsCapability`, DISM online),
+  and the Store and winget's `msstore` source do not answer; winget's own source and plain
+  downloads work. Say so in the report when the app needs one of them.
 - What the program does inside (files, registry, processes, ETW, packets, USB, pipes), and
   debugger servers: `desk observe` ([observe.md](observe.md)).
 - The report reads the event log (service failures, application errors and crashes, MSI

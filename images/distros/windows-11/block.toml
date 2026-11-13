@@ -35,16 +35,37 @@ provision = "provision.ps1"
 relogin = "shutdown.exe /r /t 0 /f"
 # Refreshed in C:\desk at every warm-up, so agent fixes do not need a new install.
 files = ["agent"]
-# Before the warm state is saved: wait (5 min at most, by the clock) for the CPU to calm down, so a restored run
-# does not inherit Windows' first-boot background work, then empty the standby list: the file cache Windows keeps
-# in free memory would be saved with it, about half of the memory state and of the time a restore takes.
+# `desk selftest` watches the guest for this long after its start and fails when it works in the background;
+# a start of the image is handed over once the guest is calm.
+calm_seconds = 180
+# Before the warm state is saved: wait until Windows' boot work is over, so a restored run does not inherit it:
+# 2 minutes in a row of 15 s averages under 5 % CPU (its delayed work came after shorter lulls), not counting
+# interrupts: the timer interrupts of a nested guest alone can exceed that. After 900 s (by the clock) it names
+# what was still busy and fails, since every run would replay that work. Then empty the standby list: the file
+# cache Windows keeps in free memory would be saved with it, about half of the memory state and of the time a
+# restore takes.
 idle = '''
-$n = 0; $sw = [Diagnostics.Stopwatch]::StartNew()
-while ($sw.Elapsed.TotalSeconds -lt 300) {
-    $c = (Get-CimInstance Win32_Processor | Measure-Object LoadPercentage -Average).Average
-    if ($c -lt 15) { $n++ } else { $n = 0 }
-    if ($n -ge 6) { break }
-    Start-Sleep 5
+$sw = [Diagnostics.Stopwatch]::StartNew(); $calm = 0
+$cpu = New-Object Diagnostics.PerformanceCounter 'Processor', '% Processor Time', '_Total'
+$irq = New-Object Diagnostics.PerformanceCounter 'Processor', '% Interrupt Time', '_Total'
+[void]$cpu.NextValue(); [void]$irq.NextValue()
+while ($calm -lt 8) {
+    if ($sw.Elapsed.TotalSeconds -gt 860) {
+        $before = @{}; Get-Process | ForEach-Object { $before[$_.Id] = $_.TotalProcessorTime.TotalSeconds }
+        Start-Sleep 10
+        $svc = @{}; Get-CimInstance Win32_Service -Filter 'ProcessId > 0' | ForEach-Object { $svc[[int]$_.ProcessId] += @($_.Name) }
+        $busy = Get-Process | Where-Object { $before.ContainsKey($_.Id) } | ForEach-Object {
+            $name = if ($_.ProcessName -eq 'svchost' -and $svc[$_.Id]) { $svc[$_.Id] -join '+' } else { $_.ProcessName }
+            [pscustomobject]@{ Name = $name; Seconds = $_.TotalProcessorTime.TotalSeconds - $before[$_.Id] }
+        } | Sort-Object Seconds -Descending | Select-Object -First 4 | ForEach-Object { '{0} {1:n1} s' -f $_.Name, $_.Seconds }
+        $tasks = @(Get-ScheduledTask | Where-Object State -eq Running | ForEach-Object { $_.TaskPath + $_.TaskName })
+        [Console]::Error.WriteLine("Windows still busy after 900 s ($([int]$load) % CPU): in 10 s $($busy -join ', '); " +
+            "tasks running: $(if ($tasks) { $tasks -join ', ' } else { 'none' })")
+        exit 1
+    }
+    Start-Sleep 15
+    $load = $cpu.NextValue() - $irq.NextValue()
+    if ($load -lt 5) { $calm++ } else { $calm = 0 }
 }
 Add-Type -Namespace Desk -Name Memory -MemberDefinition '[DllImport("ntdll.dll")] public static extern int RtlAdjustPrivilege(int privilege, bool enable, bool thread, out bool was); [DllImport("ntdll.dll")] public static extern int NtSetSystemInformation(int infoClass, ref int command, int length);'
 # SeProfileSingleProcessPrivilege (13), then SystemMemoryListInformation (80) with MemoryPurgeStandbyList (4).

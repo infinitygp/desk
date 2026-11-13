@@ -304,6 +304,17 @@ What else differs from Firefox:
   compiles .NET's native images, and turns off what works in the background during tests and no
   test needs: the updater of Edge and WebView2, SysMain, the search indexer, telemetry and Delivery
   Optimization.
+- Provisioning turns off what Windows itself does in the background, each seen keeping an idle
+  guest busy: Automatic Maintenance (defragmenting, clean-up, Defender's scheduled scan, which
+  start after minutes without input, and UI Automation and SSH are no input), the compatibility
+  appraisal, OneDrive's update tasks, and Windows Update, whose orchestrator scans and installs
+  Store updates despite the policy of the install: its policy names an update server where nothing
+  listens, its services and Delivery Optimization are disabled, and its scan tasks, the Store's
+  and the language components' are off (the orchestrator's refuse an administrator, so a one-shot
+  task does it as SYSTEM). Provisioning reads all of it back and fails naming what did not hold.
+  A guest therefore cannot add optional features or language packs, and the Store and winget's
+  Store source have no server. The Widgets feed still loads once per boot, and Defender still
+  updates its signatures about a minute after a restore.
 - Provisioning excludes the folders where tests run and write programs from Defender, whose
   real-time protection Tamper Protection keeps on: `C:\Users`, `C:\desk`, the program folders,
   `C:\ProgramData`, Windows' `Temp` and `Installer` (AMSI blocks a script that excludes the whole
@@ -321,8 +332,9 @@ What else differs from Firefox:
   from its window while the tip is open.
 - Provisioning turns the IANA time zone into Windows' id with ICU's `ucal_getWindowsTimeZoneID`
   (`icu.dll`, part of Windows), and the layout into the en-US input method (00000409 or 00000415).
-- Before the warm state is saved, `idle` empties the standby list, the file cache that would make
-  up almost half of the saved memory. A warm-up fails when `idle` exits with an error or does not
+- Before the warm state is saved, `idle` waits until Windows' boot work is over (2 minutes in a row
+  under 5 % CPU, as its delayed work came after shorter lulls) and empties the standby list, the
+  file cache that would make up almost half of the saved memory. A warm-up fails when `idle` exits with an error or does not
   finish within 16 minutes: a guest that did not settle would hand its background work to every run.
 - A guest that was just started or restored may work in the background for minutes, and a test
   started meanwhile shares the CPU with it.
