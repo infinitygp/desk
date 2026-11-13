@@ -675,6 +675,14 @@ skips, is refused when the file loads, as either would pass having checked nothi
 1 when any image failed a step, as that is a finding about the product whatever the others did,
 else 2 when desk could not check one.
 
+Repeating: `--repeat N` runs the scenario N times, each in a new run, to find the steps that pass in
+one run and fail in another (`scenario.run_repeat`); a state one run left behind cannot decide the
+next. `[build]` runs in the first only, so every run tests the same artifacts. A run desk could not
+finish counts for nothing, neither as passed nor as failed steps, and the exit code follows
+`--all`'s rule (1, then 2, then 0). The summary names the steps that both passed and
+failed with each failure's first line. The scenario header in a run's `log.jsonl` records whether
+the run started `warm` or `cold`, and each step event its `kind` (the action) next to the label.
+
 ## Evidence
 
 - `desk down` writes `reports/<run>/report.md`: failed units, unit failures from the journal since

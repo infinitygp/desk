@@ -904,7 +904,12 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
     return ""
 
 
-def run_scenario(path: Path, keep: bool = False, image: str | None = None, no_build: bool = False) -> bool:
+def run_scenario(path: Path, keep: bool = False, image: str | None = None, no_build: bool = False,
+                 result: dict | None = None) -> bool:
+    """One run of the scenario; whether all steps passed. `result`, when given, is filled as the run
+    goes with what a repeat needs: "built" once [build] is done, "run" (its id) and "cold" once it is
+    up, and "steps" (what _run_steps appends)."""
+    result = {} if result is None else result
     data = load(path)
     spec = load_image(image or data["image"])
     data = for_image(data, spec.name)
@@ -917,10 +922,12 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None, no_bu
         # Before the build: a scenario that needs the controller should not build its product to learn it is missing.
         usbvfiod.check()
     artifacts, built = _build(data, base, skip=no_build)
+    result["built"] = True
     agent, _ = runs.agent_process()
     run = runs.up(spec, label=f"scenario {base.name}/{path.name}" + (f" ({agent})" if agent else ""),
                   usbvfiod=bool(data.get("usbvfiod")))
     print(f"run {run.id} ({spec.name})", flush=True)
+    result.update(run=run.id, cold=run.domain == f"desk-{run.id}", steps=[])
     ok, brun = True, None
     try:
         if bspec:
@@ -930,7 +937,7 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None, no_bu
         if data.get("record"):
             record.start(run)
         run.log_event(scenario=str(path.resolve()), steps=len(data.get("step", [])),
-                      **({"build": built} if built else {}))
+                      start="cold" if result["cold"] else "warm", **({"build": built} if built else {}))
         if artifacts:
             dest = GUEST_IN[spec.family]
             guest.ssh_run(run.ssh_port, run.user, spec.cmd(f"mkdir -p {dest}" if spec.family != "windows"
@@ -945,7 +952,7 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None, no_bu
         # The run's end (evidence.finish) stops and collects whatever is still open, failure or not.
         _observe_before(run, path, data)
         ok = _run_steps(run, runs.spec_for(run), data, observed=observations(path, data), base=base,
-                        machine=_Browser(brun, run) if brun else None)
+                        machine=_Browser(brun, run) if brun else None, outcomes=result["steps"])
     finally:
         if brun:
             # Its screenshots and steps are in the scenario's report.
@@ -994,6 +1001,72 @@ def run_all(path: Path, keep: bool = False, no_build: bool = False) -> int:
     return 0
 
 
+def run_repeat(path: Path, times: int, image: str | None = None, no_build: bool = False) -> int:
+    """The scenario `times` times, each in a new run and one after the other, to find the steps that
+    pass in one run and fail in another. [build] runs in the first only; the others take its
+    artifacts as they are. A run desk could not finish says nothing about any step: it is not
+    counted. The exit code: 1 when any counted run failed a step, a finding even if other runs could
+    not be checked; else 2 when a run was not checked; 0 only when all passed."""
+    rows: list[dict] = []
+    for k in range(1, times + 1):
+        print(f"== run {k} of {times}", flush=True)
+        row: dict = {}
+        try:
+            row["ok"] = run_scenario(path, image=image, no_build=no_build or k > 1, result=row)
+        except DeskError as e:
+            if k == 1 and not row.get("built"):
+                raise  # nothing was built: every other run would stop at the same place
+            print(f"desk: {e}", flush=True)
+            row["why"] = str(e)
+        rows.append(row)
+    counted = [r for r in rows if "ok" in r]
+    width = max(len(r.get("run", "-")) for r in rows)
+    print(f"scenario {path.name} {times} times:")
+    for k, r in enumerate(rows, 1):
+        failed = next((i for i, _, passed, _, _ in r.get("steps", []) if passed is False), None)
+        said = (("passed" if r["ok"] else "FAILED" + (f" at step {failed}" if failed else ""))
+                if "ok" in r else f"NOT CHECKED: {r['why']}")
+        start = "-" if "cold" not in r else "cold" if r["cold"] else "warm"
+        print(f"  run {k}  {r.get('run', '-'):<{width}}  {start:<4}  {said}")
+    if counted:
+        _repeat_steps(counted)
+    print(f"{len(counted)} of {times} runs counted, {times - len(counted)} not checked")
+    if any(not r["ok"] for r in counted):
+        return 1
+    if len(counted) < times:
+        print(f"desk: only {len(counted)} of {times} runs were counted: see above for why", file=sys.stderr)
+        return 2
+    return 0
+
+
+def _repeat_steps(counted: list[dict]) -> None:
+    """What run_repeat says of each step over the runs that were counted; nothing to say of none."""
+    labels: dict[int, str] = {}
+    ran: dict[int, list[tuple[str, bool, str, float]]] = {}
+    for r in counted:
+        for i, label, passed, detail, seconds in r["steps"]:
+            labels[i] = label
+            if passed is not None:  # None: skipped on this image
+                ran.setdefault(i, []).append((r["run"], passed, detail, seconds))
+    print("steps:")
+    for i in sorted(labels):
+        got = ran.get(i, [])
+        said = f"passed {sum(p for _, p, _, _ in got)} of {len(got)}" if got else "skipped"
+        if len(got) > 1:
+            said += f", {min(s for *_, s in got):.1f}s to {max(s for *_, s in got):.1f}s"
+        print(f"  {i:>2}. {labels[i][:60]:<60} {said}")
+    mixed = [i for i in sorted(ran) if 0 < sum(p for _, p, _, _ in ran[i]) < len(ran[i])]
+    print("steps that both passed and failed:" if mixed else "no step both passed and failed")
+    for i in mixed:
+        print(f"  {i:>2}. {labels[i][:60]:<60} passed {sum(p for _, p, _, _ in ran[i])} of {len(ran[i])}")
+        failures: dict[str, list[str]] = {}
+        for run_id, passed, detail, _ in ran[i]:
+            if not passed:
+                failures.setdefault((detail.splitlines() or [""])[0][:100], []).append(run_id)
+        for head, ids in failures.items():
+            print(f"        {head}  (run {', '.join(ids)})")
+
+
 def continue_scenario(path: Path, run, first: int, image: str | None = None) -> bool:
     """Steps `first`.. of the file in a run that is already there (left by --keep): no build, no
     new run. While a scenario is being written, a fixed step is tried again without the ones before
@@ -1039,12 +1112,16 @@ def _warn(data: dict) -> None:
 
 
 def _run_steps(run, spec, data: dict, first: int = 1, observed: dict | None = None,
-               base: Path | None = None, machine: _Browser | None = None) -> bool:
+               base: Path | None = None, machine: _Browser | None = None,
+               outcomes: list | None = None) -> bool:
     """Steps `first`.. in order, stopping at the first failure that is not soft; whether all passed.
-    With a browser machine, the steps that are not GUEST_ACTIONS go to it."""
+    With a browser machine, the steps that are not GUEST_ACTIONS go to it. Each step is appended to
+    `outcomes` as (index, label, passed, detail, seconds); a skipped one has passed None and its
+    reason as detail."""
     from .observe import ObserveError
 
     ok = True
+    outcomes = [] if outcomes is None else outcomes
     steps = Steps(spec, run)
     steps.observations = observed or {}
     steps.base = base or Path.cwd()  # where pull's `to` is, as [build]'s artifacts are
@@ -1062,7 +1139,8 @@ def _run_steps(run, spec, data: dict, first: int = 1, observed: dict | None = No
             if "only" in step and not is_for(step, spec.name):
                 # Logged and shown, never counted as passed.
                 why = f"only on {', '.join(step['only'])}"
-                run.log_event(step=i, action=label, skipped=why)
+                run.log_event(step=i, action=label, kind=action, skipped=why)
+                outcomes.append((i, label, None, why, 0.0))
                 print(f"SKIP  {i:>2}. {label[:60]:<60}         {why}", flush=True)
                 continue
             t0 = time.monotonic()
@@ -1082,7 +1160,9 @@ def _run_steps(run, spec, data: dict, first: int = 1, observed: dict | None = No
                     detail = str(lost)
                 elif isinstance(e, (browser.Unchecked, ObserveError, winagent.AgentGone, NotDone)):
                     lost = e  # a check desk could not make (or ask the session) says nothing about the product either
-            run.log_event(step=i, action=label, ok=passed, detail=detail, seconds=round(time.monotonic() - t0, 1))
+            seconds = round(time.monotonic() - t0, 1)
+            run.log_event(step=i, action=label, kind=action, ok=passed, detail=detail, seconds=seconds)
+            outcomes.append((i, label, passed, detail, seconds))
             head, *rest = detail.splitlines() or [""]
             print(f"{'PASS' if passed else 'FAIL'}  {i:>2}. {label[:60]:<60} {time.monotonic() - t0:5.1f}s  "
                   f"{head[:100]}", flush=True)

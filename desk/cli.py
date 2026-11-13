@@ -804,6 +804,16 @@ def cmd_scenario(args) -> None:
         for w in scenario.fixed_waits(data):
             print(f"warning: {w}")
         return
+    if args.repeat is not None:
+        if args.repeat < 2:
+            raise DeskError("--repeat takes a number of runs, 2 or more")
+        for flag, given, why in (
+                ("--keep", args.keep, "the runs would all be left running"),
+                ("--all", args.all, "it runs the file's images, --repeat one image; use one of them"),
+                ("--from", args.from_step is not None, "it goes on in one existing run; --repeat starts new ones")):
+            if given:
+                raise DeskError(f"--repeat takes no {flag}: {why}")
+        sys.exit(scenario.run_repeat(path, args.repeat, image=args.image, no_build=args.no_build))
     if args.all:
         if args.image or args.from_step is not None:
             raise DeskError("--all runs the file's image and every one of its images; it takes no --image or --from")
@@ -1496,6 +1506,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="run on the file's image and then on each of its images, one after the other")
     p.add_argument("--no-build", action="store_true",
                    help="skip [build] run and take the newest files matching artifacts as they are")
+    p.add_argument("--repeat", type=int, metavar="N",
+                   help="run the scenario N times (2 or more), each in a new run ([build] runs once), and "
+                        "say which steps passed in one run and failed in another")
     p.add_argument("--from", dest="from_step", type=int, metavar="N",
                    help="run steps N.. in the run already there (-r / $DESK_RUN, e.g. left by --keep): "
                         "no build, no new run; it stays running")

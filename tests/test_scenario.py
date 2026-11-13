@@ -1,3 +1,5 @@
+import contextlib
+import io
 import subprocess
 import tempfile
 import unittest
@@ -1021,7 +1023,8 @@ class SeveralImages(unittest.TestCase):
                 mock.patch("sys.stdout") as out:
             self.assertTrue(scenario._run_steps(run, spec, data))
         self.assertEqual(step.call_count, 2)
-        self.assertIn(mock.call(step=2, action="key alt+f4", skipped="only on kde"), run.log_event.call_args_list)
+        self.assertIn(mock.call(step=2, action="key alt+f4", kind="key", skipped="only on kde"),
+                      run.log_event.call_args_list)
         self.assertRegex("".join(c.args[0] for c in out.write.call_args_list), r"SKIP   2\. key alt\+f4 .*only on kde")
 
     def run_all(self, outcomes) -> tuple[int, str]:
@@ -1042,3 +1045,174 @@ class SeveralImages(unittest.TestCase):
         self.assertRegex(said, r"fedora-44-kde +FAILED")
         # Never green when one could not be checked, and never 1 for desk's own failure.
         self.assertEqual(self.run_all([True, DeskError("no SSH connection"), True])[0], 2)
+
+
+def passed(i: int, label: str, seconds: float = 0.1) -> tuple:
+    return (i, label, True, "", seconds)
+
+
+def failed(i: int, label: str, detail: str, seconds: float = 0.1) -> tuple:
+    return (i, label, False, detail, seconds)
+
+
+def a_run(run_id: str, *steps: tuple, cold: bool = False, built: bool = True, error: str | None = None) -> dict:
+    return {"run": run_id, "cold": cold, "steps": list(steps), "built": built, "error": error}
+
+
+class RepeatedRuns(unittest.TestCase):
+    FILE = ('image = "fedora-44-gnome"\n[[step]]\nexec = "true"\n[[step]]\nclick = "Close"\n'
+            '[[step]]\nexec = "true"\nname = "last"\n')
+    STEPS = ("exec true", "click Close", "last")
+
+    def repeat(self, runs: list[dict], no_build: bool = False) -> tuple[int, str, str, list[bool]]:
+        """run_repeat over runs a fake run_scenario plays one by one: what it returned, printed, and
+        the no_build each run was started with."""
+        seen: list[bool] = []
+        script = iter(runs)
+
+        def fake(path, keep=False, image=None, no_build=False, result=None):
+            seen.append(no_build)
+            one = next(script)
+            result.update({k: v for k, v in one.items() if k != "error" and (k != "built" or v)})
+            if one["error"]:
+                raise DeskError(one["error"])
+            return all(passed is not False for _, _, passed, _, _ in one["steps"])
+
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch("desk.scenario.run_scenario", side_effect=fake), contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(err):
+            code = scenario.run_repeat(write(self.FILE), len(runs), no_build=no_build)
+        return code, out.getvalue(), err.getvalue(), seen
+
+    def clean(self, run_id: str, **kw) -> dict:
+        return a_run(run_id, *(passed(i, label) for i, label in enumerate(self.STEPS, 1)), **kw)
+
+    def test_all_runs_passing_is_0_and_only_the_first_builds(self):
+        code, said, err, seen = self.repeat([self.clean("a"), self.clean("b", cold=True), self.clean("c")])
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(seen, [False, True, True])
+        for k in (1, 2, 3):
+            self.assertIn(f"== run {k} of 3", said)
+        self.assertRegex(said, r"run 2  b  cold  passed")
+        self.assertRegex(said, r"run 1  a  warm  passed")
+        self.assertRegex(said, r"2\. click Close +passed 3 of 3, 0\.1s to 0\.1s")
+        self.assertIn("no step both passed and failed", said)
+        self.assertIn("3 of 3 runs counted, 0 not checked", said)
+        # --no-build is the user's for every run.
+        self.assertEqual(self.repeat([self.clean("a"), self.clean("b")], no_build=True)[3], [True, True])
+
+    def test_a_step_that_passes_in_one_run_and_fails_in_another_is_named_with_its_failure(self):
+        code, said, err, _ = self.repeat([
+            self.clean("a"),
+            a_run("b", passed(1, "exec true", 0.3), failed(2, "click Close", "no element Close\nfocused: Files", 2.5)),
+            self.clean("c"),
+            a_run("d", passed(1, "exec true"), failed(2, "click Close", "no element Close\nfocused: Files")),
+        ])
+        self.assertEqual((code, err), (1, ""))
+        self.assertRegex(said, r"run 2  b  warm  FAILED at step 2")
+        # The step after the failed one ran in two of the four runs only.
+        self.assertRegex(said, r"3\. last +passed 2 of 2")
+        self.assertRegex(said, r"2\. click Close +passed 2 of 4, 0\.1s to 2\.5s")
+        block = said.split("steps that both passed and failed:\n")[1]
+        self.assertRegex(block, r"2\. click Close +passed 2 of 4\n +no element Close  \(run b, d\)\n")
+        self.assertNotIn("focused: Files", block)
+        self.assertNotIn("1. exec", block)
+
+    def test_a_run_desk_could_not_finish_is_not_counted(self):
+        # Its half-run steps, a failed one among them, say nothing about the product.
+        lost = a_run("b", passed(1, "exec true"), failed(2, "click Close", "no SSH connection"), cold=True,
+                     error="no SSH connection to the guest")
+        code, said, err, seen = self.repeat([self.clean("a"), lost, self.clean("c")])
+        self.assertEqual(code, 2)
+        self.assertEqual(seen, [False, True, True])
+        self.assertIn("desk: no SSH connection to the guest", said)
+        self.assertRegex(said, r"run 2  b  cold  NOT CHECKED: no SSH connection to the guest")
+        self.assertRegex(said, r"2\. click Close +passed 2 of 2")
+        self.assertIn("no step both passed and failed", said)
+        self.assertIn("2 of 3 runs counted, 1 not checked", said)
+        self.assertIn("only 2 of 3 runs were counted", err)
+        # A finding comes before what was not checked.
+        broken = a_run("c", passed(1, "exec true"), failed(2, "click Close", "no element Close"))
+        code, said, err, _ = self.repeat([self.clean("a"), lost, broken])
+        self.assertEqual((code, err), (1, ""))
+        self.assertRegex(said, r"2\. click Close +passed 1 of 2")
+
+    def test_a_run_that_stops_before_its_build_is_done_stops_the_repeat(self):
+        # Nothing was built (the collector has no "built"): the error is the command's, once, exit 2.
+        with mock.patch("desk.scenario.run_scenario", side_effect=DeskError("build failed: make")) as each, \
+                contextlib.redirect_stdout(io.StringIO()), self.assertRaisesRegex(DeskError, "build failed: make"):
+            scenario.run_repeat(write(self.FILE), 3)
+        self.assertEqual(each.call_count, 1)
+
+    def test_a_first_run_lost_after_its_build_goes_on_with_that_build(self):
+        code, said, _, seen = self.repeat([a_run("a", error="no memory for the guest"), self.clean("b"),
+                                             self.clean("c")])
+        self.assertEqual((code, seen), (2, [False, True, True]))
+        self.assertIn("2 of 3 runs counted, 1 not checked", said)
+        # Nothing counted says nothing of the steps, rather than that none was flaky.
+        code, said, err, _ = self.repeat([a_run("a", error="no memory"), a_run("b", error="no memory")])
+        self.assertEqual(code, 2)
+        self.assertIn("0 of 2 runs counted, 2 not checked", said)
+        self.assertNotIn("steps", said)
+        self.assertIn("only 0 of 2 runs were counted", err)
+
+    def test_a_skipped_step_is_shown_as_skipped_and_never_as_passed(self):
+        skipped = (2, "click Close", None, "only on kde", 0.0)
+        code, said, _, _ = self.repeat([a_run("a", passed(1, "exec true"), skipped, passed(3, "last")),
+                                        a_run("b", passed(1, "exec true"), skipped, passed(3, "last"))])
+        self.assertEqual(code, 0)
+        self.assertRegex(said, r"2\. click Close +skipped\n")
+        self.assertRegex(said, r"3\. last +passed 2 of 2")
+
+
+class StepLog(unittest.TestCase):
+    def test_each_step_is_logged_with_its_kind_and_handed_to_the_collector(self):
+        run = mock.Mock()
+        spec = SimpleNamespace(name="fedora-44-gnome", family="linux")
+        data = {"step": [{"exec": "true"}, {"key": "alt+f4", "only": ["kde"]},
+                         {"click": "Close", "name": "close it"}, {"exec": "never"}]}
+        got: list = []
+        with mock.patch("desk.scenario._step", side_effect=["fine", scenario.StepFailed("no element\nmore")]), \
+                mock.patch("desk.scenario.Steps"), mock.patch("desk.scenario.display"), mock.patch("sys.stdout"):
+            self.assertFalse(scenario._run_steps(run, spec, data, outcomes=got))
+        calls = run.log_event.call_args_list
+        self.assertIn(mock.call(step=1, action="exec true", kind="exec", ok=True, detail="fine", seconds=mock.ANY),
+                      calls)
+        self.assertIn(mock.call(step=2, action="key alt+f4", kind="key", skipped="only on kde"), calls)
+        # The name is the label; the kind stays the action.
+        self.assertIn(mock.call(step=3, action="close it", kind="click", ok=False, detail="no element\nmore",
+                                seconds=mock.ANY), calls)
+        self.assertEqual(got, [(1, "exec true", True, "fine", mock.ANY), (2, "key alt+f4", None, "only on kde", 0.0),
+                               (3, "close it", False, "no element\nmore", mock.ANY)])
+
+    def started(self, domain: str) -> tuple[mock.Mock, dict, mock.Mock]:
+        run = mock.Mock(id="r1", domain=domain)
+        spec = SimpleNamespace(name="fedora-44-gnome", family="linux")
+        result: dict = {}
+        with mock.patch("desk.scenario.load_image", return_value=spec), mock.patch("desk.scenario.runs") as runs, \
+                mock.patch("desk.scenario.evidence") as evidence, mock.patch("sys.stdout"), \
+                mock.patch("desk.scenario._run_steps", return_value=True) as steps:
+            runs.up.return_value = run
+            runs.agent_process.return_value = (None, None)
+            evidence.finish.return_value = (None, [])
+            path = write('image = "fedora-44-gnome"\n[[step]]\nexec = "true"\n')
+            self.assertTrue(scenario.run_scenario(path, result=result))
+        self.assertIs(steps.call_args.kwargs["outcomes"], result["steps"])
+        return run, result, path
+
+    def test_the_scenario_header_says_whether_the_run_started_warm_or_cold(self):
+        for domain, start in (("desk-r1", "cold"), ("desk-fedora-44-gnome-warm", "warm")):
+            with self.subTest(start=start):
+                run, result, path = self.started(domain)
+                run.log_event.assert_any_call(scenario=str(path.resolve()), steps=1, start=start)
+                self.assertEqual((result["run"], result["cold"], result["built"]), ("r1", start == "cold", True))
+
+    def test_a_build_that_fails_leaves_the_collector_without_built(self):
+        result: dict = {}
+        spec = SimpleNamespace(name="fedora-44-gnome", family="linux")
+        with mock.patch("desk.scenario.load_image", return_value=spec), \
+                mock.patch("desk.scenario._build", side_effect=DeskError("build failed: make")), \
+                mock.patch("desk.scenario.runs") as runs, self.assertRaisesRegex(DeskError, "build failed"):
+            scenario.run_scenario(write('image = "fedora-44-gnome"\n[[step]]\nexec = "true"\n'), result=result)
+        self.assertEqual(result, {})
+        runs.up.assert_not_called()

@@ -65,7 +65,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk up IMAGE --resolution WxH --scale N --displays N`, `desk display [--resolution WxH] [--scale N]` | Monitors: mode, scaling in percent, several displays ([system.md](system.md)) |
 | `desk up IMAGE --memory 8G --cpus N` | Memory and vCPUs of this run instead of the image's (4 GB and 4 on the desktop images, 6 GB on Windows); other than its warm state's, the run boots cold (~25 s; Windows: until the guest is calm, at most 5 minutes more) |
 | `desk focus NAME` | Bring a window to the front by application or title (keys go to the focused window); on Windows it fails when Windows keeps the window behind the one in front |
-| `desk scenario run FILE [--keep] [--no-build] [--all]`, `desk scenario check FILE` | Run a repeatable test from a TOML file (see below) |
+| `desk scenario run FILE [--keep] [--no-build] [--all] [--repeat N]`, `desk scenario check FILE` | Run a repeatable test from a TOML file (see below) |
 | `desk wait [--change] [--timeout S]` | Until the screen is still; `--change` first waits for it to change at all |
 | `desk wait --until-exec CMD [--root] [--timeout S]` | Run CMD in the guest every 2 s until it exits 0 (a service up, a file written; default 120 s), instead of a polling loop |
 | `desk reboot [--shot] [--prepare]` | Reboot and return when the new session is ready; reports apps that blocked shutdown; `--prepare` then redoes the image's preparation (Cockpit logged in again) |
@@ -376,7 +376,16 @@ report (`desk down`) counts each step's last attempt. Finish with one whole run 
 which is what the scenario has to pass. `--no-build` skips `[build] run` in a new run and takes
 the newest files matching `artifacts` as they are (the same build on several images, or again
 after a fix in the scenario only); the output and the report say so and which files, and with no
-file to take it stops before starting a run (exit 2). `scenario check` and `run` warn about fixed waits
+file to take it stops before starting a run (exit 2). `--repeat N` (2 or more; not with `--keep`,
+`--all` or `--from`) runs the scenario N times, each in a new run, to find the steps that pass in
+one run and fail in another (a race, a timing the product depends on) instead of running it by hand
+and comparing: `[build]` runs in the first run only and the others take its artifacts as they are.
+After the last run it prints a line per run (its id, warm or cold start, `passed`, `FAILED at step K`
+or `NOT CHECKED` and why), a line per step with `passed X of Y` and its shortest and longest time,
+and a list of the steps that both passed and failed with each failure's first line and the runs it
+came from. A run desk could not finish (the guest lost, no memory) is not counted: none of its steps
+count as passed or failed. Exit 1 when any counted run failed a step, else 2 when a run was not
+checked, 0 only when all N runs passed. `scenario check` and `run` warn about fixed waits
 (`wait = 2`, `sleep` in a command): they fail on a busy host and waste time on an idle one, so
 `expect` what should appear, or repeat a check with `until = true`. A `type` step refuses, like `desk type`,
 when a browser's focus is not in a text field; `anywhere = true` types anyway (page shortcuts).

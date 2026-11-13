@@ -1,6 +1,7 @@
 import errno
 import subprocess
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -91,7 +92,7 @@ class Exec(unittest.TestCase):
 class ScenarioFrom(unittest.TestCase):
     def test_from_0_is_refused_not_a_fresh_run(self):
         args = SimpleNamespace(file="a.toml", action="run", from_step=0, run=None, image=None, keep=False,
-                               all=False)
+                               all=False, repeat=None)
         data = {"image": "a", "step": [{}]}
         with mock.patch("desk.cli.runs.resolve", return_value=mock.Mock(image="a")), \
                 mock.patch("desk.scenario.load", return_value=data), \
@@ -104,11 +105,43 @@ class ScenarioFrom(unittest.TestCase):
 
     def test_all_takes_no_image_or_from(self):
         for extra in ({"image": "b", "from_step": None}, {"image": None, "from_step": 2}):
-            args = SimpleNamespace(file="a.toml", action="run", run=None, keep=False, no_build=False, all=True, **extra)
+            args = SimpleNamespace(file="a.toml", action="run", run=None, keep=False, no_build=False, all=True,
+                                   repeat=None, **extra)
             with self.subTest(extra=extra), mock.patch("desk.scenario.run_all") as every, \
                     self.assertRaisesRegex(cli.DeskError, "--all .* takes no --image or --from"):
                 cli.cmd_scenario(args)
             every.assert_not_called()
+
+    def repeat(self, **given):
+        args = SimpleNamespace(**{"file": "a.toml", "action": "run", "run": None, "image": None, "keep": False,
+                                  "no_build": False, "all": False, "from_step": None, "repeat": 3, **given})
+        with mock.patch("desk.scenario.run_repeat", return_value=1) as many, \
+                mock.patch("desk.scenario.run_scenario") as one, mock.patch("desk.scenario.run_all") as every, \
+                self.assertRaises(SystemExit) as left:
+            cli.cmd_scenario(args)
+        one.assert_not_called()
+        every.assert_not_called()
+        return many, left.exception.code
+
+    def test_repeat_runs_the_file_that_many_times_and_exits_with_its_code(self):
+        many, code = self.repeat(image="b")
+        many.assert_called_once_with(Path("a.toml"), 3, image="b", no_build=False)
+        self.assertEqual(code, 1)
+        self.assertEqual(cli.build_parser().parse_args(["scenario", "run", "a.toml", "--repeat", "3"]).repeat, 3)
+        self.assertIsNone(cli.build_parser().parse_args(["scenario", "run", "a.toml"]).repeat)
+
+    def test_repeat_takes_two_or_more_and_no_keep_all_or_from(self):
+        for change, said in (({"repeat": 1}, "2 or more"), ({"repeat": 0}, "2 or more"), ({"repeat": -3}, "2 or more"),
+                             ({"keep": True}, "no --keep: the runs would all be left running"),
+                             ({"all": True}, "no --all: .*one image"),
+                             ({"from_step": 2}, "no --from: .*one existing run")):
+            args = SimpleNamespace(**{"file": "a.toml", "action": "run", "run": None, "image": None, "keep": False,
+                                      "no_build": False, "all": False, "from_step": None, "repeat": 3, **change})
+            with self.subTest(change=change), mock.patch("desk.scenario.run_repeat") as many, \
+                    mock.patch("desk.scenario.run_scenario") as one, self.assertRaisesRegex(cli.DeskError, said):
+                cli.cmd_scenario(args)
+            many.assert_not_called()
+            one.assert_not_called()
 
 
 class Failures(unittest.TestCase):

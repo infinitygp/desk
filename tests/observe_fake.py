@@ -56,6 +56,7 @@ def pcapng_bytes(packets: int = 3, order: str = "<") -> bytes:
 class FakeRun:
     def __init__(self, d: Path, image: str = "windows-11", run_id: str = "r1"):
         self.id, self.dir, self.image = run_id, d, image
+        self.domain = f"desk-{run_id}"
         self.created = time.time() - 60
         self.label, self.timezone, self.layout = "tests", "", ""
         self.usbvfiod = {}
