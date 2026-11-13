@@ -58,6 +58,23 @@ def guest_time(run) -> float:
     return guest.agent(run.dom(), "guest-get-time") / 1e9
 
 
+# From this many seconds on, a guest's clock is reported as not the host's.
+DRIFT_LIMIT = 2
+
+
+def drift(run) -> float:
+    """Seconds the guest's clock is ahead of the host's plus the run's offset (negative: behind)."""
+    return guest_time(run) - (time.time() + run.clock_offset)
+
+
+def drift_warning(seconds: float) -> str | None:
+    if abs(seconds) < DRIFT_LIMIT:
+        return None
+    way = "ahead of" if seconds > 0 else "behind"
+    return (f"the guest's clock is {round(abs(seconds))} s {way} the host's, so times in the guest "
+            "(its logs, files, the product's own) are off by that much")
+
+
 def guest_since(run) -> float:
     """The run's start on the guest's clock, for what asks the guest for its logs since then: a
     guest set back (desk clock -2h) stamps what it logs afterwards with times before the start."""

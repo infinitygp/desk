@@ -4,6 +4,7 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 from zoneinfo import ZoneInfo
 
 from desk import clock
@@ -62,6 +63,41 @@ class GuestSince(unittest.TestCase):
 
     def test_a_guest_set_forward_is_asked_from_the_start(self):
         self.assertEqual(self.since(86400.0, [{"clock": "+1d", "offset": 86400}]), 10000.0)
+
+
+class Drift(unittest.TestCase):
+    def drift(self, guest_ahead: float, offset: float = 0.0) -> float:
+        import time
+
+        run = SimpleNamespace(dom=lambda: None, clock_offset=offset)
+        with mock.patch("desk.guest.agent", lambda dom, execute: int((time.time() + offset + guest_ahead) * 1e9)):
+            return clock.drift(run)
+
+    def test_a_guest_behind_or_ahead(self):
+        self.assertAlmostEqual(self.drift(-30), -30, delta=1)
+        self.assertAlmostEqual(self.drift(30), 30, delta=1)
+
+    def test_the_runs_offset_is_not_a_drift(self):
+        self.assertAlmostEqual(self.drift(0, offset=86400), 0, delta=1)
+        self.assertAlmostEqual(self.drift(-30, offset=-7200), -30, delta=1)
+
+    def test_a_guest_that_does_not_answer_is_an_error(self):
+        run = SimpleNamespace(dom=lambda: None, clock_offset=0.0)
+        with mock.patch("desk.guest.agent", side_effect=DeskError("not responding")), \
+                self.assertRaisesRegex(DeskError, "not responding"):
+            clock.drift(run)
+
+
+class DriftWarning(unittest.TestCase):
+    def test_under_two_seconds_is_the_hosts_time(self):
+        for seconds in (0, 1.99, -1.99):
+            self.assertIsNone(clock.drift_warning(seconds))
+
+    def test_two_seconds_and_more_is_said(self):
+        self.assertIn("2 s ahead of the host's", clock.drift_warning(2))
+        self.assertIn("2 s behind the host's", clock.drift_warning(-2.0))
+        self.assertIn("31 s behind the host's", clock.drift_warning(-30.6))
+        self.assertIn("are off by that much", clock.drift_warning(-30.6))
 
 
 class Duration(unittest.TestCase):

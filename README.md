@@ -573,6 +573,9 @@ journalctl --user -u desk-maintain  # output of the last runs
   time sync off and keeps the offset in `run.json`, put back after snapshot restores and reboots
   (tried for 20 s, as the agent may answer a moment late after a restore). A moved clock that
   could not be put back is an error, not a warning.
+  `desk up` reads the clock back after a restore (once the guest is calm, for an image with
+  `calm_seconds`) and warns with the difference when it is 2 s or more or could not be read: a
+  time service in the guest can set it back after desk set it.
 
 ### Clicking and typing
 

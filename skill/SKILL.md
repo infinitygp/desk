@@ -203,6 +203,9 @@ Windows 11 Enterprise (evaluation) for Windows builds and installers; `openwrt-2
 (`desk image list` shows the date) unless the host renews them with `desk maintain`, by hand or
 from its weekly timer; if `desk up` prints a warning about a failed maintenance or a licence
 running out, pass it on to the user.
+A warning that the guest's clock is behind or ahead of the host's means the times in the reports,
+and anything the product derives from the clock, are off by that much: say so with a result that
+depends on them.
 
 ## Derived images
 

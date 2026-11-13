@@ -792,7 +792,7 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
             try:
                 guest.agent_set_time(dom)
             except DeskError as e:
-                print(f"[desk] warning: clock not synced: {e}")
+                print(f"[desk] warning: clock not synced: {e}", file=sys.stderr)
         started()
         guest.wait_ssh(run.ssh_port, run.user, timeout=300 if cold else 60)
         if cold:
@@ -812,6 +812,16 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
                 print(f"[desk] warning: the guest is still working ({busy:.1f} vCPUs over the last "
                       f"{calm.WINDOW} s) after {CALM_WAIT} s, so the first steps share the CPU with it",
                       file=sys.stderr)
+        if not cold:
+            # A time service in the guest may have set the clock back after desk set it.
+            from . import clock
+
+            try:
+                drifted = clock.drift_warning(clock.drift(run))
+            except DeskError as e:
+                drifted = f"the guest's clock could not be checked: {e}"
+            if drifted:
+                print(f"[desk] warning: {drifted}", file=sys.stderr)
         if cold:
             with run.edit() as r:
                 r.ready = time.time()
