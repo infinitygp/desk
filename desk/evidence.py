@@ -425,6 +425,11 @@ def collect(run, diff: bool = False) -> Path:
         md.append(f"- booted cold: the image was provisioned in the run until "
                   f"{time.strftime('%H:%M:%S', time.localtime(run.ready))}; guest logs and package changes "
                   "count from then" + (", the list of changed files includes it" if changes is not None else ""))
+    elif run.domain == f"desk-{run.id}":
+        md.append("- booted cold; the start did not get as far as a guest that was ready")
+    else:
+        # The other way a run starts: the same scenario may behave differently after each.
+        md.append("- restored from the image's warm state")
     md.append("")
     events = _log(run)
     # Scenario steps; `desk clock --step` logged its step size as "step" before it had a name of its own.

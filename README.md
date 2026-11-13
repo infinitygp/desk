@@ -714,7 +714,8 @@ the run started `warm` or `cold`, and each step event its `kind` (the action) ne
 
 ## Evidence
 
-- `desk down` writes `reports/<run>/report.md`: failed units, unit failures from the journal since
+- `desk down` writes `reports/<run>/report.md`: how the run started (restored from the warm state
+  or booted cold, which leaves the guest in another state), failed units, unit failures from the journal since
   the start across reboots, SELinux denials, coredumps, journal warnings, package changes (dnf's
   UTC times made local) and the timeline with screenshots; `--diff` adds the files the run
   changed, from `virt-diff` against the image the run started from. What the guest could not be

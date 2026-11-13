@@ -162,6 +162,28 @@ class Report(unittest.TestCase):
         self.assertIn("step 2 FAILED", md)  # the timeline keeps the first attempt
         self.assertNotIn("- build:", md)
 
+    def test_the_report_says_how_the_run_started(self):
+        import tempfile
+
+        from desk import evidence
+
+        said = {}
+        for how, domain, ready in (("warm", "desk-warm-fedora-44-gnome-1", 0.0), ("cold", "desk-r1", 120.0),
+                                   ("unfinished", "desk-r1", 0.0)):
+            with tempfile.TemporaryDirectory() as tmp:
+                run_dir = Path(tmp) / "r1"
+                run_dir.mkdir()
+                (run_dir / "log.jsonl").write_text("")
+                run = mock.Mock(id="r1", dir=run_dir, image="fedora-44-gnome", created=99.0, ready=ready, usbvfiod={},
+                                domain=domain)
+                run.live_domain.return_value = None
+                with mock.patch.object(evidence, "REPORTS", Path(tmp) / "reports"):
+                    said[how] = (evidence.collect(run) / "report.md").read_text()
+        self.assertIn("- restored from the image's warm state", said["warm"])
+        self.assertIn("- booted cold: the image was provisioned in the run until", said["cold"])
+        self.assertNotIn("restored", said["cold"])
+        self.assertIn("- booted cold; the start did not get as far", said["unfinished"])
+
     def test_a_build_skipped_with_no_build_is_in_the_report(self):
         import json
         import tempfile

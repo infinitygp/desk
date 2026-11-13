@@ -157,8 +157,9 @@ guest shell; `--root` and `--gui` apply to the whole snippet.
 
 ## Evidence report
 
-`desk down` first writes `reports/<run>/report.md` under desk's home and prints its path: failed
-units (now, and every unit failure since the start, before reboots too), SELinux denials, crashes,
+`desk down` first writes `reports/<run>/report.md` under desk's home and prints its path: how the
+run started (restored from the warm state or booted cold: when two runs of a scenario differ,
+look there first), failed units (now, and every unit failure since the start, before reboots too), SELinux denials, crashes,
 journal warnings, package changes and web console errors since the run started, plus a
 timeline of every desk command with its exit code and the screenshots taken. `desk down --diff`
 adds the files the run changed. Without `--keep`, `desk down` deletes the run's directory (disk,
