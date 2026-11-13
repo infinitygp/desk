@@ -44,13 +44,14 @@ function Get-TopHandles { @(Get-TopWindowInfo | ForEach-Object { $_.Handle }) }
 function Focus-NewWindow($before, $procId, $timeout = 15) {
     # Prefer a window of the started process. Packaged apps (Calculator) draw theirs from another
     # process, so after a short grace period any window that was not there before will do.
-    $start = Get-Date
-    $deadline = $start.AddSeconds($timeout)
-    while ((Get-Date) -lt $deadline) {
+    # A stopwatch, not the clock: the guest's clock may be moved while this waits (desk clock), which
+    # would hold the agent until the clock catches up or end the wait at once.
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    while ($clock.Elapsed.TotalSeconds -lt $timeout) {
         $fresh = @(Get-TopWindowInfo | Where-Object { $_.Handle -and ($before -notcontains $_.Handle) })
         $own = $fresh | Where-Object { $_.Pid -eq $procId } | Select-Object -First 1
         $new = if ($own) { $own.Handle }
-               elseif ($fresh -and ((Get-Date) - $start).TotalSeconds -gt 3) { $fresh[0].Handle }
+               elseif ($fresh -and $clock.Elapsed.TotalSeconds -gt 3) { $fresh[0].Handle }
         if ($new) { return Show-Window $new }
         Start-Sleep -Milliseconds 250
     }
@@ -66,8 +67,8 @@ function Show-Window($handle) {
     [void][Desk.Win]::SetForegroundWindow($h)
     # Whether it is in front now, as the user would see it: SetForegroundWindow's own answer only
     # says whether Windows accepted the request.
-    $deadline = (Get-Date).AddSeconds(2)
-    while ((Get-Date) -lt $deadline) {
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    while ($clock.Elapsed.TotalSeconds -lt 2) {
         if ([Desk.Win]::GetForegroundWindow() -eq [IntPtr][long]$handle) { return $true }
         Start-Sleep -Milliseconds 100
     }
