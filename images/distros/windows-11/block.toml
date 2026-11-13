@@ -40,10 +40,12 @@ files = ["agent"]
 calm_seconds = 180
 # Before the warm state is saved: wait until Windows' boot work is over, so a restored run does not inherit it:
 # 2 minutes in a row of 15 s averages under 5 % CPU (its delayed work came after shorter lulls), not counting
-# interrupts: the timer interrupts of a nested guest alone can exceed that. After 900 s (by the clock) it names
-# what was still busy and fails, since every run would replay that work. Then empty the standby list: the file
-# cache Windows keeps in free memory would be saved with it, about half of the memory state and of the time a
-# restore takes.
+# interrupts: the timer interrupts of a nested guest alone can exceed that. Not before the guest has been up for
+# 11 minutes: the Widgets feed loads about 6 minutes after a boot and a group of tasks starts 10 minutes after
+# the logon, and a state saved in a lull before them had every run load the feed in its first minutes. After
+# 900 s (by the clock) it names what was still busy and fails, since every run would replay that work. Then
+# empty the standby list: the file cache Windows keeps in free memory would be saved with it, about half of the
+# memory state and of the time a restore takes.
 idle = '''
 $sw = [Diagnostics.Stopwatch]::StartNew(); $calm = 0
 $cpu = New-Object Diagnostics.PerformanceCounter 'Processor', '% Processor Time', '_Total'
@@ -65,7 +67,7 @@ while ($calm -lt 8) {
     }
     Start-Sleep 15
     $load = $cpu.NextValue() - $irq.NextValue()
-    if ($load -lt 5) { $calm++ } else { $calm = 0 }
+    if ($load -lt 5 -and [Environment]::TickCount -ge 660000) { $calm++ } else { $calm = 0 }
 }
 Add-Type -Namespace Desk -Name Memory -MemberDefinition '[DllImport("ntdll.dll")] public static extern int RtlAdjustPrivilege(int privilege, bool enable, bool thread, out bool was); [DllImport("ntdll.dll")] public static extern int NtSetSystemInformation(int infoClass, ref int command, int length);'
 # SeProfileSingleProcessPrivilege (13), then SystemMemoryListInformation (80) with MemoryPurgeStandbyList (4).
