@@ -34,9 +34,14 @@ Part of the desk skill ([SKILL.md](SKILL.md)); the commands and pitfalls there a
   user's session) and brings its window to the front, as starting it from the Start menu would.
 - `desk a11y` / `find` / `click --name` use UI Automation; names are the ones Narrator would read
   (Calculator: "Seven", "Multiply by", "Equals"; result "Display is 42").
-- If that agent ends, it is started again within a minute: listings and lookups wait for it and
-  are asked again, anything else fails with "in-session agent not reachable". The report lists
-  each end among the failed units, with the error that ended it when there was one.
+- If that agent ends, it is started again within a minute. When a request to it gets no answer
+  (it ended, or the connection was lost on the way), desk waits for it and asks once more: a
+  listing or lookup as it is, anything else under the same request id, so an agent that had begun
+  it does not do it again (it sends its answer again; a program waited for that is still running
+  fails the step with "its result went with that connection"). An agent that ended forgets those
+  ids, so an action it had begun may happen twice; an older agent that knows none (an older warm
+  state) is not asked an action again: that fails with "in-session agent not reachable". The
+  report lists each end among the failed units, with the error that ended it when there was one.
 - Installers: `desk push setup.msi C:/Users/tester/Downloads/` then
   `desk exec -- 'Start-Process msiexec -ArgumentList "/i C:\Users\tester\Downloads\setup.msi /qn" -Wait'`,
   or run the installer UI with `exec --gui` and click through it. UAC prompts do not appear for

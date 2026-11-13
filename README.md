@@ -360,9 +360,19 @@ the logged-in session (`images/distros/windows-11/agent/agent.ps1`, its port for
   (`exec --gui --wait`) is waited for on a thread of its own.
 - A request whose caller gave up waiting (its connection closed) is left undone when the agent gets
   to it: the caller was told it failed.
+- A connection can be lost on the way: passt keeps the host's source port, Windows remembers a
+  connection the agent closed for 120 s, and a new one from a host port used a minute or two
+  earlier for the same run may go unanswered (reset after ~19 s, or late). desk therefore gives
+  every action a random id. The agent remembers the last 200 ids it began, with their answers,
+  and does not begin one again: it sends the answer again, or, while a program it waits for still
+  runs, says it was begun (desk reports that program's result as lost, exit 2). The memory is the
+  agent's own and ends with it: an action begun by an agent that ended may be done twice.
 - `agent-loop.ps1`, started at logon, starts the agent again when it ends and writes that to
-  `C:\desk\agent.log`, which the report lists among the failed units. desk asks a listing or a
-  lookup again once the agent is back, but not an action, which may have been done.
+  `C:\desk\agent.log`, which the report lists among the failed units. After a lost connection or
+  no answer in time desk waits for the agent to answer a ping (a minute at most) and asks once
+  more: a listing or a lookup always, an action under its id only when the ping says the agent
+  knows ids (`ids`). An older agent (an older warm state or a derived image) is not asked an action
+  again, which it may have done.
 
 ### OpenWrt
 

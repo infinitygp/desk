@@ -5,6 +5,7 @@ SSH sessions on Windows cannot see the interactive desktop, so UI Automation que
 """
 
 import json
+import secrets
 import socket
 import time
 
@@ -13,10 +14,16 @@ from .config import DeskError
 # agent-loop.ps1 starts an agent that ended again within this many seconds (PowerShell's start and
 # the C# it compiles).
 RESTART_WAIT = 60
+# What one ping that waits for the agent may take; a busy agent is pinged again until RESTART_WAIT.
+PING_TIMEOUT = 5
 
 
 class AgentGone(DeskError):
     """Nothing listens on the agent's port, or it went away without an answer."""
+
+
+class AgentBusy(DeskError):
+    """No answer within the time given: the agent is busy, or the answer was lost on the way."""
 
 
 def _query(req: dict) -> bool:
@@ -28,21 +35,28 @@ def _query(req: dict) -> bool:
 def request(run, timeout: float = 60, **req) -> dict:
     if not run.agent_port:
         raise DeskError(f"run {run.id} has no in-session agent port")
+    if not _query(req):
+        # An agent that has begun a request with this id does not begin it again, so an action
+        # whose connection was lost can be sent again.
+        req["id"] = secrets.token_hex(8)
     try:
         return _request(run, timeout, req)
-    except AgentGone:
-        # An action may have been done before the agent ended: only a query is asked again.
-        if not _query(req):
-            raise
+    except (AgentGone, AgentBusy) as e:
+        first = e
+    # Lost on the way (a guest that still remembers an earlier connection from the same host port
+    # resets this one), or the agent ended and agent-loop.ps1 starts it again: wait until it answers.
     deadline = time.monotonic() + RESTART_WAIT
     while True:
         try:
-            _request(run, 5, {"cmd": "ping"})
+            pong = _request(run, PING_TIMEOUT, {"cmd": "ping"})
             break
-        except AgentGone:
+        except (AgentGone, AgentBusy):
             if time.monotonic() > deadline:
-                raise
+                raise first
             time.sleep(1)
+    if "id" in req and not pong.get("ids"):
+        # An older agent knows no ids and may have done the action before the connection was lost.
+        raise first
     return _request(run, timeout, req)
 
 
@@ -59,7 +73,7 @@ def _request(run, timeout: float, req: dict) -> dict:
     except TimeoutError as e:
         # Connected or not, it is there but busy: one request at a time, and a large window's
         # tree or a program it waits for can take longer than this.
-        raise DeskError(f"the in-session agent did not answer {req.get('cmd')!r} within {timeout:.0f}s; it may still "
+        raise AgentBusy(f"the in-session agent did not answer {req.get('cmd')!r} within {timeout:.0f}s; it may still "
                         "be working on it or on an earlier request") from e
     except OSError as e:
         raise AgentGone(f"in-session agent not reachable ({e}): it ended (C:\\desk\\agent.log says why; it is "
@@ -71,6 +85,11 @@ def _request(run, timeout: float, req: dict) -> dict:
         out = json.loads(raw)
     except ValueError:
         raise DeskError(f"the in-session agent's answer was cut off after {len(raw)} characters") from None
+    if isinstance(out, dict) and out.get("begun"):
+        # Sent again under its id while the program it waits for still runs: desk could not see its result.
+        raise AgentGone(f"the in-session agent had started {req.get('file') or req.get('cmd')!r} when the connection "
+                        "to it was lost; its result went with that connection, and it was not started again (it "
+                        "is still running)")
     if isinstance(out, dict) and out.get("error"):
         raise DeskError(out["error"])
     return out

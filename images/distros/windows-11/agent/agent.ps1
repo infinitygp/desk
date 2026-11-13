@@ -179,6 +179,36 @@ using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 namespace Desk {
     public static class Waiter {
+        // The requests with an id that were begun, with the answer once there is one: desk sends a
+        // request again under its id when the connection was lost, and what was begun is not done
+        // twice. Read and written by the loop and by the threads that answer waited programs.
+        static readonly Dictionary<string, string> replies = new Dictionary<string, string>();
+        static readonly Queue<string> begun = new Queue<string>();
+
+        // False when the id was begun already; otherwise it is now, and the oldest beyond 200 is forgotten.
+        public static bool Begin(string id) {
+            lock (replies) {
+                if (replies.ContainsKey(id)) return false;
+                replies[id] = null;
+                begun.Enqueue(id);
+                if (begun.Count > 200) replies.Remove(begun.Dequeue());
+                return true;
+            }
+        }
+
+        // The answer of a begun id, null while it is still being worked on.
+        public static string Reply(string id) {
+            lock (replies) {
+                string json;
+                return replies.TryGetValue(id, out json) ? json : null;
+            }
+        }
+
+        public static void Store(string id, string json) {
+            if (String.IsNullOrEmpty(id)) return;
+            lock (replies) { if (replies.ContainsKey(id)) replies[id] = json; }
+        }
+
         // Programs that print UTF-8 (Rust, Python with UTF-8 mode) come through as they are;
         // console tools write in the OEM code page when their output is redirected.
         static string Decode(byte[] bytes) {
@@ -188,7 +218,7 @@ namespace Desk {
 
         // Waits for `p` (at most `ms` milliseconds; -1: for ever) away from the agent's loop and
         // answers the request on `client` with its exit code and output, then closes it.
-        public static void Answer(Process p, TcpClient client, int ms) {
+        public static void Answer(Process p, TcpClient client, int ms, string id) {
             var stdout = new MemoryStream();
             var stderr = new MemoryStream();
             var copies = new Task[] { p.StandardOutput.BaseStream.CopyToAsync(stdout), p.StandardError.BaseStream.CopyToAsync(stderr) };
@@ -209,6 +239,7 @@ namespace Desk {
                 }
                 try {
                     var json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue }.Serialize(reply);
+                    Store(id, json);
                     var bytes = new UTF8Encoding(false).GetBytes(json);
                     client.GetStream().Write(bytes, 0, bytes.Length);
                 } catch (Exception) { }
@@ -261,7 +292,7 @@ function Invoke-Program($req, $client) {
     }
     $p = [Diagnostics.Process]::Start($psi)
     $ms = if ($req.timeout_s) { [int][Math]::Min(1000 * [double]$req.timeout_s, [int]::MaxValue) } else { -1 }
-    [Desk.Waiter]::Answer($p, $client, $ms)
+    [Desk.Waiter]::Answer($p, $client, $ms, [string]$req.id)
     # From here the connection is the waiting thread's: it answers and closes it. Not before:
     # a hand-off that failed is answered by the loop like any other error.
     $script:handed = $true
@@ -276,6 +307,7 @@ while ($true) {
     $script:handed = $false
     $reply = $null
     $stream = $null
+    $id = $null
     try {
         # A connection that sends no request (a probe, a caller that gave up) is not waited for.
         $client.ReceiveTimeout = 5000
@@ -290,8 +322,26 @@ while ($true) {
             $client.Close()
             continue
         }
+        # desk sends a request again under its id when the connection to it was lost: one begun
+        # already is not done twice. Its answer is sent again or, while the program it waits for
+        # still runs, that it was begun (the answer goes to the connection that was lost).
+        if ($req.id) {
+            if (-not [Desk.Waiter]::Begin([string]$req.id)) {
+                $json = [Desk.Waiter]::Reply([string]$req.id)
+                if ($null -eq $json) {
+                    $json = @{ error = "request $($req.id) was begun already and is still being worked on; not begun again"
+                               begun = $true } | ConvertTo-Json -Compress
+                }
+                $bytes = $utf8.GetBytes($json)
+                $stream.Write($bytes, 0, $bytes.Length)
+                $client.Close()
+                continue
+            }
+            $id = [string]$req.id
+        }
         $reply = switch ($req.cmd) {
-            'ping' { @{ ok = $true; session = (Get-Process -Id $PID).SessionId; user = $env:USERNAME } }
+            # ids: this agent knows request ids, so desk may send a request again under its id.
+            'ping' { @{ ok = $true; session = (Get-Process -Id $PID).SessionId; user = $env:USERNAME; ids = $true } }
             'run' {
                 if ($req.wait -or $req.env) { Invoke-Program $req $client }
                 else {
@@ -329,7 +379,9 @@ while ($true) {
     if ($script:handed) { continue }
     if ($null -eq $reply) { $reply = @{ error = "the agent has no answer to $($req.cmd)" } }
     try {
-        $bytes = $utf8.GetBytes(($reply | ConvertTo-Json -Depth 20 -Compress))
+        $json = $reply | ConvertTo-Json -Depth 20 -Compress
+        [Desk.Waiter]::Store($id, $json)
+        $bytes = $utf8.GetBytes($json)
         if ($stream) { $stream.Write($bytes, 0, $bytes.Length) }
     } catch { }
     $client.Close()

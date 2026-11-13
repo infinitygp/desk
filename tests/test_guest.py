@@ -139,6 +139,8 @@ class SetTime(unittest.TestCase):
 
 
 class WindowsAgent(unittest.TestCase):
+    @mock.patch("desk.winagent.RESTART_WAIT", 0)
+    @mock.patch("desk.winagent.PING_TIMEOUT", 0.2)
     def test_busy_is_not_unreachable(self):
         with socket.socket() as server:
             server.bind(("127.0.0.1", 0))
