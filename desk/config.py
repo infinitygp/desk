@@ -237,6 +237,9 @@ class ImageSpec:
     # new build before making it current).
     base_version: str | None = None
     warm_version: str | None = None
+    # Not from a definition: the distro as image names have it (fedora-44 of the block fedora), by
+    # which fingerprints name the files of a distro with versions.
+    distro: str | None = None
 
     @property
     def base_name(self) -> str:
@@ -334,9 +337,24 @@ BLOCK_ONLY = {"distros": "desktops", "desktops": None, "addons": "distros"}
 NOT_OVERRIDES = {"name", "dir", "base", "base_version", "warm_version", *PATH_KEYS, *LIST_KEYS}
 
 
+def _versions(block: Path) -> dict[str, dict]:
+    """The versions a distro block was tried with ([versions.44]), each with the settings that
+    differ for it; none for a block without them, or one whose block.toml does not read, which
+    the images that use it are told."""
+    f = block / "block.toml"
+    try:
+        versions = _toml(f).get("versions") or {}
+    except DeskError:
+        return {}
+    if not isinstance(versions, dict) or not all(isinstance(v, dict) for v in versions.values()):
+        raise DeskError(f"{f}: versions holds a table for each version tried, such as [versions.44]")
+    return versions
+
+
 def scan_blocks(kind: str) -> tuple[dict[str, Path], dict[str, str]]:
     """The blocks of a kind by name, shipped and the host's own, and why the other names cannot be
-    used: those fail only the images that use them."""
+    used: those fail only the images that use them. A distro with versions is named by each of them
+    (fedora-44, fedora-45 of the block fedora)."""
     found: dict[str, Path] = {}
     refused: dict[str, str] = {}
     for root in BLOCK_ROOTS:
@@ -344,18 +362,32 @@ def scan_blocks(kind: str) -> tuple[dict[str, Path], dict[str, str]]:
         for p in sorted(d.iterdir()) if d.is_dir() else []:
             if not (p / "block.toml").is_file() or p.name in refused:
                 continue
-            if p.name in found:
-                refused[p.name] = (f"{kind[:-1]} {p.name!r} is defined twice, in {found.pop(p.name)} and in {p}: "
-                                   "rename the host's own")
+            try:
+                names = [f"{p.name}-{v}" for v in _versions(p)] if kind == "distros" else []
+            except DeskError as e:
+                refused[p.name] = str(e)
+                continue
+            names = names or [p.name]
+            # The same block, or a name of it (a host's own fedora-44 beside the versions of fedora).
+            twin, same = next(((q, n) for n, q in found.items() if q.name == p.name or n in names), (None, None))
+            if twin:
+                whole = twin.name == p.name
+                why = (f"{kind[:-1]} {p.name if whole else same!r} is defined twice, in {twin} and in {p}: rename the "
+                       "host's own")
+                gone = [n for n, q in found.items() if q == twin and (whole or n in names)]
+                for n in gone:
+                    del found[n]
+                refused.update(dict.fromkeys([p.name, *gone, *names], why))
             elif kind != "distros" and "-" in p.name:
                 refused[p.name] = (f"{p}: the name of a desktop or an addon has no '-', which separates the "
                                    "blocks in image names")
-            elif kind == "distros" and (other := next(
-                    (n for n in found if n.startswith(f"{p.name}-") or p.name.startswith(f"{n}-")), None)):
-                refused[p.name] = (f"{p}: the names of the images of {p.name} and of {other} can be the same "
-                                   "(one name and '-' begins the other): rename the host's own")
+            elif kind == "distros" and (pair := next(((m, n) for i, m in enumerate(names) for n in [*found, *names[:i]]
+                                                      if n.startswith(f"{m}-") or m.startswith(f"{n}-")), None)):
+                why = (f"{p}: the names of the images of {pair[0]} and of {pair[1]} can be the same (one name and '-' "
+                       "begins the other): rename the host's own")
+                refused.update(dict.fromkeys([p.name, *names], why))
             else:
-                found[p.name] = p
+                found.update(dict.fromkeys(names, p))
     return found, refused
 
 
@@ -375,13 +407,43 @@ def describe(block: Path) -> str:
     return text[:text.index(". ") + 1] if ". " in text else text
 
 
+def _with_version(value, version: str):
+    if isinstance(value, list):
+        return [_with_version(v, version) for v in value]
+    # Not str.format: settings hold scripts full of braces.
+    return value.replace("{version}", version) if isinstance(value, str) else value
+
+
+def _settings_of(d: Path, name: str) -> dict:
+    """A block's settings as its block.toml has them; for a version of a distro (fedora-44 of the
+    block fedora), the version's over the block's, {version} in their strings filled in."""
+    data = _toml(d / "block.toml")
+    if name == d.name:
+        return data
+    version = name[len(d.name) + 1:]
+    data.update(data.pop("versions")[version])
+    return {k: _with_version(v, version) for k, v in data.items()}
+
+
+def _no_block(kind: str, name: str, found: dict[str, Path]) -> str:
+    """Why there is no block of this name: a distro with versions is built in one of them."""
+    for d in {d for n, d in found.items() if n != d.name}:
+        tried = [n[len(d.name) + 1:] for n, q in found.items() if q == d]
+        if name == d.name:
+            return f"{d.name} needs a version: {', '.join(f'{d.name}-{v}' for v in tried)}"
+        if name.startswith(f"{d.name}-"):
+            return (f"{d.name} {name[len(d.name) + 1:]} was not tried: {d.name} has {', '.join(tried)} "
+                    f"({d / 'block.toml'}, [versions])")
+    return f"no {kind[:-1]} {name!r} (there are: {', '.join(found) or 'none'})"
+
+
 def _block(kind: str, name: str) -> tuple[Path, dict]:
     """A block's settings, its files as absolute paths."""
     found, refused = scan_blocks(kind)
     d = found.get(name)
     if d is None:
-        raise DeskError(refused.get(name) or f"no {kind[:-1]} {name!r} (there are: {', '.join(found) or 'none'})")
-    data = _toml(d / "block.toml")
+        raise DeskError(refused.get(name) or _no_block(kind, name, found))
+    data = _settings_of(d, name)
 
     def resolve(rel: str) -> str:
         p = Path(os.path.normpath(d / rel))
@@ -411,7 +473,7 @@ def parse_name(name: str) -> tuple[str, str | None, list[str]] | None:
         if name.startswith(f"{distro}-"):
             rest = name[len(distro) + 1:].split("-")
             # A distro that comes with its desktop or has none is followed by addons only.
-            if "desktops" not in _toml(distros[distro] / "block.toml"):
+            if "desktops" not in _settings_of(distros[distro], distro):
                 return distro, None, rest
             return distro, rest[0], rest[1:]
     return None
@@ -436,7 +498,8 @@ def _layers(distro: str, desktop: str | None, addons: list[str]) -> tuple[Path, 
     for a in addons:
         data = _block("addons", a)[1]
         allowed = data.pop("distros", None)
-        if allowed is not None and distro not in allowed:
+        # The block's own name stands for every version of a distro (fedora for fedora-44).
+        if allowed is not None and distro not in allowed and d_dir.name not in allowed:
             raise DeskError(f"the addon {a} works on {', '.join(allowed)}, not on {distro}")
         extra.append(data)
     return d_dir, base, extra
@@ -584,7 +647,7 @@ def load_image(name: str) -> ImageSpec:
     if not _zone(spec["timezone"]):
         raise DeskError(f"{f}: timezone {spec['timezone']!r} is no time zone this host knows")
     try:
-        return ImageSpec(name=name, dir=d_dir, **spec)
+        return ImageSpec(name=name, dir=d_dir, distro=distro, **spec)
     except TypeError as e:
         # An unknown or a missing setting.
         raise DeskError(f"{f}: {str(e).replace('ImageSpec.__init__() ', '')}") from None

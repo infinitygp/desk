@@ -137,7 +137,7 @@ def _image_show(spec) -> None:
             [data["distro"], *([data["desktop"]] if data["desktop"] else []), *data["addons"]]))
     for f in fields(spec):
         value = getattr(spec, f.name)
-        if f.name not in ("name", "dir", "base_version", "warm_version") and value != f.default:
+        if f.name not in ("name", "dir", "distro", "base_version", "warm_version") and value != f.default:
             print(f"{f.name} = {_shown(value, f.name in config.PATH_KEYS + config.LIST_KEYS)}")
 
 
@@ -145,17 +145,29 @@ def _image_blocks() -> None:
     for kind in config.KINDS:
         print(kind)
         found, refused = config.scan_blocks(kind)
+        names: dict[Path, list[str]] = {}
         for name, d in found.items():
+            names.setdefault(d, []).append(name)
+        also = config.BLOCK_ONLY[kind]
+        for d, versions in names.items():
             try:
-                data = config._toml(d / "block.toml")
+                settings = [config._settings_of(d, n) for n in versions]
             except DeskError as e:
-                print(f"  {name:<16}broken: {e}")
+                print(f"  {d.name:<16}broken: {e}")
                 continue
-            also = config.BLOCK_ONLY[kind]
-            note = f" ({also}: {', '.join(data[also])})" if also and also in data else ""
-            print(f"  {name:<16}{config.describe(d)}{note}")
+            notes = [f"{also}: {', '.join(s[also])}" if also and also in s else "" for s in settings]
+            # A distro with versions is listed once, its versions below it with their desktops where they differ.
+            same = len(set(notes)) == 1
+            print(f"  {d.name:<16}{config.describe(d)}{f' ({notes[0]})' if same and notes[0] else ''}")
+            if versions != [d.name]:
+                for n, text in zip(versions, notes):
+                    print(f"    {n:<14}{'' if same else text}".rstrip())
+        shown = set()
         for name, why in refused.items():
-            print(f"  {name:<16}refused: {why}")
+            # A refused distro with versions is refused under each of its names.
+            if why not in shown:
+                shown.add(why)
+                print(f"  {name:<16}refused: {why}")
 
 
 def _image_list() -> None:

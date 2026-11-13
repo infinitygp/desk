@@ -1,0 +1,21 @@
+# Fedora, installed over the network with a kickstart.
+# fedora43, as an older libosinfo has no entry for the newer releases; it gives the same device defaults.
+os_variant = "fedora43"
+memory_mib = 4096
+vcpus = 4
+disk_gb = 40
+location = "https://dl.fedoraproject.org/pub/fedora/linux/releases/{version}/Everything/x86_64/os/"
+kickstart = "ks.cfg"
+release = "{version}"
+user = "tester"
+# Prefix for `desk exec --agent`; see the wrapper in ks.cfg.
+agent_wrapper = ["/usr/local/libexec/desk-ga-run"]
+# `desk maintain` reinstalls it this often, so tests run against current updates.
+rebuild_days = 28
+desktops = ["gnome"]
+
+# The releases tried, each with what differs for it.
+[versions.44]
+desktops = ["gnome", "kde", "xfce", "cinnamon"]
+
+[versions.45]

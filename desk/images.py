@@ -65,14 +65,17 @@ def current(link: Path) -> Path | None:
 
 # Image settings that do not change what ends up in the guest (the files the URLs lead to are
 # named, version included, by virtio_win_iso and openssh_msi).
-NOT_IN_GUEST = ("name", "dir", "base_version", "warm_version", "rebuild_days", "expiry", "calm_seconds",
+NOT_IN_GUEST = ("name", "dir", "distro", "base_version", "warm_version", "rebuild_days", "expiry", "calm_seconds",
                 "cloud_image_sums", "virtio_win_url", "virtio_win_sha256", "openssh_msi_url", "openssh_msi_sha256")
 
 
-def _named(path: Path) -> str:
+def _named(path: Path, spec: ImageSpec | None = None) -> str:
     """A file as fingerprints know it: within its root, so that neither where desk runs from nor a
-    block moved to the host's own makes a new build."""
+    block moved to the host's own makes a new build. A file of a distro with versions is named as
+    the version's (distros/fedora-44/ks.cfg), as when each version was a block of its own."""
     path = path.resolve()
+    if spec and spec.distro and spec.distro != spec.dir.name and path.is_relative_to(spec.dir.resolve()):
+        return str(Path("distros", spec.distro, path.relative_to(spec.dir.resolve())))
     return next((str(path.relative_to(r.resolve())) for r in BLOCK_ROOTS if path.is_relative_to(r.resolve())),
                 str(path))
 
@@ -85,7 +88,8 @@ def _settings(spec: ImageSpec, keys) -> str:
         value = getattr(spec, f.name)
         if f.name in keys and (f.default is MISSING or value != f.default):
             if f.name in PATH_KEYS + LIST_KEYS and value:
-                value = [_named(spec.path(v)) for v in value] if isinstance(value, list) else _named(spec.path(value))
+                value = ([_named(spec.path(v), spec) for v in value] if isinstance(value, list)
+                         else _named(spec.path(value), spec))
             data[f.name] = value
     return json.dumps(data, sort_keys=True, default=str)
 
@@ -94,7 +98,7 @@ def _hash_files(h, spec: ImageSpec, rels: list[str]) -> None:
     for rel in rels:
         src = spec.path(rel).resolve()
         for f in [src] if src.is_file() else sorted(q for q in src.rglob("*") if q.is_file()):
-            h.update(_named(f).encode() + b"\0" + f.read_bytes() + b"\0")
+            h.update(_named(f, spec).encode() + b"\0" + f.read_bytes() + b"\0")
 
 
 def install_fingerprint(spec: ImageSpec) -> str:

@@ -456,7 +456,12 @@ class ImageCommands(unittest.TestCase):
     def test_blocks(self):
         code, out, _ = self.desk("image", "blocks")
         self.assertEqual(code, 0)
-        self.assertRegex(out, r"distros\n(  .*\n)*  fedora-44 +Fedora 44\b.*\(desktops: gnome, kde\b")
+        self.assertRegex(out, r"distros\n(  .*\n)*  arch +Arch Linux.*\(desktops: gnome, kde\b")
+        # A distro with versions once, its versions below it, with their desktops where they differ.
+        self.assertRegex(out, r"\n  fedora +Fedora, installed over the network with a kickstart\.\n"
+                              r"    fedora-44 +desktops: gnome, kde, xfce, cinnamon\n    fedora-45 +desktops: gnome\n")
+        self.assertRegex(out, r"\n  debian +Debian: .*\(desktops: gnome, kde\b.*\)\n    debian-13\n")
+        self.assertNotRegex(out, r"\n  fedora-44 ")
         self.assertRegex(out, r"addons\n(  .*\n)*  cockpit +Cockpit.*\(distros: fedora-44\)")
         own = config.CONFIG_DIR / "addons" / "my-lang"
         own.mkdir(parents=True)
@@ -474,3 +479,20 @@ class ImageCommands(unittest.TestCase):
         code, out, _ = self.desk("image", "blocks")
         self.assertEqual(code, 0)
         self.assertRegex(out, r"  xx +broken: .*block.toml: not valid TOML")
+        desktop = config.CONFIG_DIR / "desktops" / "yy"
+        desktop.mkdir(parents=True)
+        self.addCleanup(desktop.rmdir)
+        (desktop / "block.toml").write_text("ready = \n")
+        self.addCleanup((desktop / "block.toml").unlink)
+        code, out, _ = self.desk("image", "blocks")
+        self.assertRegex(out, r"desktops\n(  .*\n)*  yy +broken: .*block.toml: not valid TOML")
+        # A distro with versions refused (defined twice): once.
+        twin = config.CONFIG_DIR / "distros" / "fedora"
+        twin.mkdir(parents=True)
+        self.addCleanup(twin.rmdir)
+        (twin / "block.toml").write_text("[versions.44]\n")
+        self.addCleanup((twin / "block.toml").unlink)
+        code, out, _ = self.desk("image", "blocks")
+        self.assertEqual(code, 0)
+        self.assertEqual(out.count("refused: distro 'fedora' is defined twice"), 1, out)
+        self.assertNotRegex(out, r"\n    fedora-4")

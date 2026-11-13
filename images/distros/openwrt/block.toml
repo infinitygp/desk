@@ -1,8 +1,7 @@
-# OpenWrt 25.12 (x86-64, ext4) without a desktop: for testing OpenWrt packages and LuCI apps. The
+# OpenWrt (x86-64, ext4) without a desktop: for testing OpenWrt packages and LuCI apps. The
 # release image itself, its root file system grown, reachable over SSH as root (password root);
-# LuCI through `desk forward 80`. A new point release: change the version in disk_image_url.
+# LuCI through `desk forward 80`.
 installer = "disk"
-disk_image_url = "https://downloads.openwrt.org/releases/25.12.5/targets/x86/64/openwrt-25.12.5-x86-64-generic-ext4-combined-efi.img.gz"
 # Written onto the image before its first boot: SSH key, network and time zone, power-off.
 disk_files = "disk"
 os_variant = "linux2022"
@@ -17,3 +16,8 @@ ready = "ubus call network.interface.lan status | grep -q '\"up\": true'"
 reboot = "reboot"
 poweroff = "poweroff"
 provision = "provision.sh"
+
+# The releases tried, each with what differs for it.
+[versions."25.12"]
+# A new point release: change the version in disk_image_url.
+disk_image_url = "https://downloads.openwrt.org/releases/25.12.5/targets/x86/64/openwrt-25.12.5-x86-64-generic-ext4-combined-efi.img.gz"

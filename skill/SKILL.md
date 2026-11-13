@@ -251,10 +251,11 @@ besides `image`; a plain `scenario run` still runs `image` only, `--all` runs it
 when any could not be checked (not built here, the guest lost: `NOT CHECKED` and why), 0 only when
 all passed (no `--image` or `--from` with it). A step with `only = ["kde"]` runs on the images that
 are or are made of one of those names, the exact block names (`arch`, `fedora-44`, `kde`,
-`cockpit`) or whole image names; elsewhere it shows as `SKIP` and in the report as skipped, never
-passed. `scenario check` refuses an `only` name none of the file's images has and an image every
-step leaves out. `only` is for a few steps that differ (a title bar, a tray); a scenario that
-differs in most of its steps stays a file of its own. A guest without a
+`cockpit`; a distro without its version, `fedora`, stands for all of them) or whole image names;
+elsewhere it shows as `SKIP` and in the report as skipped, never passed. `scenario check` refuses
+an `only` name none of the file's images has and an image every step leaves out. `only` is for a
+few steps that differ (a title bar, a tray); a scenario that differs in most of its steps stays a
+file of its own. A guest without a
 desktop whose web pages need checking (an OpenWrt router's LuCI) gets a browser machine:
 `browser = "fedora-44-gnome"` at the top starts that desktop next to it, and every step that is not
 a command of the guest (`exec`, `root`, `reboot`, `pull`, `offline`, `clock`, `disk_*`, `prepare`,

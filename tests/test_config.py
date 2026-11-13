@@ -35,7 +35,8 @@ class HostFiles(unittest.TestCase):
 class Composition(HostFiles):
     def test_an_image_is_its_blocks(self):
         spec = load_image("fedora-44-gnome")
-        self.assertEqual((spec.installer, spec.desktop, spec.dir), ("kickstart", "gnome", IMAGES_DIR / "distros" / "fedora-44"))
+        self.assertEqual((spec.installer, spec.desktop, spec.dir), ("kickstart", "gnome", IMAGES_DIR / "distros" / "fedora"))
+        self.assertEqual(spec.distro, "fedora-44")
         self.assertEqual(spec.provision_scripts, [str(IMAGES_DIR / "shared" / "desktop.sh"),
                                                   str(IMAGES_DIR / "desktops" / "gnome" / "provision.sh")])
         shared, files = spec.files
@@ -334,14 +335,14 @@ class HostBlocks(HostFiles):
 
     def test_a_name_that_cannot_be_read_back_fails_only_its_images(self):
         self.addon("my-lang", "")
-        self.block("distros", "fedora", 'desktops = ["44"]\n')
-        self.assertEqual(load_image("fedora-44-gnome-cockpit").name, "fedora-44-gnome-cockpit")
-        self.assertEqual(config.parse_name("fedora-44"), ("fedora-44", None, []))
+        self.block("distros", "arch-x", 'desktops = ["gnome"]\n')
+        self.assertEqual(load_image("arch-gnome").name, "arch-gnome")
+        self.assertEqual(config.parse_name("arch-x-gnome"), ("arch", "x", ["gnome"]))
         self.images()
         with self.assertRaisesRegex(DeskError, "my-lang: the name of a desktop or an addon has no '-'"):
             config.add_image("fedora-44", "gnome", ["my-lang"], {})
-        with self.assertRaisesRegex(DeskError, "fedora: the names of the images of fedora and of fedora-44 can be"):
-            config.add_image("fedora", "44", [], {})
+        with self.assertRaisesRegex(DeskError, "arch-x: the names of the images of arch-x and of arch can be"):
+            config.add_image("arch-x", "gnome", [], {})
 
     def test_the_shipped_blocks_are_all_usable(self):
         for kind in config.KINDS:
@@ -368,6 +369,114 @@ class HostBlocks(HostFiles):
             moved = load_image("fedora-44-gnome-cockpit")
             self.assertEqual(moved.path(moved.prepare), tmp / "own" / "addons" / "cockpit" / "prepare.py")
             self.assertEqual((images.install_fingerprint(moved), images.warm_fingerprint(moved)), expected)
+
+
+class VersionedDistros(HostFiles):
+    """One block per distribution, its versions in [versions]; image names keep the version."""
+
+    PLAN9 = ('# Plan 9 from a test.\ninstaller = "cloudimg"\nos_variant = "plan9-{version}"\nuser_data = "seed"\n'
+             'memory_mib = 1024\nvcpus = 1\ndisk_gb = 4\nuser = "glenda"\n'
+             'install = ["all.sh", "only-{version}.sh"]\nready = "test -e {version} && echo {0}"\n'
+             'desktops = ["gnome"]\n'
+             '[versions.4]\ndesktops = ["gnome", "kde"]\nuser_data = "seed-4"\n'
+             '[versions."4.1"]\n')
+
+    def plan9(self) -> Path:
+        return self.block("distros", "plan9", self.PLAN9, seed="", **{"seed-4": "", "all.sh": "", "only-4.sh": "",
+                                                                     "only-4.1.sh": ""})
+
+    def test_a_block_offers_its_versions_each_with_its_own_settings_over_the_blocks(self):
+        d = self.plan9()
+        found = config.blocks("distros")
+        self.assertEqual((found["plan9-4"], found["plan9-4.1"]), (d, d))
+        self.assertNotIn("plan9", found)
+        four, four_one = config._block("distros", "plan9-4")[1], config._block("distros", "plan9-4.1")[1]
+        # A list is replaced, a file of the version's is one of the block's.
+        self.assertEqual((four["desktops"], four_one["desktops"]), (["gnome", "kde"], ["gnome"]))
+        self.assertEqual((four["user_data"], four_one["user_data"]), (str(d / "seed-4"), str(d / "seed")))
+        # {version} in strings and lists; other braces are left as they are.
+        self.assertEqual((four["os_variant"], four_one["os_variant"]), ("plan9-4", "plan9-4.1"))
+        self.assertEqual(four_one["install"], [str(d / "all.sh"), str(d / "only-4.1.sh")])
+        self.assertEqual(four["ready"], "test -e 4 && echo {0}")
+        self.assertNotIn("versions", four)
+        self.assertEqual(config.parse_name("plan9-4.1-kde"), ("plan9-4.1", "kde", []))
+        self.images()
+        with self.assertRaisesRegex(DeskError, "plan9-4.1 needs one of the desktops gnome"):
+            config.add_image("plan9-4.1", "kde", [], {})
+        self.assertEqual(config.add_image("plan9-4", "kde", [], {}), ["plan9-4-kde"])
+        self.assertEqual(config.read_image("plan9-4-kde")["distro"], "plan9-4")
+        self.assertEqual((load_image("plan9-4-kde").dir, load_image("plan9-4-kde").distro), (d, "plan9-4"))
+
+    def test_the_shipped_fedora_has_its_versions(self):
+        f44, f45 = load_image("fedora-44-gnome"), load_image("fedora-45-gnome")
+        # The image files name the distro as they did when each version was a block of its own.
+        self.assertEqual(config.read_image("fedora-44-gnome")["distro"], "fedora-44")
+        self.assertEqual((f44.release, f45.release), ("44", "45"))
+        self.assertEqual(f44.location, "https://dl.fedoraproject.org/pub/fedora/linux/releases/44/Everything/x86_64/os/")
+        self.assertIn("/releases/45/", f45.location)
+        self.assertEqual(f44.kickstart, f45.kickstart)
+        self.assertEqual(config.parse_name("fedora-45-gnome"), ("fedora-45", "gnome", []))
+        self.assertEqual(config.add_command("fedora-45-gnome"), "desk image add fedora-45 gnome")
+        self.assertIsNone(config.add_command("fedora-45-kde"))
+
+    def test_the_blocks_name_or_a_version_not_tried_is_no_distro_to_build(self):
+        self.images()
+        with self.assertRaisesRegex(DeskError, "^fedora needs a version: fedora-44, fedora-45$"):
+            config.add_image("fedora", "gnome", [], {})
+        with self.assertRaisesRegex(DeskError, r"^fedora 46 was not tried: fedora has 44, 45 \(.*/images/distros/fedora/"
+                                               r"block.toml, \[versions\]\)$"):
+            config.add_image("fedora-46", "gnome", [], {})
+        with self.assertRaisesRegex(DeskError, r"no distro 'fedorax' \(there are: .*fedora-44, fedora-45"):
+            config.add_image("fedorax", None, [], {})
+        self.assertEqual(list_images(), [])
+
+    def test_an_addon_for_the_blocks_name_goes_on_every_version(self):
+        self.addon("xx", 'distros = ["fedora"]\nprovision = "p.sh"\n', **{"p.sh": "true\n"})
+        self.addon("yy", 'distros = ["fedora-44"]\nprovision = "p.sh"\n', **{"p.sh": "true\n"})
+        self.images()
+        config.add_image("fedora-44", "gnome", ["xx"], {})
+        config.add_image("fedora-45", "gnome", ["xx"], {})
+        self.assertEqual(load_image("fedora-45-gnome-xx").base, "fedora-45-gnome")
+        with self.assertRaisesRegex(DeskError, "the addon xx works on fedora, not on arch"):
+            config.add_image("arch", "gnome", ["xx"], {})
+        with self.assertRaisesRegex(DeskError, "the addon yy works on fedora-44, not on fedora-45"):
+            config.add_image("fedora-45", "gnome", ["yy"], {})
+
+    def test_names_that_clash_are_refused(self):
+        # A host's own block of a name a versioned one has: both, as for any name defined twice.
+        self.block("distros", "fedora-44", 'desktops = ["gnome"]\n')
+        for name in ("fedora-44-gnome", "fedora-44-gnome-cockpit"):
+            with self.assertRaisesRegex(DeskError, r"distro 'fedora-44' is defined twice, in .*/images/distros/fedora "
+                                                   r"and in .*/fedora-44: rename the host's own"):
+                load_image(name)
+        self.assertEqual(load_image("fedora-45-gnome").distro, "fedora-45")
+        found, refused = config.scan_blocks("distros")
+        self.assertNotIn("fedora-44", found)
+        self.assertIn("fedora-44", refused)
+
+    def test_a_versioned_block_defined_twice_is_refused_by_every_name(self):
+        self.block("distros", "fedora", '[versions.44]\ndesktops = ["gnome"]\n[versions.46]\ndesktops = ["gnome"]\n')
+        for name in ("fedora-44", "fedora-45", "fedora-46"):
+            with self.assertRaisesRegex(DeskError, "distro 'fedora' is defined twice"):
+                config._block("distros", name)
+        self.assertEqual(load_image("arch-gnome").distro, "arch")
+
+    def test_names_that_one_and_a_dash_begins_are_refused(self):
+        self.block("distros", "fedora-44-x", 'desktops = ["gnome"]\n')
+        self.block("distros", "plan9", '[versions.1]\n[versions.1-2]\n')
+        found, refused = config.scan_blocks("distros")
+        self.assertRegex(refused["fedora-44-x"], "the names of the images of fedora-44-x and of fedora-44 can be the same")
+        self.assertRegex(refused["plan9-1-2"], "the names of the images of plan9-1-2 and of plan9-1 can be the same")
+        self.assertNotIn("plan9-1", found)
+        self.assertEqual(found["fedora-44"], IMAGES_DIR / "distros" / "fedora")
+        # A block of a name of its own beside a versioned one stays a distro of its own.
+        self.block("distros", "fedora-46", 'desktops = ["gnome"]\n')
+        self.assertEqual(config.blocks("distros")["fedora-46"], CONFIG_DIR / "distros" / "fedora-46")
+
+    def test_versions_that_are_no_tables_are_refused(self):
+        self.block("distros", "plan9", 'versions = ["1"]\n')
+        with self.assertRaisesRegex(DeskError, r"plan9/block.toml: versions holds a table for each version tried"):
+            config._block("distros", "plan9")
 
 
 class GuestSettings(HostFiles):

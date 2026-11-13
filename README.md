@@ -91,13 +91,12 @@ the same on every host, and `desk up` of an image the host has not defined print
 
 | Block | Kind | Install, or what it adds | Notes |
 |---|---|---|---|
-| `fedora-44` | distro | kickstart over the network, the system without a desktop | |
-| `fedora-45` | distro | kickstart over the network (fedora-44's), the system without a desktop | |
+| `fedora` | distro, versions 44, 45 | kickstart over the network, the system without a desktop | |
 | `arch` | distro | official cloud image: users by cloud-init (NoCloud seed), the rest by `install.sh` | rolling; no Secure Boot, no Firefox |
-| `debian-13` | distro | official cloud image (generic: the genericcloud one's kernel drives no display), likewise | Firefox ESR |
-| `ubuntu-26.04` | distro | official cloud image, likewise | Firefox from Mozilla's repository; no Chromium (Ubuntu has only its snap) |
+| `debian` | distro, version 13 | official cloud image (generic: the genericcloud one's kernel drives no display), likewise | Firefox ESR |
+| `ubuntu` | distro, version 26.04 | official cloud image, likewise | Firefox from Mozilla's repository; no Chromium (Ubuntu has only its snap) |
 | `windows-11` | distro | evaluation ISO + `autounattend.xml` on a second CD | comes with its desktop; 90-day evaluation, reinstalled by `desk maintain` |
-| `openwrt-25.12` | distro | the release's disk image (x86-64 ext4 combined, EFI), grown and preconfigured offline | no desktop: BusyBox ash, procd, apk, LuCI |
+| `openwrt` | distro, version 25.12 | the release's disk image (x86-64 ext4 combined, EFI), grown and preconfigured offline | no desktop: BusyBox ash, procd, apk, LuCI |
 | `gnome` | desktop | the Workstation's packages (Fedora), the gnome group (Arch), gnome-core (Debian), ubuntu-desktop-minimal (Ubuntu), automatic login; shell extension, settings for steady screenshots | |
 | `kde` | desktop | Plasma on Wayland, logged in by Plasma Login Manager (Fedora, Arch) or SDDM (Debian, Ubuntu) | |
 | `xfce` | desktop | Xfce on X11, logged in by LightDM | |
@@ -108,7 +107,7 @@ the same on every host, and `desk up` of an image the host has not defined print
 The Linux images with a desktop have Chromium (not Ubuntu's) and Firefox (not Arch's).
 
 ```bash
-bin/desk image blocks                              # the distros, desktops and addons there are
+bin/desk image blocks                              # the distros and their versions, desktops, addons
 bin/desk image add fedora-44 gnome                 # defines fedora-44-gnome on this host
 bin/desk image add fedora-44 gnome --addon cockpit # fedora-44-gnome-cockpit
 bin/desk image set fedora-44-gnome --memory 8G     # sizes (--disk 60G is a new install)
@@ -131,12 +130,29 @@ distro, its desktop and its addons in that order:
 
 - A setting of a later block wins; `install`, `provision`, `files` and `unattend_files` add up,
   and only one block brings a `prepare`.
-- A distro lists the desktops it was tried with (`desktops`); one without the list comes with its
-  desktop (Windows) or has none (OpenWrt). An addon may list the distros it works on (`distros`).
-  `desk image add` refuses other combinations.
+- A distro lists the desktops it was tried with (`desktops`, a version's own where they differ);
+  one without the list comes with its desktop (Windows) or has none (OpenWrt). An addon may list
+  the distros it works on (`distros`). `desk image add` refuses other combinations.
 - The image's own file names its blocks and sets what names no file: sizes, `layout`,
   `timezone`, `rebuild_days`. `desk image add` and `desk image set` write it whole, without
   comments; it may be edited by hand as well.
+
+A distribution is one block, its versions in a table each (`[versions.44]`, `[versions."26.04"]`):
+a version is listed once it was tried, with the settings that differ for it, which replace the
+block's (a list such as `desktops` as a whole), and may name files of the block like the block's
+own (`kickstart = "ks-46.cfg"`). In the block's strings, lists' included, `{version}` stands for the
+version (Fedora's `location` and `release`); a setting that holds more than the version (Debian's
+code name, OpenWrt's point release in `disk_image_url`) is set whole in the version's table. A new
+version is often a table with nothing in it, as Fedora 45's: what differs from 44 is `{version}`,
+and 44 lists more desktops than the block.
+
+Images still name the distro by the block and the version (`fedora-44`): image names
+(`fedora-44-gnome`), `desk image add fedora-44 gnome`, `distro = "fedora-44"` in an image's file,
+so the files hosts have stay as they are. The block's name alone is no distro to build, and a
+version it does not list is refused with the ones it does; in a scenario's `only` and an addon's
+`distros` it stands for every version (`only = ["fedora"]`). Fingerprints name a version's files as
+that version's (`distros/fedora-44/ks.cfg`), as they were named when each version was a block of
+its own.
 
 The settings that shape a run:
 
@@ -179,13 +195,16 @@ moves the clock forward.
 
 Blocks only one host needs (its language, its hardware) are kept on that host, in
 `~/.config/desk/distros/`, `desktops/` and `addons/` (`$XDG_CONFIG_HOME`), laid out like
-`images/`. desk offers them with the shipped ones, but a shipped distro takes only the desktops it
-lists: a desktop of the host's own goes with a distro of the host's own, and brings itself what
-the shipped desktops get from `images/shared/desktop.sh`. A name is in one of the two places
-only; a name desk cannot use (in both places, a desktop's or an addon's with a '-', a distro's
-that with a '-' begins another's) fails only the images that use it, and `desk image blocks`
-says why. A block moved from one to the other keeps its builds: fingerprints name files within
-their root, as they do for a checkout and a release of the same commit.
+`images/` (a distro with versions alike). desk offers them with the shipped ones, but a shipped
+distro takes only the desktops it lists: a desktop of the host's own goes with a distro of the
+host's own, and brings itself what the shipped desktops get from `images/shared/desktop.sh`. A
+version of a shipped distro that it does not list is a distro of the host's own named like one
+(`distros/fedora-46/`), which `only = ["fedora"]` does not cover. A name is in one of the two
+places only; a name desk cannot use (a block's or a distro version's in both places, a desktop's
+or an addon's with a '-', a distro's that with a '-' begins another's) fails only the images that
+use it, and `desk image blocks` says why. A block moved from one to the other keeps its builds:
+fingerprints name files within their root, as they do for a checkout and a release of the same
+commit.
 
 ### Provisioning
 
@@ -678,12 +697,12 @@ Several images: `images` lists the others a file is for and `--all` runs them on
 (`scenario.run_all`), not side by side, since `desk up` waits for room on the host anyway and the
 output of several would interleave; the default stays one image, so the whole set is run when asked
 for. A step's `only` names blocks or images, matched by the image's name and the blocks it is made
-of (`scenario.image_blocks`, read from the names, so an image this host has not defined matches as
-on one that has). A skipped step is logged with `skipped`, not `ok`, so the report counts it apart
-and never as passed; a name in `only` that none of the images has, or an image that every step
-skips, is refused when the file loads, as either would pass having checked nothing. `--all` exits
-1 when any image failed a step, as that is a finding about the product whatever the others did,
-else 2 when desk could not check one.
+of, a distro with versions by its block's name too (`scenario.image_blocks`, read from the names, so
+an image this host has not defined matches as on one that has). A skipped step is logged with
+`skipped`, not `ok`, so the report counts it apart and never as passed; a name in `only` that none
+of the images has, or an image that every step skips, is refused when the file loads, as either
+would pass having checked nothing. `--all` exits 1 when any image failed a step, as that is a
+finding about the product whatever the others did, else 2 when desk could not check one.
 
 Repeating: `--repeat N` runs the scenario N times, each in a new run, to find the steps that pass in
 one run and fail in another (`scenario.run_repeat`); a state one run left behind cannot decide the
@@ -820,7 +839,7 @@ libvirt bindings to run.
 | | Arch | Fedora |
 |---|---|---|
 | To start runs | `libvirt` `libvirt-python` `qemu-system-x86` `qemu-hw-display-virtio-vga` `qemu-img` `edk2-ovmf` `passt` `openssh` | `libvirt-daemon-driver-qemu` `python3-libvirt` `qemu-system-x86-core` `qemu-device-display-virtio-vga` `qemu-img` `edk2-ovmf` `passt` `openssh-clients` |
-| To build images | `virt-install` `openssh`; cloud images (`arch`, `debian-13`, `ubuntu-26.04`): `curl` `openssl`; `openwrt-*`: `curl` `gzip` `gptfdisk` `parted` `libguestfs`; `windows-11`: `curl` `7zip` `libisoburn` | `virt-install` `openssh`; cloud images (`arch`, `debian-13`, `ubuntu-26.04`): `curl` `openssl`; `openwrt-*`: `curl` `gzip` `gdisk` `parted` `libguestfs`; `windows-11`: `curl` `7zip` `xorriso` |
+| To build images | `virt-install` `openssh`; cloud images (`arch`, `debian`, `ubuntu`): `curl` `openssl`; `openwrt`: `curl` `gzip` `gptfdisk` `parted` `libguestfs`; `windows-11`: `curl` `7zip` `libisoburn` | `virt-install` `openssh`; cloud images (`arch`, `debian`, `ubuntu`): `curl` `openssl`; `openwrt`: `curl` `gzip` `gdisk` `parted` `libguestfs`; `windows-11`: `curl` `7zip` `xorriso` |
 | Single features | `python-pillow` (crops, several monitors), `qemu-hw-display-virtio-gpu-pci` (`--resolution`, `--displays`), `qemu-hw-usb-host` (`usb add`, `up --usb`), `guestfs-tools` (`desk diff`), `gstreamer` `gst-plugins-base` `gst-plugins-good` (`desk record`), `github-cli` (`desk update` from a repository that needs a login) | `python3-pillow`, `qemu-device-display-virtio-gpu-pci`, `qemu-device-usb-host`, `guestfs-tools`, `gstreamer1` `gstreamer1-plugins-base` `gstreamer1-plugins-good`, `gh` |
 
 The user needs `/dev/kvm` (the `kvm` group where it is not open to everybody); VMs run under

@@ -1,5 +1,5 @@
 #!/bin/sh
-# OpenWrt 25.12: run by desk as root with BusyBox ash (no bash on OpenWrt) at every warm-up.
+# OpenWrt: run by desk as root with BusyBox ash (no bash on OpenWrt) at every warm-up.
 set -e
 
 apk update >/dev/null

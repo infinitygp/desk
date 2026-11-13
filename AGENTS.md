@@ -70,10 +70,13 @@ guest; whatever talks to one is tried in one before it is committed:
   NAME` for an image of each kind that uses it: it reinstalls or re-warms what the change touches,
   selftests the new build and switches to it only then. `desk image build --force` switches
   without testing.
-- A desktop goes into a distro's `desktops` list, an addon's distro into its `distros`, once an
-  image of the two was built and passed its selftest. An image whose blocks are new to this host
-  is added for the check (`desk image add`) and removed with its builds afterwards unless the
-  user asked for it.
+- A desktop goes into the `desktops` list of the distro's version it was tried on (its
+  `[versions.N]` table in the distro's `block.toml`; the block's own list only when every version
+  without a list of its own was tried with it), an addon's distro into its `distros` (the block's
+  name, `fedora`, only when it was tried on every version), once an image of the two was built and
+  passed its selftest. A new version of a distro goes into its `[versions]` the same way. An image
+  whose blocks are new to this host is added for the check (`desk image add`) and removed with its
+  builds afterwards unless the user asked for it.
 - `bin/desk image shot NAME` shows the screen of an install that is running; a graphical
   installer that waits for an answer is the usual reason an install hangs.
 - A build takes long enough for the code to change under it: run it from a copy of the commit,

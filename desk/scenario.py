@@ -16,7 +16,7 @@ from datetime import UTC
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from . import a11y, browser, clock, disks, display, evidence, guest, hubs, record, runs, usb, usbvfiod, winagent
-from .config import DeskError, NotDone, derived_from, load_image, parse_name
+from .config import DeskError, NotDone, blocks, derived_from, load_image, parse_name
 from .steps import Steps
 
 # Exactly one per step; the value is the action's argument.
@@ -126,7 +126,7 @@ VALUES = {
     "save": (lambda v: isinstance(v, str) and re.fullmatch(r"[A-Z][A-Z0-9_]*", v) is not None,
              "a NAME in capitals, used as {NAME} by later steps"),
     "only": (lambda v: isinstance(v, list) and bool(v) and all(_text(x) for x in v),
-             "a list of images or their blocks, e.g. [\"kde\"] or [\"arch\", \"fedora-44-gnome\"]"),
+             "a list of images or their blocks, e.g. [\"kde\"], [\"fedora\"] or [\"arch\", \"fedora-44-gnome\"]"),
 }
 # What an [[observe]] table takes: a session started before the first step (start = "before") or
 # by an observe_start step (start = "step"), stopped by an observe_stop step or when the run ends.
@@ -294,14 +294,15 @@ def load(path: Path) -> dict:
 
 def image_blocks(name: str) -> set[str]:
     """What `only` matches an image by: its name and the blocks it is made of (distro, desktop,
-    addons), those of the image it was saved from for a derived one. Read from the names alone, so
-    an image this host has not defined is matched as on a host that has."""
+    addons; a distro with versions by its block's name too, fedora for fedora-44), those of the
+    image it was saved from for a derived one. Read from the names alone, so an image this host has
+    not defined is matched as on a host that has."""
     found: set[str] = set()
     while name and name not in found:
         found.add(name)
         parts = parse_name(name)
         if parts:
-            found |= {parts[0], *([parts[1]] if parts[1] else []), *parts[2]}
+            found |= {parts[0], blocks("distros")[parts[0]].name, *([parts[1]] if parts[1] else []), *parts[2]}
         name = derived_from(name)
     return found
 

@@ -81,6 +81,29 @@ class Fingerprints(unittest.TestCase):
             self.assertEqual(images.warm_fingerprint(spec), images.warm_fingerprint(other))
             self.assertEqual(images.install_fingerprint(spec), images.install_fingerprint(other))
 
+    def test_files_of_a_distro_with_versions_are_named_as_the_versions(self):
+        from desk.config import IMAGES_DIR, INSTALL_KEYS
+
+        f44, f45, openwrt = load_image("fedora-44-gnome"), load_image("fedora-45-gnome"), load_image("openwrt-25.12")
+        ks = Path(f44.kickstart)
+        self.assertEqual(ks, IMAGES_DIR / "distros" / "fedora" / "ks.cfg")
+        # As when each version was a block of its own, so the builds made then stay current.
+        self.assertEqual((images._named(ks, f44), images._named(ks, f45)), ("distros/fedora-44/ks.cfg",
+                                                                             "distros/fedora-45/ks.cfg"))
+        self.assertEqual(images._named(ks), "distros/fedora/ks.cfg")
+        self.assertEqual(images._named(Path(f44.install[0]), f44), "desktops/gnome/install.sh")
+        self.assertEqual(json.loads(images._settings(f44, INSTALL_KEYS))["kickstart"], "distros/fedora-44/ks.cfg")
+        self.assertEqual(images._named(Path(openwrt.disk_files) / "etc" / "rc.local", openwrt),
+                         "distros/openwrt-25.12/disk/etc/rc.local")
+        with mock.patch.object(images.hashlib, "sha256") as sha:
+            images.install_fingerprint(openwrt)
+        hashed = b"".join(c.args[0] for c in sha.return_value.update.call_args_list)
+        self.assertIn(b"distros/openwrt-25.12/disk/etc/rc.local\0", hashed)
+        self.assertNotIn(b"distros/openwrt/", hashed)
+        # The distro's name itself is no setting of the guest.
+        arch = load_image("arch-gnome")
+        self.assertEqual(images.warm_fingerprint(replace(arch, distro=None)), images.warm_fingerprint(arch))
+
     def test_install_scripts_are_part_of_the_install(self):
         from unittest import mock
 

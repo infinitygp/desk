@@ -972,7 +972,7 @@ class SeveralImages(unittest.TestCase):
 
     def test_only_matches_an_image_by_its_name_and_blocks(self):
         self.assertEqual(scenario.image_blocks("fedora-44-gnome-cockpit"),
-                         {"fedora-44-gnome-cockpit", "fedora-44", "gnome", "cockpit"})
+                         {"fedora-44-gnome-cockpit", "fedora-44", "fedora", "gnome", "cockpit"})
         self.assertEqual(scenario.image_blocks("windows-11"), {"windows-11"})
         data = scenario.load(write(self.FILE))
         close, quit_ = data["step"][1], data["step"][2]
@@ -980,8 +980,18 @@ class SeveralImages(unittest.TestCase):
         self.assertFalse(scenario.is_for(close, "fedora-44-kde"))
         self.assertTrue(scenario.is_for(quit_, "fedora-44-kde") and scenario.is_for(quit_, "arch-gnome"))
         self.assertFalse(scenario.is_for(quit_, "fedora-44-gnome"))
-        # Exact block names: "fedora" is no block of fedora-44.
-        self.assertFalse(scenario.is_for({"only": ["fedora"]}, "fedora-44-gnome"))
+        # A distro with versions also by its block's name, which stands for all of them.
+        self.assertEqual(scenario.image_blocks("fedora-45-gnome"), {"fedora-45-gnome", "fedora-45", "fedora", "gnome"})
+        for image in ("fedora-44-gnome", "fedora-45-gnome", "fedora-44-gnome-cockpit"):
+            self.assertTrue(scenario.is_for({"only": ["fedora"]}, image), image)
+        self.assertTrue(scenario.is_for({"only": ["fedora-44"]}, "fedora-44-gnome"))
+        self.assertFalse(scenario.is_for({"only": ["fedora-44"]}, "fedora-45-gnome"))
+        self.assertFalse(scenario.is_for({"only": ["fedora"]}, "arch-gnome"))
+        # Exact block names otherwise: "fedo" is no block of fedora-44, "gnom" none of gnome.
+        self.assertFalse(scenario.is_for({"only": ["fedo", "gnom"]}, "fedora-44-gnome"))
+        data = scenario.load(write('image = "fedora-44-gnome"\nimages = ["fedora-45-gnome", "arch-gnome"]\n'
+                                   '[[step]]\nexec = "true"\nonly = ["fedora"]\n[[step]]\nexec = "true"\nonly = ["arch"]\n'))
+        self.assertEqual([st["only"] for st in data["step"]], [["fedora"], ["arch"]])
 
     def test_mistakes_are_refused_before_anything_runs(self):
         for bad, said in (
@@ -995,6 +1005,8 @@ class SeveralImages(unittest.TestCase):
              "step 1: only names kde, which none of the scenario's images"),
             ('image = "fedora-44-gnome"\nimages = ["arch-gnome"]\n[[step]]\nexec = "true"\nonly = ["arch"]',
              "every step has an only that leaves out fedora-44-gnome: nothing would be checked"),
+            ('image = "arch-gnome"\n[[step]]\nexec = "true"\nonly = ["fedora"]',
+             "step 1: only names fedora, which none of the scenario's images"),
             ('image = "fedora-44-gnome"\nimages = ["arch-gnome", "debian-13-gnome"]\n[build]\nrun = "make"\n'
              '[build.image.arch-gnome]\nrun = "make DISTRO=arch"', r"add a \[build.image.debian-13-gnome\] table"),
         ):
