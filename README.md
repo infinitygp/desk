@@ -652,8 +652,9 @@ into a browser window whose focus is not in a text field is refused. Walks of th
   libvirt has no element for it): a directory only this user reaches and the only one tried
   where SELinux lets the VMs create sockets besides libvirt's own; a run started without
   `$XDG_RUNTIME_DIR` has no picture of monitors 2 and on, and `desk view --monitor 2` says so.
-  With `--control` the pointer of such a monitor lands on a Windows guest's first one, at the same
-  coordinates: its absolute tablet reaches only the primary monitor (see Monitors).
+  QEMU moves the pointer of such a monitor with the absolute tablet, which Windows maps onto the
+  primary monitor: a click would land on monitor 1, so on Windows `--control` passes on keys but not
+  the pointer of monitors 2 and on.
 - Programs that show runs (a dashboard, a session viewer) read `desk ls --json` and take
   screenshots with `desk shot --peek -o FILE`. Neither counts as activity: the idle clock that
   `desk gc` and `DESK_TTL` go by, the run's timeline and its report stay as they were, so a run

@@ -795,7 +795,8 @@ def cmd_view(args) -> None:
         run.dom()
         w, h = view.start(run, args.socket, args.monitor, args.control)
         print(f"monitor {args.monitor} of {run.displays} of run {run.id} ({w}x{h}): {Path(args.socket).absolute()}, "
-              + ("keys and pointer reach the guest" if args.control else "view only")
+              + (("keys and pointer reach the guest" if view.pointer_reaches(run, args.monitor) else
+                  "keys reach the guest, the pointer not: Windows puts it on monitor 1") if args.control else "view only")
               + f" (desk view --stop {Path(args.socket).absolute()}; desk down ends it)")
         return
     if args.monitor != 1 or args.control:

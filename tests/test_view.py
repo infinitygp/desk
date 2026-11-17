@@ -87,7 +87,7 @@ class Proxy(unittest.TestCase):
         quiet.start()
         self.addCleanup(quiet.stop)
 
-    def connect(self, control: bool = False, frame: bytes = b""):
+    def connect(self, control: bool = False, frame: bytes = b"", pointer: bool = True):
         qemu = FakeQemu()
         up_view, up_qemu = socket.socketpair()
         threading.Thread(target=qemu.serve, args=(up_qemu, frame), daemon=True).start()
@@ -97,7 +97,7 @@ class Proxy(unittest.TestCase):
         patcher = mock.patch("desk.view._upstream", return_value=up_view)
         patcher.start()
         self.addCleanup(patcher.stop)
-        t = threading.Thread(target=view._serve_client, args=(served, "r", 1, control), daemon=True)
+        t = threading.Thread(target=view._serve_client, args=(served, "r", 1, control, pointer), daemon=True)
         t.start()
         self.addCleanup(client.close)
         return qemu, client, t
@@ -123,6 +123,21 @@ class Proxy(unittest.TestCase):
         t.join(5)
         qemu.done.wait(5)
         self.assertEqual(qemu.received, [KEY + POINTER + UPDATE_REQUEST])
+
+    def test_control_without_the_pointer_passes_the_rest(self):
+        qemu, client, t = self.connect(control=True, pointer=False)
+        client_hello(client)
+        client.sendall(KEY + POINTER + CUT_TEXT + QEMU_KEY + UPDATE_REQUEST)
+        client.shutdown(socket.SHUT_WR)
+        t.join(5)
+        qemu.done.wait(5)
+        self.assertEqual(qemu.received, [KEY + CUT_TEXT + QEMU_KEY + UPDATE_REQUEST])
+
+    def test_the_pointer_of_a_windows_guests_second_monitor_is_not_passed(self):
+        windows = runs.Run(id="w", image="windows-11", domain="d", ssh_port=1, user="u", created=0, displays=2)
+        linux = runs.Run(id="l", image="fedora-44-gnome", domain="d", ssh_port=1, user="u", created=0, displays=2)
+        self.assertEqual([view.pointer_reaches(r, m) for r in (windows, linux) for m in (1, 2)],
+                         [True, False, True, True])
 
     def test_a_message_the_filter_cannot_size_ends_the_connection(self):
         qemu, client, t = self.connect()
@@ -212,6 +227,11 @@ class Process(unittest.TestCase):
             self.addCleanup(c.close)
             self.assertEqual(client_hello(c, shared=0), SERVER_INIT)
             watchers.append(c)
+        # One that was killed outright is replaced by the next on its socket.
+        os.kill(view.listing(self.run_)[0]["pid"], 9)
+        time.sleep(0.3)
+        self.assertEqual(view.start(self.run_, str(path), monitor=2), (800, 600))
+        self.assertEqual([v["alive"] for v in view.listing(self.run_)], [True])
         self.assertEqual(view.stop(self.run_, str(path)), [str(path)])
         self.assertFalse(path.exists())
         for c in watchers:

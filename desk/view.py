@@ -7,6 +7,8 @@ password), the others through the sockets QEMU serves them on (virt.prepare_doma
 Without --control the process passes on only what a picture needs (pixel format, encodings,
 update requests) and drops keys, pointer, clipboard, desktop resizes and power requests, so a
 watcher cannot get in the agent's way; a message it cannot size ends that watcher's connection.
+With --control on a Windows guest's monitor 2 and on it drops the pointer alone: QEMU moves the
+absolute tablet, which Windows maps onto the primary monitor, so a click would land on monitor 1.
 Every watcher connects to QEMU as a shared client, so none disconnects another."""
 
 import json
@@ -71,6 +73,12 @@ def check_monitor(run, monitor: int) -> None:
                         "for runs started with $XDG_RUNTIME_DIR set by this desk (desk up again)")
 
 
+def pointer_reaches(run, monitor: int) -> bool:
+    from . import runs
+
+    return monitor == 1 or runs.spec_for(run).family != "windows"
+
+
 def start(run, path: str, monitor: int = 1, control: bool = False) -> tuple[int, int]:
     """Serve the monitor on PATH; the size of its picture, seen through PATH."""
     from . import runs
@@ -82,7 +90,10 @@ def start(run, path: str, monitor: int = 1, control: bool = False) -> tuple[int,
     with lock(run):
         for r in runs.all_runs():
             for v in listing(r):
-                if v["socket"] != str(sock) or not v["alive"]:
+                if v["socket"] != str(sock):
+                    continue
+                if not v["alive"]:
+                    (_dir(r) / f"{v['pid']}.json").unlink(missing_ok=True)  # replaced by this one
                     continue
                 if r.id == run.id and (v["monitor"], v["control"]) == (monitor, control):
                     return probe(sock)
@@ -245,40 +256,47 @@ def _upstream(run_id: str, monitor: int) -> socket.socket:
     return s
 
 
-# Client messages: type -> bytes after the type byte, or None for those of their own length.
-_SHOWN = {0: 19, 3: 9, 150: 9}  # SetPixelFormat, FramebufferUpdateRequest, EnableContinuousUpdates
-_DROPPED = {4: 7, 5: 5, 250: 3}  # KeyEvent, PointerEvent, xvp (power)
+# Client messages of a fixed size: type -> bytes after the type byte.
+_FIXED = {0: 19, 3: 9, 150: 9,  # SetPixelFormat, FramebufferUpdateRequest, EnableContinuousUpdates
+          4: 7, 5: 5, 250: 3}  # KeyEvent, PointerEvent, xvp (power)
+SHOWN = frozenset({0, 2, 3, 150})  # and SetEncodings (2)
+ALL_BUT_POINTER = frozenset({0, 2, 3, 150, 4, 6, 250, 251, 255})
 
 
-def _filter(client: socket.socket, up: socket.socket) -> None:
-    """Pass on what the picture needs, drop input; end on a message that cannot be sized."""
+def _message(client: socket.socket) -> tuple[int, bytes]:
+    """The next client message, whole; a type it cannot size ends the connection."""
+    t = _exact(client, 1)[0]
+    if t in _FIXED:
+        return t, bytes([t]) + _exact(client, _FIXED[t])
+    if t == 2:  # SetEncodings
+        head = _exact(client, 3)
+        return t, b"\x02" + head + _exact(client, 4 * struct.unpack(">H", head[1:])[0])
+    if t == 6:  # ClientCutText; a negative length is the extended clipboard's
+        head = _exact(client, 7)
+        return t, b"\x06" + head + _exact(client, abs(struct.unpack(">i", head[3:])[0]))
+    if t == 251:  # SetDesktopSize: it would resize the guest's monitor
+        head = _exact(client, 7)
+        return t, b"\xfb" + head + _exact(client, 16 * head[5])
+    if t == 255:  # QEMU: extended key event, audio
+        sub = _exact(client, 1)
+        if sub == b"\x00":
+            return t, b"\xff" + sub + _exact(client, 10)
+        if sub == b"\x01":
+            op = _exact(client, 2)
+            if op in (b"\0\0", b"\0\x01"):
+                return t, b"\xff" + sub + op
+            if op == b"\0\x02":
+                return t, b"\xff" + sub + op + _exact(client, 6)
+        raise ConnectionError(f"QEMU message {sub[0]} unknown to the filter")
+    raise ConnectionError(f"client message type {t} unknown to the filter")
+
+
+def _filter(client: socket.socket, up: socket.socket, passed: frozenset = SHOWN) -> None:
+    """Pass on the messages of the types given, drop the others."""
     while True:
-        t = _exact(client, 1)[0]
-        if t in _SHOWN:
-            up.sendall(bytes([t]) + _exact(client, _SHOWN[t]))
-        elif t == 2:  # SetEncodings
-            head = _exact(client, 3)
-            up.sendall(b"\x02" + head + _exact(client, 4 * struct.unpack(">H", head[1:])[0]))
-        elif t in _DROPPED:
-            _exact(client, _DROPPED[t])
-        elif t == 6:  # ClientCutText; a negative length is the extended clipboard's
-            _skip(client, abs(struct.unpack(">i", _exact(client, 7)[3:])[0]))
-        elif t == 251:  # SetDesktopSize: it would resize the guest's monitor
-            _skip(client, 16 * _exact(client, 7)[5])
-        elif t == 255:  # QEMU: extended key event, audio
-            sub = _exact(client, 1)[0]
-            if sub == 0:
-                _exact(client, 10)
-            elif sub == 1:
-                op = struct.unpack(">H", _exact(client, 2))[0]
-                if op == 2:
-                    _exact(client, 6)
-                elif op not in (0, 1):
-                    raise ConnectionError(f"QEMU audio operation {op} unknown to the view-only filter")
-            else:
-                raise ConnectionError(f"QEMU message {sub} unknown to the view-only filter")
-        else:
-            raise ConnectionError(f"client message type {t} unknown to the view-only filter")
+        t, msg = _message(client)
+        if t in passed:
+            up.sendall(msg)
 
 
 def _pump(src: socket.socket, dst: socket.socket) -> None:
@@ -295,7 +313,7 @@ def _close(*socks: socket.socket) -> None:
         s.close()
 
 
-def _serve_client(client: socket.socket, run_id: str, monitor: int, control: bool) -> None:
+def _serve_client(client: socket.socket, run_id: str, monitor: int, control: bool, pointer: bool = True) -> None:
     up = None
     try:
         client.settimeout(HANDSHAKE)
@@ -322,7 +340,10 @@ def _serve_client(client: socket.socket, run_id: str, monitor: int, control: boo
             _close(client, up)
 
         threading.Thread(target=down, daemon=True).start()
-        (_pump if control else _filter)(client, up)
+        if control and pointer:
+            _pump(client, up)
+        else:
+            _filter(client, up, ALL_BUT_POINTER if control else SHOWN)
     except (DeskError, OSError, ConnectionError) as e:
         print(f"[desk view] client of monitor {monitor}: {e}", file=sys.stderr, flush=True)
     finally:
@@ -330,7 +351,10 @@ def _serve_client(client: socket.socket, run_id: str, monitor: int, control: boo
 
 
 def _serve(run_id: str, monitor: int, control: bool, path: str) -> None:
+    from . import runs
+
     mine = RUNS / run_id / "view" / f"{os.getpid()}.json"
+    pointer = pointer_reaches(runs.load(run_id), monitor)
     os.umask(0o177)  # the socket: this user only
     srv = socket.socket(socket.AF_UNIX)
     srv.bind(path)
@@ -364,7 +388,8 @@ def _serve(run_id: str, monitor: int, control: bool, path: str) -> None:
             client, _ = srv.accept()
         except TimeoutError:
             continue
-        threading.Thread(target=_serve_client, args=(client, run_id, monitor, control), daemon=True).start()
+        threading.Thread(target=_serve_client, args=(client, run_id, monitor, control, pointer),
+                         daemon=True).start()
     end()
 
 
