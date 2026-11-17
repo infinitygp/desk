@@ -202,6 +202,99 @@ class Down(unittest.TestCase):
         self.assertIn("shots/0001.png", md)
 
 
+class Observer(unittest.TestCase):
+    """desk ls --json and desk shot --peek, for programs that watch runs without using them."""
+
+    def setUp(self):
+        import tempfile
+
+        from desk import runs
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.home = Path(tmp.name)
+        self.domains = {}
+        for target, value in (("desk.runs.RUNS", self.home / "runs"), ("desk.runs.HOME", self.home),
+                              ("desk.evidence.REPORTS", self.home / "reports"),
+                              ("desk.runs.conn", lambda: mock.Mock(listAllDomains=lambda flags: [])),
+                              ("desk.runs.lookup", self.domains.get)):
+            patch = mock.patch(target, value)
+            patch.start()
+            self.addCleanup(patch.stop)
+        self.runs = runs
+
+    def make_run(self, run_id: str, idle_hours: float = 0, running: bool = True, **fields):
+        import time
+
+        then = time.time() - idle_hours * 3600
+        run = self.runs.Run(id=run_id, image="fedora-44-gnome", domain=f"desk-{run_id}", ssh_port=1, user="tester",
+                            created=then, last_used=then, **fields)
+        run.dir.mkdir(parents=True)
+        run.save()
+        if running:
+            self.domains[run.domain] = mock.Mock(isActive=lambda: True,
+                                                 XMLDesc=lambda flags: str(run.dir / "disk.qcow2"))
+        return run
+
+    def ls(self, sizes=((1024, 768),)) -> list:
+        import io
+        import json
+
+        out = io.StringIO()
+        looked = {"side_effect": sizes} if isinstance(sizes, Exception) else {"return_value": list(sizes)}
+        with mock.patch("sys.stdout", out), mock.patch("desk.display.screen_sizes", **looked):
+            cli.cmd_ls(SimpleNamespace(json=True))
+        return json.loads(out.getvalue())
+
+    def test_no_runs_is_an_empty_list(self):
+        self.assertEqual(self.ls(), [])
+
+    def test_each_run_with_what_a_watcher_needs(self):
+        self.make_run("a", owner="session-1", label="claude @ work", holder=1, displays=1)
+        self.make_run("b", running=False)
+        with mock.patch("desk.runs.holder_alive", return_value=False):
+            a, b = self.ls()
+        self.assertEqual(a, {"id": "a", "image": "fedora-44-gnome", "state": "running", "usbvfiod_ended": False,
+                             "idle_seconds": 0, "label": "claude @ work", "owner": "session-1", "agent_alive": False,
+                             "monitors": 1, "screens": [[1024, 768]], "dir": str(self.home / "runs" / "a")})
+        # Its domain gone: listed, not looked at.
+        self.assertEqual((b["state"], b["screens"], b["owner"], b["label"], b["agent_alive"]),
+                         ("stopped", None, None, None, None))
+
+    def test_screens_that_could_not_be_looked_at_are_null_not_guessed(self):
+        import libvirt
+
+        self.make_run("a")
+        self.assertIsNone(self.ls(sizes=libvirt.libvirtError("Domain not found"))[0]["screens"])
+
+    def test_peeking_is_no_activity(self):
+        import json
+        import struct
+
+        run = self.make_run("old", idle_hours=3)
+        png = b"\x89PNG\r\n\x1a\n" + struct.pack(">I4sII", 13, b"IHDR", 800, 600)
+        out = self.home / "peek.png"
+        args = SimpleNamespace(run="old", peek=True, output=str(out), settle=0, region=None, window=None, zoom=1,
+                               label=None)
+        with mock.patch("desk.display.screenshot", return_value=png), mock.patch("sys.stdout"):
+            cli.cmd_shot(args)
+            self.ls()
+        self.assertEqual(out.read_bytes(), png)
+        self.assertEqual(json.loads((run.dir / "run.json").read_text())["last_used"], run.last_used)
+        self.assertEqual(json.loads((run.dir / "run.json").read_text())["shots"], 0)
+        self.assertFalse((run.dir / "log.jsonl").exists())
+        self.assertFalse(run.in_use())
+        with mock.patch("desk.evidence.collect", return_value=self.home / "reports" / "old"):
+            removed = self.runs.gc_idle(verbose=False)
+        self.assertEqual(len(removed), 1)
+        self.assertFalse(run.dir.exists())
+
+    def test_peeking_needs_a_file_of_its_own(self):
+        args = SimpleNamespace(run="old", peek=True, output=None)
+        with self.assertRaisesRegex(config.DeskError, "--peek writes only where -o says"):
+            cli.cmd_shot(args)
+
+
 class Copy(unittest.TestCase):
     def copy(self, rc: int, family: str = "linux"):
         run = mock.Mock(ssh_port=1, user="tester")

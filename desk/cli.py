@@ -394,12 +394,35 @@ def cmd_diff(args) -> None:
 def cmd_ls(args) -> None:
     from . import usbvfiod
 
+    listed = []
     for r in runs.all_runs():
-        state = "running" if r.live_domain() is not None else "stopped"
-        if r.usbvfiod and not usbvfiod.alive(r):
-            state += ", usbvfiod ended"
+        dom = r.live_domain()
+        state = "running" if dom is not None else "stopped"
+        ended = bool(r.usbvfiod) and not usbvfiod.alive(r)
+        if args.json:
+            listed.append({"id": r.id, "image": r.image, "state": state, "usbvfiod_ended": ended,
+                           "idle_seconds": round(r.idle()), "label": r.label or None, "owner": r.owner,
+                           "agent_alive": runs.holder_alive(r) if r.holder else None,
+                           "monitors": r.displays, "screens": _screens(dom), "dir": str(r.dir)})
+            continue
         held = (r.label or "-") + ("" if not r.holder or runs.holder_alive(r) else " (agent gone)")
-        print(f"{r.id}\t{r.image}\t{state}\tidle {r.idle() / 60:.0f} min\t{held}\tssh:{r.ssh_port}\t{r.dir}")
+        print(f"{r.id}\t{r.image}\t{state}{', usbvfiod ended' if ended else ''}\tidle {r.idle() / 60:.0f} min\t"
+              f"{held}\tssh:{r.ssh_port}\t{r.dir}")
+    if args.json:
+        print(json.dumps(listed, indent=2))
+
+
+def _screens(dom) -> list[list[int]] | None:
+    """The size of each monitor as the guest drives it now; None for a stopped run, or when the
+    look failed (the domain went down meanwhile)."""
+    if dom is None:
+        return None
+    import libvirt
+
+    try:
+        return [list(size) for size in display.screen_sizes(dom)]
+    except (libvirt.libvirtError, DeskError):
+        return None
 
 
 def cmd_gc(args) -> None:
@@ -411,7 +434,9 @@ def cmd_gc(args) -> None:
 
 
 def cmd_shot(args) -> None:
-    run = runs.resolve(args.run)
+    if args.peek and not args.output:
+        raise DeskError("--peek writes only where -o says: it leaves the run's shots and report alone")
+    run = runs.resolve(args.run, activity=not args.peek)
     dom = run.dom()
     png = display.wait_stable(dom, timeout=args.settle)[0] if args.settle > 0 else display.screenshot(dom)
     box = None
@@ -425,6 +450,10 @@ def cmd_shot(args) -> None:
         box = _window_box(run, args.window)
     if box or args.zoom != 1:
         png = display.crop(png, box or (0, 0, *display.png_size(png)), zoom=args.zoom)
+    if args.peek:
+        Path(args.output).write_bytes(png)
+        print(f"{args.output} {'x'.join(map(str, display.png_size(png)))}")
+        return
     _emit_shot(run, png, args.output, args.label or "")
 
 
@@ -1358,7 +1387,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, default=200, help="max paths per category")
     p.set_defaults(func=cmd_diff)
 
-    sub.add_parser("ls", help="list runs").set_defaults(func=cmd_ls)
+    p = sub.add_parser("ls", help="list runs")
+    p.add_argument("--json", action="store_true", help="as a JSON array, for other programs (README, Runs)")
+    p.set_defaults(func=cmd_ls)
     sub.add_parser("gc", help="destroy runs idle longer than $DESK_TTL s (default 2 h) and orphaned VMs"
                    ).set_defaults(func=cmd_gc)
 
@@ -1369,6 +1400,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--region", metavar="X,Y,W,H", help="only this part of the screen")
     p.add_argument("--window", metavar="NAME", help="only the window with NAME in its title or application")
     p.add_argument("--zoom", type=float, default=1.0, help="enlarge by this factor, e.g. 2, to see details")
+    p.add_argument("--peek", action="store_true",
+                   help="a look from outside the test, with -o: not activity for gc, not in the run's report")
     p.set_defaults(func=cmd_shot)
 
     p = sub.add_parser("wait", help="wait until the screen stops changing, or until a command in the guest succeeds")

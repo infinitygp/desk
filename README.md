@@ -636,6 +636,27 @@ into a browser window whose focus is not in a text field is refused. Walks of th
   host port only while connected, so while a guest reboots no other run's `desk forward` takes it.
 - `desk view`: every run has a VNC display on 127.0.0.1 with a per-run password; the command
   prints the SSH tunnel to use from a workstation.
+- Programs that show runs (a dashboard, a session viewer) read `desk ls --json` and take
+  screenshots with `desk shot --peek -o FILE`. Neither counts as activity: the idle clock that
+  `desk gc` and `DESK_TTL` go by, the run's timeline and its report stay as they were, so a run
+  that only somebody watching keeps open is still taken down. `--peek` writes only the file `-o`
+  names, never into the run's `shots/`.
+- `desk ls --json` prints a JSON array, `[]` without runs, one object per run:
+
+  | Field | |
+  |---|---|
+  | `id`, `image` | the run and the image it started from |
+  | `state` | `running`, or `stopped` when its domain is gone (QEMU ended, destroyed outside desk) |
+  | `usbvfiod_ended` | the run's usbvfiod has ended (`desk up --usbvfiod`); `false` without one |
+  | `idle_seconds` | since the last command that used the run |
+  | `label` | who holds it, as `desk ls` shows it (scenario, `--label` / `$DESK_LABEL`, agent @ directory); `null`: none |
+  | `owner` | `$AGENT_SESSION` at `desk up`, whatever the starting program put there to find its runs again; `null`: not set |
+  | `agent_alive` | the coding agent that started the run still runs; `null`: no agent started it |
+  | `monitors` | how many monitors the run has |
+  | `screens` | `[width, height]` of each monitor as the guest drives it now; `null` when stopped or when the look failed. It takes a screenshot of each monitor, about 0.1 s per run |
+  | `dir` | the run's directory |
+
+  Fields may be added later; the ones above keep their names and meaning.
 
 ## Scenarios
 

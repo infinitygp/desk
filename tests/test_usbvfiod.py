@@ -308,7 +308,7 @@ class Listing(InRuns):
                                            "bus": "pci.14"})
         with mock.patch("desk.runs.lookup", return_value=None), mock.patch.object(usbvfiod, "_alive", return_value=False), \
                 mock.patch("builtins.print") as out:
-            cli.cmd_ls(SimpleNamespace())
+            cli.cmd_ls(SimpleNamespace(json=False))
         lines = {c.args[0].split("\t")[0]: c.args[0].split("\t")[2] for c in out.call_args_list}
         self.assertEqual(lines, {"r1": "stopped", served.id: "stopped, usbvfiod ended"})
 

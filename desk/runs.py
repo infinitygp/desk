@@ -145,6 +145,9 @@ class Run:
     # directory it works in; holder is the agent's PID, to tell when it is gone.
     label: str = ""
     holder: int = 0
+    # $AGENT_SESSION at desk up: the session of whoever started the run, for programs that show
+    # runs by session (desk ls --json); None: not set.
+    owner: str | None = None
     # The guest's time zone and keyboard layout, as its provisioning set them; "": the image's
     # (runs from before desk kept them).
     timezone: str = ""
@@ -276,8 +279,10 @@ def all_runs() -> list[Run]:
     return sorted(found, key=lambda r: r.created)
 
 
-def resolve(run_id: str | None) -> Run:
-    """Explicit id, then $DESK_RUN, then the only active run. Counts as activity for gc."""
+def resolve(run_id: str | None, activity: bool = True) -> Run:
+    """Explicit id, then $DESK_RUN, then the only active run. Counts as activity for gc unless
+    `activity` is False: a look from outside (desk shot --peek) leaves the idle clock, the hold
+    that keeps gc away and the timeline alone."""
     run_id = run_id or os.environ.get("DESK_RUN")
     if run_id:
         # A directory in RUNS, not further: runs named before names were checked still resolve.
@@ -292,9 +297,10 @@ def resolve(run_id: str | None) -> Run:
             raise DeskError("several active runs, pick one with -r/--run or DESK_RUN: "
                             + ", ".join(r.id for r in active))
         run = active[0]
-    run.touch()
-    run.hold()
-    run.log_event(argv=logged_argv(sys.argv[1:]))
+    if activity:
+        run.touch()
+        run.hold()
+        run.log_event(argv=logged_argv(sys.argv[1:]))
     return run
 
 
@@ -752,7 +758,8 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
               user=spec.user, created=now, last_used=now, vnc_password=secrets.token_urlsafe(6)[:8],
               agent_port=free_port() if spec.agent_port else 0, displays=displays,
               resolution=list(resolution) if resolution else None,
-              label=label or auto_label, holder=holder, shared_memory=shared_memory,
+              label=label or auto_label, holder=holder, owner=os.environ.get("AGENT_SESSION") or None,
+              shared_memory=shared_memory,
               timezone=made.get("timezone", spec.timezone), layout=made.get("layout", spec.layout))
     run.save()
     # In use by this process until it ends: a scenario or selftest keeps its run through steps

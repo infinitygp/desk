@@ -304,6 +304,17 @@ class Up(unittest.TestCase):
         self.assertTrue(run.in_use())  # held by this process, so gc leaves it to it
         self.assertFalse(runs._locked)
 
+    def test_the_owner_is_the_session_in_the_environment_at_up(self):
+        from desk.config import load_image
+
+        for i, (session, owner) in enumerate((("s-1", "s-1"), (None, None), ("", None))):
+            with self.subTest(session=session), mock.patch.dict(os.environ), mock.patch("sys.stdout"):
+                os.environ.pop("AGENT_SESSION", None)
+                if session is not None:
+                    os.environ["AGENT_SESSION"] = session
+                runs.up(load_image("fedora-44-gnome"), run_id=f"t{i}")
+                self.assertEqual(json.loads((self.home / "runs" / f"t{i}" / "run.json").read_text())["owner"], owner)
+
     def test_other_sizes_than_the_warm_states_boot_cold(self):
         from dataclasses import replace
 
