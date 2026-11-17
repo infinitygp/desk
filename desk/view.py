@@ -1,0 +1,372 @@
+"""A run's screen for another program (desk view --socket PATH): a background process serves one
+monitor as plain VNC (RFB, no authentication) on a unix socket only this user may open, for as
+long as the run exists. It speaks to QEMU itself, so the run's VNC password stays with libvirt:
+monitor 1 through libvirt's VNC display (a connection libvirt hands over without asking for the
+password), the others through the sockets QEMU serves them on (virt.prepare_domain_xml).
+
+Without --control the process passes on only what a picture needs (pixel format, encodings,
+update requests) and drops keys, pointer, clipboard, desktop resizes and power requests, so a
+watcher cannot get in the agent's way; a message it cannot size ends that watcher's connection.
+Every watcher connects to QEMU as a shared client, so none disconnects another."""
+
+import json
+import os
+import signal
+import socket
+import struct
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+
+from .config import PROJECT, RUNS, DeskError
+
+HANDSHAKE = 10  # seconds a client and QEMU each get for the RFB handshake
+UNIX_PATH_MAX = 107  # sun_path holds 108 bytes, the last a NUL
+
+
+def _dir(run) -> Path:
+    return run.dir / "view"
+
+
+def _alive(pid: int) -> bool:
+    try:
+        return b"desk.view" in Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return False
+
+
+def _answers(path: Path) -> bool:
+    with socket.socket(socket.AF_UNIX) as s:
+        s.settimeout(1)
+        return s.connect_ex(str(path)) == 0
+
+
+def listing(run) -> list[dict]:
+    out = []
+    d = _dir(run)
+    for f in sorted(d.glob("*.json")) if d.exists() else []:
+        try:
+            info = json.loads(f.read_text())
+        except (OSError, ValueError):
+            continue
+        out.append({**info, "alive": _alive(info["pid"])})
+    return out
+
+
+def lock(run):
+    from .runs import _flock
+
+    return _flock(run.dir / ".view.lock", f"another command changing views of run {run.id}", 60)
+
+
+def check_monitor(run, monitor: int) -> None:
+    """Refuse a monitor the run does not have or whose picture QEMU does not serve."""
+    if not 1 <= monitor <= run.displays:
+        raise DeskError(f"run {run.id} has {run.displays} monitor{'s' if run.displays > 1 else ''}; "
+                        f"--monitor is 1 to {run.displays}")
+    if monitor > 1 and not (run.vnc_dir and (Path(run.vnc_dir) / f"{monitor}.sock").is_socket()):
+        raise DeskError(f"run {run.id} has no picture of monitor {monitor}: QEMU serves monitors 2 and on only "
+                        "for runs started with $XDG_RUNTIME_DIR set by this desk (desk up again)")
+
+
+def start(run, path: str, monitor: int = 1, control: bool = False) -> tuple[int, int]:
+    """Serve the monitor on PATH; the size of its picture, seen through PATH."""
+    from . import runs
+
+    sock = Path(path).absolute()
+    if len(str(sock).encode()) > UNIX_PATH_MAX:
+        raise DeskError(f"{sock} is longer than a unix socket path may be ({UNIX_PATH_MAX} bytes); take a shorter one")
+    check_monitor(run, monitor)
+    with lock(run):
+        for r in runs.all_runs():
+            for v in listing(r):
+                if v["socket"] != str(sock) or not v["alive"]:
+                    continue
+                if r.id == run.id and (v["monitor"], v["control"]) == (monitor, control):
+                    return probe(sock)
+                raise DeskError(f"{sock} shows monitor {v['monitor']} of run {r.id} already "
+                                f"(desk -r {r.id} view --stop {sock} first)")
+        if sock.is_socket():
+            if _answers(sock):
+                raise DeskError(f"{sock} is the socket of another program; take another path")
+            sock.unlink()  # left by a process that is gone
+        elif sock.exists() or sock.is_symlink():
+            raise DeskError(f"{sock} exists and is not a socket; take another path")
+        if not sock.parent.is_dir():
+            raise DeskError(f"{sock.parent} is not a directory")
+        d = _dir(run)
+        d.mkdir(exist_ok=True)
+        log_path = d / f"{sock.name}.log"
+        with open(log_path, "a") as log:
+            p = subprocess.Popen([sys.executable, "-m", "desk.view", run.id, str(monitor), "1" if control else "0",
+                                  str(sock)], cwd=PROJECT, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+                                 start_new_session=True)
+        (d / f"{p.pid}.json").write_text(json.dumps({"socket": str(sock), "monitor": monitor, "control": control,
+                                                     "pid": p.pid}))
+        deadline = time.monotonic() + 15
+        while not (sock.is_socket() and _answers(sock)):
+            if p.poll() is not None or time.monotonic() > deadline:
+                _stop(run, None, pid=p.pid)
+                tail = log_path.read_text(errors="replace").strip()[-300:]
+                raise DeskError(f"serving monitor {monitor} of run {run.id} on {sock} failed" +
+                                (f": {tail}" if tail else ""))
+            time.sleep(0.1)
+        try:
+            # A look through the socket itself: QEMU answers on it with the picture's size.
+            size = probe(sock)
+        except DeskError:
+            _stop(run, None, pid=p.pid)
+            raise
+    run.log_event(view=str(sock), monitor=monitor, control=control)
+    return size
+
+
+def stop(run, path: str | None = None) -> list[str]:
+    with lock(run):
+        return _stop(run, str(Path(path).absolute()) if path else None)
+
+
+def _stop(run, path: str | None, *, pid: int | None = None) -> list[str]:
+    stopped, held = [], []
+    for v in listing(run):
+        if (path is not None and v["socket"] != path) or (pid is not None and v["pid"] != pid):
+            continue
+        (_dir(run) / f"{v['pid']}.json").unlink(missing_ok=True)
+        if v["alive"]:
+            try:
+                os.killpg(v["pid"], signal.SIGTERM)
+                held.append(v["pid"])
+            except ProcessLookupError:
+                pass
+        stopped.append(v["socket"])
+    deadline = time.monotonic() + 5
+    while any(_alive(p) for p in held) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    for s in map(Path, stopped):
+        # The process removes its socket as it ends; one that was killed outright leaves it.
+        if s.is_socket() and not _answers(s):
+            s.unlink(missing_ok=True)
+    return stopped
+
+
+# The RFB protocol (RFC 6143) and QEMU's additions to it.
+
+def _exact(s: socket.socket, n: int) -> bytes:
+    buf = b""
+    while len(buf) < n:
+        chunk = s.recv(n - len(buf))
+        if not chunk:
+            raise ConnectionError("connection closed")
+        buf += chunk
+    return buf
+
+
+def _skip(s: socket.socket, n: int) -> None:
+    while n:
+        n -= len(_exact(s, min(n, 65536)))
+
+
+def _version(data: bytes) -> int:
+    """The minor version a client speaks: 3, 7 or 8."""
+    if len(data) != 12 or not data.startswith(b"RFB ") or data[7:8] != b"." or not data[4:11].replace(b".", b"").isdigit():
+        raise ConnectionError(f"not an RFB client: {data!r}")
+    major, minor = int(data[4:7]), int(data[8:11])
+    return 8 if (major, minor) >= (3, 8) else 7 if (major, minor) == (3, 7) else 3
+
+
+def _refuse(client: socket.socket, minor: int, reason: str) -> None:
+    text = reason.encode()
+    client.sendall((b"\0\0\0\0" if minor == 3 else b"\0") + struct.pack(">I", len(text)) + text)
+
+
+def _greet(client: socket.socket, minor: int) -> None:
+    """Security type None; then the client's ClientInit, whose shared flag QEMU never sees."""
+    if minor == 3:
+        client.sendall(struct.pack(">I", 1))
+    else:
+        client.sendall(b"\x01\x01")
+        if _exact(client, 1) != b"\x01":
+            raise ConnectionError("the client chose a security type it was not offered")
+        if minor == 8:
+            client.sendall(struct.pack(">I", 0))
+    _exact(client, 1)
+
+
+def handshake(s: socket.socket) -> bytes:
+    """Log in to an RFB server that asks for no password, as a shared client; its ServerInit."""
+    if not _exact(s, 12).startswith(b"RFB 003."):
+        raise DeskError("the display does not speak RFB 3.x")
+    s.sendall(b"RFB 003.008\n")
+    types = _exact(s, _exact(s, 1)[0])
+    if not types:
+        raise DeskError("the display refused: " + _exact(s, struct.unpack(">I", _exact(s, 4))[0]).decode(errors="replace"))
+    if 1 not in types:
+        raise DeskError(f"the display asks for authentication (security types {list(types)})")
+    s.sendall(b"\x01")
+    if struct.unpack(">I", _exact(s, 4))[0] != 0:
+        raise DeskError("the display refused the connection")
+    s.sendall(b"\x01")
+    head = _exact(s, 24)
+    return head + _exact(s, struct.unpack(">I", head[20:24])[0])
+
+
+def probe(path: Path) -> tuple[int, int]:
+    with socket.socket(socket.AF_UNIX) as s:
+        s.settimeout(HANDSHAKE * 2)
+        try:
+            s.connect(str(path))
+            init = handshake(s)
+        except (OSError, ConnectionError) as e:
+            raise DeskError(f"no picture on {path}: {e}") from None
+    return struct.unpack(">HH", init[:4])
+
+
+def _upstream(run_id: str, monitor: int) -> socket.socket:
+    from . import runs
+
+    run = runs.load(run_id)
+    check_monitor(run, monitor)
+    if monitor == 1:
+        import libvirt
+
+        try:
+            fd = run.dom().openGraphicsFD(0, libvirt.VIR_DOMAIN_OPEN_GRAPHICS_SKIPAUTH)
+        except libvirt.libvirtError as e:
+            raise DeskError(f"run {run_id} has no VNC display: {e}") from None
+        return socket.socket(fileno=fd)
+    s = socket.socket(socket.AF_UNIX)
+    try:
+        s.connect(str(Path(run.vnc_dir) / f"{monitor}.sock"))
+    except OSError as e:
+        s.close()
+        raise DeskError(f"monitor {monitor} of run {run_id} does not answer: {e}") from None
+    return s
+
+
+# Client messages: type -> bytes after the type byte, or None for those of their own length.
+_SHOWN = {0: 19, 3: 9, 150: 9}  # SetPixelFormat, FramebufferUpdateRequest, EnableContinuousUpdates
+_DROPPED = {4: 7, 5: 5, 250: 3}  # KeyEvent, PointerEvent, xvp (power)
+
+
+def _filter(client: socket.socket, up: socket.socket) -> None:
+    """Pass on what the picture needs, drop input; end on a message that cannot be sized."""
+    while True:
+        t = _exact(client, 1)[0]
+        if t in _SHOWN:
+            up.sendall(bytes([t]) + _exact(client, _SHOWN[t]))
+        elif t == 2:  # SetEncodings
+            head = _exact(client, 3)
+            up.sendall(b"\x02" + head + _exact(client, 4 * struct.unpack(">H", head[1:])[0]))
+        elif t in _DROPPED:
+            _exact(client, _DROPPED[t])
+        elif t == 6:  # ClientCutText; a negative length is the extended clipboard's
+            _skip(client, abs(struct.unpack(">i", _exact(client, 7)[3:])[0]))
+        elif t == 251:  # SetDesktopSize: it would resize the guest's monitor
+            _skip(client, 16 * _exact(client, 7)[5])
+        elif t == 255:  # QEMU: extended key event, audio
+            sub = _exact(client, 1)[0]
+            if sub == 0:
+                _exact(client, 10)
+            elif sub == 1:
+                op = struct.unpack(">H", _exact(client, 2))[0]
+                if op == 2:
+                    _exact(client, 6)
+                elif op not in (0, 1):
+                    raise ConnectionError(f"QEMU audio operation {op} unknown to the view-only filter")
+            else:
+                raise ConnectionError(f"QEMU message {sub} unknown to the view-only filter")
+        else:
+            raise ConnectionError(f"client message type {t} unknown to the view-only filter")
+
+
+def _pump(src: socket.socket, dst: socket.socket) -> None:
+    while data := src.recv(65536):
+        dst.sendall(data)
+
+
+def _close(*socks: socket.socket) -> None:
+    for s in socks:
+        try:
+            s.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        s.close()
+
+
+def _serve_client(client: socket.socket, run_id: str, monitor: int, control: bool) -> None:
+    up = None
+    try:
+        client.settimeout(HANDSHAKE)
+        client.sendall(b"RFB 003.008\n")
+        minor = _version(_exact(client, 12))
+        try:
+            up = _upstream(run_id, monitor)
+            up.settimeout(HANDSHAKE)
+            init = handshake(up)
+        except (DeskError, OSError, ConnectionError) as e:
+            # The client shows why, rather than a connection that closed without a word.
+            _refuse(client, minor, f"desk: monitor {monitor} of run {run_id}: {e}")
+            raise
+        _greet(client, minor)
+        client.sendall(init)
+        client.settimeout(None)
+        up.settimeout(None)
+
+        def down():
+            try:
+                _pump(up, client)
+            except OSError:
+                pass
+            _close(client, up)
+
+        threading.Thread(target=down, daemon=True).start()
+        (_pump if control else _filter)(client, up)
+    except (DeskError, OSError, ConnectionError) as e:
+        print(f"[desk view] client of monitor {monitor}: {e}", file=sys.stderr, flush=True)
+    finally:
+        _close(client, *([up] if up else []))
+
+
+def _serve(run_id: str, monitor: int, control: bool, path: str) -> None:
+    mine = RUNS / run_id / "view" / f"{os.getpid()}.json"
+    os.umask(0o177)  # the socket: this user only
+    srv = socket.socket(socket.AF_UNIX)
+    srv.bind(path)
+    ino = os.stat(path).st_ino
+
+    def end(*_):
+        # Exits with every connection open, so each watcher sees its connection close.
+        try:
+            if os.stat(path).st_ino == ino:
+                os.unlink(path)
+        except OSError:
+            pass
+        os._exit(0)
+
+    signal.signal(signal.SIGTERM, end)
+    srv.listen(16)
+    srv.settimeout(1)
+
+    def wanted() -> bool:
+        # Until the run is gone or desk no longer counts this process as the socket's view.
+        try:
+            return json.loads(mine.read_text()).get("pid") == os.getpid()
+        except (OSError, ValueError):
+            return False
+
+    deadline = time.monotonic() + 10
+    while not mine.exists() and time.monotonic() < deadline:
+        time.sleep(0.1)  # desk writes the file right after starting this process
+    while wanted():
+        try:
+            client, _ = srv.accept()
+        except TimeoutError:
+            continue
+        threading.Thread(target=_serve_client, args=(client, run_id, monitor, control), daemon=True).start()
+    end()
+
+
+if __name__ == "__main__":
+    _serve(sys.argv[1], int(sys.argv[2]), sys.argv[3] == "1", sys.argv[4])

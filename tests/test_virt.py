@@ -2,7 +2,7 @@ import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from desk.virt import domain_size, prepare_domain_xml
+from desk.virt import QEMU_NS, domain_size, prepare_domain_xml
 
 TEMPLATE = """
 <domain type='kvm'>
@@ -58,6 +58,19 @@ class PrepareDomainXml(unittest.TestCase):
         self.assertEqual(models[0].get("primary"), "yes")
         self.assertEqual([(m.find("resolution").get("x"), m.find("resolution").get("y")) for m in models],
                          [("1920", "1080")] * 3)
+
+    def test_monitors_after_the_first_have_vnc_sockets_of_their_own(self):
+        root = prepare(displays=3, vnc_dir=Path("/run/user/1/desk/r1"), vnc_password="pw")
+        args = [a.get("value") for a in root.iter(f"{{{QEMU_NS}}}arg")]
+        self.assertEqual(args, ["-vnc", "unix:/run/user/1/desk/r1/2.sock,id=desk-monitor2,display=video1,share=force-shared",
+                                "-vnc", "unix:/run/user/1/desk/r1/3.sock,id=desk-monitor3,display=video2,share=force-shared"])
+        self.assertEqual(root.find("devices/graphics").get("sharePolicy"), "force-shared")
+        # A template that has them already (a state saved from such a run) gets this run's.
+        again = ET.fromstring(prepare_domain_xml(ET.tostring(root, encoding="unicode"),
+                                                 **{**ARGS, "displays": 2, "vnc_dir": Path("/x")}))
+        self.assertEqual([a.get("value") for a in again.iter(f"{{{QEMU_NS}}}arg")][1].split(",")[0], "unix:/x/2.sock")
+        self.assertIsNone(prepare(displays=1, vnc_dir=Path("/x")).find(f"{{{QEMU_NS}}}commandline"))
+        self.assertIsNone(prepare(displays=2).find(f"{{{QEMU_NS}}}commandline"))
 
     def test_default_keeps_the_images_monitor(self):
         root = prepare()

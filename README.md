@@ -635,7 +635,25 @@ into a browser window whose focus is not in a text field is refused. Walks of th
   (`python -m desk.forward`), restarted when SSH drops and stopped by `desk down`. ssh holds the
   host port only while connected, so while a guest reboots no other run's `desk forward` takes it.
 - `desk view`: every run has a VNC display on 127.0.0.1 with a per-run password; the command
-  prints the SSH tunnel to use from a workstation.
+  prints the SSH tunnel to use from a workstation. The display is forced shared, so a viewer that
+  asks for it alone does not disconnect the others.
+- `desk view --socket PATH` serves a run's screen to another program (a session viewer that tunnels
+  it to a browser) as plain RFB without authentication on a unix socket of mode 0600, from a
+  background process (`python -m desk.view`) that lives as long as the run and that `desk down`
+  stops, closing its viewers' connections and removing the socket. The password stays with
+  libvirt: the process gets each connection to QEMU from `virDomainOpenGraphicsFD` with
+  `SKIPAUTH`. libvirt can put the VNC display on a unix socket itself, but QEMU has no view-only
+  mode for a client, so the process stands between: without `--control` it passes on only
+  SetPixelFormat, SetEncodings and update requests, drops keys, pointer, clipboard, desktop
+  resizes and power requests, and ends a viewer's connection on a message it cannot size. It
+  speaks to QEMU as a shared client whatever the viewer asks for.
+- libvirt gives a domain one VNC display, the first monitor's. With `--displays N` QEMU serves the
+  others on `$XDG_RUNTIME_DIR/desk/<run>/<monitor>.sock` (`-vnc` through `qemu:commandline`, as
+  libvirt has no element for it): a directory only this user reaches and the only one tried
+  where SELinux lets the VMs create sockets besides libvirt's own; a run started without
+  `$XDG_RUNTIME_DIR` has no picture of monitors 2 and on, and `desk view --monitor 2` says so.
+  With `--control` the pointer of such a monitor lands on a Windows guest's first one, at the same
+  coordinates: its absolute tablet reaches only the primary monitor (see Monitors).
 - Programs that show runs (a dashboard, a session viewer) read `desk ls --json` and take
   screenshots with `desk shot --peek -o FILE`. Neither counts as activity: the idle clock that
   `desk gc` and `DESK_TTL` go by, the run's timeline and its report stay as they were, so a run

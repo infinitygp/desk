@@ -783,9 +783,23 @@ def cmd_reboot(args) -> None:
 
 
 def cmd_view(args) -> None:
+    from . import view
     from .virt import vnc_port
 
     run = runs.resolve(args.run)
+    if args.stop is not None:
+        stopped = view.stop(run, None if args.stop == "all" else args.stop)
+        print("stopped " + (", ".join(stopped) if stopped else "nothing"))
+        return
+    if args.socket:
+        run.dom()
+        w, h = view.start(run, args.socket, args.monitor, args.control)
+        print(f"monitor {args.monitor} of {run.displays} of run {run.id} ({w}x{h}): {Path(args.socket).absolute()}, "
+              + ("keys and pointer reach the guest" if args.control else "view only")
+              + f" (desk view --stop {Path(args.socket).absolute()}; desk down ends it)")
+        return
+    if args.monitor != 1 or args.control:
+        raise DeskError("--monitor and --control go with --socket PATH")
     port = vnc_port(run.dom())
     if port is None or not run.vnc_password:
         raise DeskError(f"run {run.id} has no VNC display (started before desk view existed?)")
@@ -795,6 +809,11 @@ def cmd_view(args) -> None:
     print(f"  ssh -N -L {port}:127.0.0.1:{port} {host}")
     print(f"then open a VNC viewer on localhost:{port}, ideally in view-only mode so you do not")
     print(f"move the pointer under the agent (e.g. `vncviewer -ViewOnly localhost:{port}`).")
+    if run.displays > 1:
+        print(f"That is monitor 1 of {run.displays}; desk view --socket PATH --monitor N serves another one.")
+    for v in view.listing(run):
+        print(f"view: {v['socket']}\tmonitor {v['monitor']}\t{'control' if v['control'] else 'view only'}\t"
+              + ("up" if v["alive"] else "gone"))
 
 
 def cmd_record(args) -> None:
@@ -1510,7 +1529,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("ssh", help="interactive shell in the guest").set_defaults(func=cmd_ssh)
 
-    sub.add_parser("view", help="how to watch a run live over VNC through an SSH tunnel").set_defaults(func=cmd_view)
+    p = sub.add_parser("view", help="how to watch a run live over VNC through an SSH tunnel; --socket: its screen "
+                       "for another program, as VNC on a unix socket")
+    p.add_argument("--socket", metavar="PATH", help="serve the screen as VNC without a password on this unix socket "
+                   "(this user only) for as long as the run exists; view only unless --control")
+    p.add_argument("--monitor", type=int, default=1, metavar="N", help="which monitor, from the left (default 1)")
+    p.add_argument("--control", action="store_true", help="let the viewer's keys and pointer reach the guest")
+    p.add_argument("--stop", metavar="PATH|all", help="stop serving on PATH")
+    p.set_defaults(func=cmd_view)
 
     p = sub.add_parser("reboot", help="reboot the guest and wait for the new session")
     p.add_argument("--shot", action="store_true")

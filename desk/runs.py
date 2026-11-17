@@ -157,6 +157,9 @@ class Run:
     # The usbvfiod that serves the run's USB controller (desk up --usbvfiod): its PID, sockets, log
     # and pcap, and the PCIe root port the controller sits in; see desk/usbvfiod.py. Empty: none.
     usbvfiod: dict = field(default_factory=dict)
+    # Where QEMU serves the VNC displays of monitors 2 and on (N.sock, desk view --monitor N);
+    # "": one monitor, or no $XDG_RUNTIME_DIR when the run started.
+    vnc_dir: str = ""
 
     @property
     def since(self) -> float:
@@ -754,12 +757,16 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
     domain = f"desk-{run_id}" if cold else ET.fromstring(saved_xml).findtext("name")
     now = time.time()
     auto_label, holder = default_label()
+    vnc_dir = ""
+    if displays > 1 and os.environ.get("XDG_RUNTIME_DIR"):
+        vnc_dir = str(Path(os.environ["XDG_RUNTIME_DIR"]) / "desk" / run_id)
+        Path(vnc_dir).mkdir(parents=True, mode=0o700, exist_ok=True)
     run = Run(id=run_id, image=spec.name, domain=domain, ssh_port=free_port(),
               user=spec.user, created=now, last_used=now, vnc_password=secrets.token_urlsafe(6)[:8],
               agent_port=free_port() if spec.agent_port else 0, displays=displays,
               resolution=list(resolution) if resolution else None,
               label=label or auto_label, holder=holder, owner=os.environ.get("AGENT_SESSION") or None,
-              shared_memory=shared_memory,
+              shared_memory=shared_memory, vnc_dir=vnc_dir,
               timezone=made.get("timezone", spec.timezone), layout=made.get("layout", spec.layout))
     run.save()
     # In use by this process until it ends: a scenario or selftest keeps its run through steps
@@ -790,7 +797,7 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
                                  agent_ports=(run.agent_port, spec.agent_port) if spec.agent_port else None,
                                  sound=spec.sound, displays=displays, resolution=resolution,
                                  memory_mib=spec.memory_mib, vcpus=spec.vcpus,
-                                 shared_memory=shared_memory)
+                                 shared_memory=shared_memory, vnc_dir=Path(vnc_dir) if vnc_dir else None)
         if cold:
             dom = conn().createXML(xml, 0)
         else:
@@ -852,7 +859,7 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
 
 
 def down(run: Run, keep: bool = False) -> None:
-    from . import forward, record, usbvfiod
+    from . import forward, record, usbvfiod, view
 
     if not keep:
         record.kill(run)
@@ -860,6 +867,10 @@ def down(run: Run, keep: bool = False) -> None:
         forward.stop(run)  # no tunnels to a VM that is gone
     except OSError as e:
         print(f"[desk] warning: stopping port forwards of {run.id}: {e}", file=sys.stderr)
+    try:
+        view.stop(run)  # its watchers are disconnected and its sockets gone
+    except OSError as e:
+        print(f"[desk] warning: stopping views of {run.id}: {e}", file=sys.stderr)
     dom = run.live_domain()
     served = run.usbvfiod and usbvfiod.alive(run)
     if dom is not None:
@@ -874,6 +885,8 @@ def down(run: Run, keep: bool = False) -> None:
         if rebound:
             print(f"[desk] warning: usbvfiod of run {run.id} left USB devices without their drivers; desk "
                   f"bound them again: {', '.join(rebound)}", file=sys.stderr)
+    if run.vnc_dir:
+        shutil.rmtree(run.vnc_dir, ignore_errors=True)
     if not keep:
         shutil.rmtree(run.dir, ignore_errors=True)
 

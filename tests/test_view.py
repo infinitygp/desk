@@ -1,0 +1,244 @@
+import io
+import os
+import shutil
+import socket
+import struct
+import tempfile
+import threading
+import time
+import unittest
+import warnings
+from pathlib import Path
+from unittest import mock
+
+from desk import runs, view
+from desk.config import DeskError
+
+PIXEL_FORMAT = bytes([32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0])
+SERVER_INIT = struct.pack(">HH", 800, 600) + PIXEL_FORMAT + struct.pack(">I", 4) + b"QEMU"
+
+SET_PIXEL_FORMAT = b"\x00\0\0\0" + PIXEL_FORMAT
+SET_ENCODINGS = b"\x02\0" + struct.pack(">Hii", 2, 0, -258)
+UPDATE_REQUEST = b"\x03\x01" + struct.pack(">HHHH", 0, 0, 800, 600)
+CONTINUOUS = b"\x96\x01" + struct.pack(">HHHH", 0, 0, 800, 600)
+KEY = b"\x04\x01\0\0" + struct.pack(">I", 0x61)
+POINTER = b"\x05\x01" + struct.pack(">HH", 10, 20)
+CUT_TEXT = b"\x06\0\0\0" + struct.pack(">I", 5) + b"hello"
+EXTENDED_CUT_TEXT = b"\x06\0\0\0" + struct.pack(">i", -4) + b"\0\0\0\x01"
+QEMU_KEY = b"\xff\x00" + struct.pack(">HII", 1, 0x61, 0x1e)
+QEMU_AUDIO = b"\xff\x01\x00\x02" + b"\x03\x02" + struct.pack(">I", 44100)
+DESKTOP_SIZE = b"\xfb\0" + struct.pack(">HHBB", 1024, 768, 1, 0) + bytes(16)
+XVP = b"\xfa\0\x01\x04"
+
+
+class FakeQemu:
+    """An RFB server that asks for no password, like QEMU's VNC for desk; keeps what clients send."""
+
+    def __init__(self):
+        self.shared: list[int] = []
+        self.received: list[bytes] = []
+        self.done = threading.Event()
+
+    def serve(self, s: socket.socket, frame: bytes = b"") -> None:
+        try:
+            s.sendall(b"RFB 003.008\n")
+            view._exact(s, 12)
+            s.sendall(b"\x01\x01")
+            view._exact(s, 1)
+            s.sendall(b"\0\0\0\0")
+            self.shared.append(view._exact(s, 1)[0])
+            s.sendall(SERVER_INIT + frame)
+            got = b""
+            while data := s.recv(4096):
+                got += data
+            self.received.append(got)
+        except (OSError, ConnectionError):
+            pass
+        finally:
+            s.close()
+            self.done.set()
+
+
+def client_hello(s: socket.socket, version: bytes = b"RFB 003.008\n", shared: int = 1) -> bytes:
+    """A client's side of the handshake with the view; the ServerInit it gets."""
+    assert view._exact(s, 12) == b"RFB 003.008\n"
+    s.sendall(version)
+    if version == b"RFB 003.003\n":
+        assert struct.unpack(">I", view._exact(s, 4))[0] == 1
+    else:
+        assert view._exact(s, 2) == b"\x01\x01"
+        s.sendall(b"\x01")
+        if version == b"RFB 003.008\n":
+            assert view._exact(s, 4) == b"\0\0\0\0"
+    s.sendall(bytes([shared]))
+    return view._exact(s, len(SERVER_INIT))
+
+
+def recv_or_reset(s: socket.socket) -> bytes:
+    try:
+        return s.recv(1)
+    except ConnectionResetError:  # closed with input of the client's unread
+        return b""
+
+
+class Proxy(unittest.TestCase):
+    def setUp(self):
+        quiet = mock.patch("sys.stderr", io.StringIO())  # what the view logs of each client
+        quiet.start()
+        self.addCleanup(quiet.stop)
+
+    def connect(self, control: bool = False, frame: bytes = b""):
+        qemu = FakeQemu()
+        up_view, up_qemu = socket.socketpair()
+        threading.Thread(target=qemu.serve, args=(up_qemu, frame), daemon=True).start()
+        client, served = socket.socketpair()
+        client.settimeout(5)
+        # The client's thread asks for the upstream after this returns.
+        patcher = mock.patch("desk.view._upstream", return_value=up_view)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        t = threading.Thread(target=view._serve_client, args=(served, "r", 1, control), daemon=True)
+        t.start()
+        self.addCleanup(client.close)
+        return qemu, client, t
+
+    def test_view_only_passes_the_picture_and_drops_input(self):
+        qemu, client, t = self.connect(frame=b"\x00\0\0\x00")
+        self.assertEqual(client_hello(client, shared=0), SERVER_INIT)
+        self.assertEqual(view._exact(client, 4), b"\x00\0\0\x00")  # what QEMU sends goes through
+        client.sendall(SET_PIXEL_FORMAT + KEY + SET_ENCODINGS + POINTER + CUT_TEXT + EXTENDED_CUT_TEXT + QEMU_KEY
+                       + QEMU_AUDIO + DESKTOP_SIZE + XVP + UPDATE_REQUEST + CONTINUOUS)
+        client.shutdown(socket.SHUT_WR)
+        t.join(5)
+        qemu.done.wait(5)
+        self.assertEqual(qemu.received, [SET_PIXEL_FORMAT + SET_ENCODINGS + UPDATE_REQUEST + CONTINUOUS])
+        # A client that asks for the display alone does not disconnect the others.
+        self.assertEqual(qemu.shared, [1])
+
+    def test_control_passes_input(self):
+        qemu, client, t = self.connect(control=True)
+        client_hello(client)
+        client.sendall(KEY + POINTER + UPDATE_REQUEST)
+        client.shutdown(socket.SHUT_WR)
+        t.join(5)
+        qemu.done.wait(5)
+        self.assertEqual(qemu.received, [KEY + POINTER + UPDATE_REQUEST])
+
+    def test_a_message_the_filter_cannot_size_ends_the_connection(self):
+        qemu, client, t = self.connect()
+        client_hello(client)
+        client.sendall(b"\x07" + KEY)
+        t.join(5)
+        self.assertFalse(t.is_alive())
+        qemu.done.wait(5)
+        self.assertEqual(qemu.received, [b""])
+        self.assertEqual(recv_or_reset(client), b"")
+
+    def test_older_clients(self):
+        for version in (b"RFB 003.003\n", b"RFB 003.007\n"):
+            qemu, client, t = self.connect()
+            self.assertEqual(client_hello(client, version), SERVER_INIT)
+
+    def test_a_display_that_is_not_there_is_refused_with_the_reason(self):
+        client, served = socket.socketpair()
+        self.addCleanup(client.close)
+        t = threading.Thread(target=view._serve_client, args=(served, "r", 1, False), daemon=True)
+        with mock.patch("desk.view._upstream", side_effect=DeskError("run r has no VNC display")):
+            t.start()
+            client.settimeout(5)
+            with self.assertRaisesRegex(DeskError, "refused: desk: monitor 1 of run r: run r has no VNC display"):
+                view.handshake(client)
+            t.join(5)
+
+    def test_a_display_that_wants_a_password_is_not_logged_in_to(self):
+        a, b = socket.socketpair()
+        b.sendall(b"RFB 003.008\n\x01\x02")
+        a.settimeout(5)
+        with self.assertRaisesRegex(DeskError, "authentication"):
+            view.handshake(a)
+        a.close(), b.close()
+
+
+def short_dir(test) -> Path:
+    # Unix socket paths are short; the test home under $TMPDIR may not be.
+    d = tempfile.TemporaryDirectory(prefix="dv", dir="/tmp")
+    test.addCleanup(d.cleanup)
+    return Path(d.name)
+
+
+class Process(unittest.TestCase):
+    """desk view --socket with the real background process, against a fake monitor 2."""
+
+    def setUp(self):
+        # The view process outlives its Popen object, as it does in desk.
+        warnings.simplefilter("ignore", ResourceWarning)
+        self.tmp = short_dir(self)
+        self.qemu = FakeQemu()
+        listener = socket.socket(socket.AF_UNIX)
+        listener.bind(str(self.tmp / "2.sock"))
+        listener.listen()
+        self.addCleanup(listener.close)
+
+        def accept():
+            while True:
+                try:
+                    s, _ = listener.accept()
+                except OSError:
+                    return
+                threading.Thread(target=self.qemu.serve, args=(s,), daemon=True).start()
+
+        threading.Thread(target=accept, daemon=True).start()
+        self.run_ = runs.Run(id="view1", image="fedora-44-gnome", domain="d", ssh_port=1, user="u", created=0,
+                             displays=2, vnc_dir=str(self.tmp))
+        self.run_.dir.mkdir(parents=True)
+        self.run_.save()
+        self.addCleanup(shutil.rmtree, self.run_.dir, ignore_errors=True)
+        self.addCleanup(lambda: self.run_.dir.exists() and view.stop(self.run_))
+
+    def test_serves_until_stopped_and_disconnects_its_watchers(self):
+        path = self.tmp / "screen.sock"
+        self.assertEqual(view.start(self.run_, str(path), monitor=2), (800, 600))
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        # The same view again is the one there is; another one on its socket is refused.
+        self.assertEqual(view.start(self.run_, str(path), monitor=2), (800, 600))
+        self.assertEqual(len(view.listing(self.run_)), 1)
+        with self.assertRaisesRegex(DeskError, "shows monitor 2 of run view1 already"):
+            view.start(self.run_, str(path), monitor=2, control=True)
+        watchers = []
+        for _ in range(2):
+            c = socket.socket(socket.AF_UNIX)
+            c.settimeout(5)
+            c.connect(str(path))
+            self.addCleanup(c.close)
+            self.assertEqual(client_hello(c, shared=0), SERVER_INIT)
+            watchers.append(c)
+        self.assertEqual(view.stop(self.run_, str(path)), [str(path)])
+        self.assertFalse(path.exists())
+        for c in watchers:
+            self.assertEqual(recv_or_reset(c), b"")  # closed, not hanging
+        self.assertEqual(view.listing(self.run_), [])
+
+    def test_refusals(self):
+        with self.assertRaisesRegex(DeskError, "--monitor is 1 to 2"):
+            view.start(self.run_, str(self.tmp / "s"), monitor=3)
+        with self.assertRaisesRegex(DeskError, "longer than a unix socket path"):
+            view.start(self.run_, "/tmp/" + "x" * 120)
+        (self.tmp / "file").write_text("")
+        with self.assertRaisesRegex(DeskError, "not a socket"):
+            view.start(self.run_, str(self.tmp / "file"), monitor=2)
+        with self.assertRaisesRegex(DeskError, "another program"):
+            view.start(self.run_, str(self.tmp / "2.sock"), monitor=2)
+        os.unlink(self.tmp / "2.sock")
+        with self.assertRaisesRegex(DeskError, "no picture of monitor 2"):
+            view.start(self.run_, str(self.tmp / "s"), monitor=2)
+
+    def test_a_run_that_goes_away_takes_its_view_along(self):
+        path = self.tmp / "screen.sock"
+        view.start(self.run_, str(path), monitor=2)
+        pid = view.listing(self.run_)[0]["pid"]
+        shutil.rmtree(self.run_.dir)
+        deadline = time.monotonic() + 5
+        while view._alive(pid) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        self.assertFalse(view._alive(pid))
+        self.assertFalse(path.exists())

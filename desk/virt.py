@@ -14,6 +14,9 @@ from .config import URI, DeskError
 
 libvirt.registerErrorHandler(lambda _ctx, _err: None, None)
 
+QEMU_NS = "http://libvirt.org/schemas/domain/qemu/1.0"
+ET.register_namespace("qemu", QEMU_NS)
+
 _conn: libvirt.virConnect | None = None
 
 
@@ -86,6 +89,7 @@ def prepare_domain_xml(
     keep_uuid: bool = False, vnc_password: str | None = None, agent_ports: tuple[int, int] | None = None,
     sound: str | None = None, displays: int = 1, resolution: tuple[int, int] | None = None,
     memory_mib: int | None = None, vcpus: int | None = None, shared_memory: bool = False,
+    vnc_dir: Path | None = None,
 ) -> str:
     """Turn the golden image's domain XML into a per-run transient domain.
 
@@ -203,9 +207,23 @@ def prepare_domain_xml(
                 ET.SubElement(model, "resolution", x=str(resolution[0]), y=str(resolution[1]))
     if vnc_password:
         # For a person to watch (desk view). Loopback only, through an SSH tunnel; the password
-        # keeps other local accounts out, since the VMs run under this user.
-        g = ET.SubElement(devices, "graphics", type="vnc", port="-1", autoport="yes", passwd=vnc_password)
+        # keeps other local accounts out, since the VMs run under this user. Forced shared: a
+        # viewer asking for the display alone would disconnect everybody else watching.
+        g = ET.SubElement(devices, "graphics", type="vnc", port="-1", autoport="yes", passwd=vnc_password,
+                          sharePolicy="force-shared")
         ET.SubElement(g, "listen", type="address", address="127.0.0.1")
+    for el in root.findall(f"{{{QEMU_NS}}}commandline"):
+        root.remove(el)
+    if vnc_dir and displays > 1:
+        # libvirt gives a domain one VNC display, which shows the first monitor; QEMU serves the
+        # others on sockets of their own (desk view --monitor N), in a directory only this user
+        # reaches and SELinux lets QEMU create sockets in ($XDG_RUNTIME_DIR).
+        cmdline = ET.SubElement(root, f"{{{QEMU_NS}}}commandline")
+        for i in range(1, displays):
+            path = str(vnc_dir / f"{i + 1}.sock").replace(",", ",,")
+            ET.SubElement(cmdline, f"{{{QEMU_NS}}}arg", value="-vnc")
+            ET.SubElement(cmdline, f"{{{QEMU_NS}}}arg",
+                          value=f"unix:{path},id=desk-monitor{i + 1},display=video{i},share=force-shared")
 
     # Runtime-only details carried over from a live or saved domain.
     for el in root.findall("seclabel"):
