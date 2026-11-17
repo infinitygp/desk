@@ -648,13 +648,16 @@ into a browser window whose focus is not in a text field is refused. Walks of th
   resizes and power requests, and ends a viewer's connection on a message it cannot size. It
   speaks to QEMU as a shared client whatever the viewer asks for.
 - libvirt gives a domain one VNC display, the first monitor's. With `--displays N` QEMU serves the
-  others on `$XDG_RUNTIME_DIR/desk/<run>/<monitor>.sock` (`-vnc` through `qemu:commandline`, as
-  libvirt has no element for it): a directory only this user reaches and the only one tried
-  where SELinux lets the VMs create sockets besides libvirt's own; a run started without
-  `$XDG_RUNTIME_DIR` has no picture of monitors 2 and on, and `desk view --monitor 2` says so.
-  QEMU moves the pointer of such a monitor with the absolute tablet, which Windows maps onto the
-  primary monitor: a click would land on monitor 1, so on Windows `--control` passes on keys but not
-  the pointer of monitors 2 and on.
+  others on `<dir>/desk/<run>/<monitor>.sock` (`-vnc` through `qemu:commandline`, as libvirt has
+  no element for it), `<dir>` being where libvirt keeps a session's runtime files:
+  `$XDG_RUNTIME_DIR`, else `~/.cache/libvirt/qemu` (`$XDG_CACHE_HOME`). Both are this user's alone,
+  and under SELinux the VMs may create sockets there (`user_tmp_t`, `svirt_home_t`), which they may
+  not in desk's default home. When that directory cannot be made, `desk up` says so and the run
+  goes on without a picture of monitors 2 and on.
+- `--control` on a Windows guest's monitor 2 and on moves the pointer through the in-session agent,
+  as `desk click` does there: QEMU's absolute tablet, which Windows maps onto the primary monitor,
+  would put it on monitor 1. One thread sends the events in order and only the newest position
+  between button changes, and a viewer that leaves lets go of the buttons it held.
 - Programs that show runs (a dashboard, a session viewer) read `desk ls --json` and take
   screenshots with `desk shot --peek -o FILE`. Neither counts as activity: the idle clock that
   `desk gc` and `DESK_TTL` go by, the run's timeline and its report stay as they were, so a run

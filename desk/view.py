@@ -7,8 +7,9 @@ password), the others through the sockets QEMU serves them on (virt.prepare_doma
 Without --control the process passes on only what a picture needs (pixel format, encodings,
 update requests) and drops keys, pointer, clipboard, desktop resizes and power requests, so a
 watcher cannot get in the agent's way; a message it cannot size ends that watcher's connection.
-With --control on a Windows guest's monitor 2 and on it drops the pointer alone: QEMU moves the
-absolute tablet, which Windows maps onto the primary monitor, so a click would land on monitor 1.
+With --control on a Windows guest's monitor 2 and on the pointer goes through the in-session
+agent, as desk click's does there: QEMU would move the absolute tablet, which Windows maps onto
+the primary monitor, so a click would land on monitor 1.
 Every watcher connects to QEMU as a shared client, so none disconnects another."""
 
 import json
@@ -69,11 +70,12 @@ def check_monitor(run, monitor: int) -> None:
         raise DeskError(f"run {run.id} has {run.displays} monitor{'s' if run.displays > 1 else ''}; "
                         f"--monitor is 1 to {run.displays}")
     if monitor > 1 and not (run.vnc_dir and (Path(run.vnc_dir) / f"{monitor}.sock").is_socket()):
-        raise DeskError(f"run {run.id} has no picture of monitor {monitor}: QEMU serves monitors 2 and on only "
-                        "for runs started with $XDG_RUNTIME_DIR set by this desk (desk up again)")
+        raise DeskError(f"run {run.id} has no picture of monitor {monitor}: QEMU serves monitors 2 and on only for "
+                        "runs started by a desk that has them (desk up said why not, if it could not; desk up again)")
 
 
-def pointer_reaches(run, monitor: int) -> bool:
+def tablet_reaches(run, monitor: int) -> bool:
+    """Whether QEMU's absolute tablet moves the pointer on this monitor; on Windows the agent does."""
     from . import runs
 
     return monitor == 1 or runs.spec_for(run).family != "windows"
@@ -291,12 +293,82 @@ def _message(client: socket.socket) -> tuple[int, bytes]:
     raise ConnectionError(f"client message type {t} unknown to the filter")
 
 
-def _filter(client: socket.socket, up: socket.socket, passed: frozenset = SHOWN) -> None:
-    """Pass on the messages of the types given, drop the others."""
+def _filter(client: socket.socket, up: socket.socket, passed: frozenset = SHOWN, pointer=None) -> None:
+    """Pass on the messages of the types given, drop the others; pointer events go to `pointer`
+    when there is one."""
     while True:
         t, msg = _message(client)
-        if t in passed:
+        if t == 5 and pointer is not None:
+            pointer.event(msg[1], *struct.unpack(">HH", msg[2:]))
+        elif t in passed:
             up.sendall(msg)
+
+
+class AgentPointer:
+    """A viewer's pointer on a Windows guest's monitor 2 and on, through the in-session agent
+    (SetCursorPos, mouse_event) in screen coordinates, as desk click moves it there. The agent
+    serves one request at a time and a viewer sends motion by the hundred, so one thread sends
+    them in order and only the newest position between two button changes; a viewer that leaves
+    lets go of the buttons it held, or the agent's next move would drag."""
+
+    BUTTONS = ((1, "left"), (2, "middle"), (4, "right"))
+    WHEEL = ((8, 1), (16, -1))  # RFB's wheel up and down; the agent's delta is in notches
+
+    def __init__(self, run, left: int):
+        self.run, self.left = run, left
+        self.mask = 0
+        self.queue: list[dict] = []
+        self.ended = False
+        self.cond = threading.Condition()
+        self.worker = threading.Thread(target=self._work, daemon=True)
+        self.worker.start()
+
+    def event(self, mask: int, x: int, y: int) -> None:
+        with self.cond:
+            move = {"action": "move", "x": self.left + x, "y": y}
+            if self.queue and self.queue[-1]["action"] == "move":
+                self.queue[-1] = move
+            else:
+                self.queue.append(move)
+            for bit, name in self.BUTTONS:
+                if (mask ^ self.mask) & bit:
+                    self.queue.append({"action": "down" if mask & bit else "up", "button": name})
+            for bit, delta in self.WHEEL:
+                if mask & bit and not self.mask & bit:
+                    self.queue.append({"action": "wheel", "delta": delta})
+            self.mask = mask
+            self.cond.notify()
+
+    def end(self) -> None:
+        with self.cond:
+            for bit, name in self.BUTTONS:
+                if self.mask & bit:
+                    self.queue.append({"action": "up", "button": name})
+            self.mask = 0
+            self.ended = True
+            self.cond.notify()
+
+    def _work(self) -> None:
+        from . import winagent
+
+        while True:
+            with self.cond:
+                while not self.queue and not self.ended:
+                    self.cond.wait()
+                if not self.queue:
+                    return
+                req = self.queue.pop(0)
+            try:
+                winagent.request(self.run, timeout=5, cmd="pointer", **req)
+            except DeskError as e:
+                print(f"[desk view] pointer {req['action']} through the agent: {e}", file=sys.stderr, flush=True)
+
+
+def _left_of(run, monitor: int) -> int:
+    """Where the monitor starts in screen coordinates: the monitors sit side by side from the left."""
+    from .display import screen_sizes
+
+    return sum(w for w, _ in screen_sizes(run.dom())[:monitor - 1])
 
 
 def _pump(src: socket.socket, dst: socket.socket) -> None:
@@ -313,8 +385,8 @@ def _close(*socks: socket.socket) -> None:
         s.close()
 
 
-def _serve_client(client: socket.socket, run_id: str, monitor: int, control: bool, pointer: bool = True) -> None:
-    up = None
+def _serve_client(client: socket.socket, run_id: str, monitor: int, control: bool, tablet: bool = True) -> None:
+    up = agent = None
     try:
         client.settimeout(HANDSHAKE)
         client.sendall(b"RFB 003.008\n")
@@ -340,13 +412,21 @@ def _serve_client(client: socket.socket, run_id: str, monitor: int, control: boo
             _close(client, up)
 
         threading.Thread(target=down, daemon=True).start()
-        if control and pointer:
+        if control and tablet:
             _pump(client, up)
+        elif control:
+            from . import runs
+
+            run = runs.load(run_id)
+            agent = AgentPointer(run, _left_of(run, monitor))
+            _filter(client, up, ALL_BUT_POINTER, agent)
         else:
-            _filter(client, up, ALL_BUT_POINTER if control else SHOWN)
+            _filter(client, up, SHOWN)
     except (DeskError, OSError, ConnectionError) as e:
         print(f"[desk view] client of monitor {monitor}: {e}", file=sys.stderr, flush=True)
     finally:
+        if agent:
+            agent.end()
         _close(client, *([up] if up else []))
 
 
@@ -354,7 +434,7 @@ def _serve(run_id: str, monitor: int, control: bool, path: str) -> None:
     from . import runs
 
     mine = RUNS / run_id / "view" / f"{os.getpid()}.json"
-    pointer = pointer_reaches(runs.load(run_id), monitor)
+    tablet = tablet_reaches(runs.load(run_id), monitor)
     os.umask(0o177)  # the socket: this user only
     srv = socket.socket(socket.AF_UNIX)
     srv.bind(path)
@@ -388,7 +468,7 @@ def _serve(run_id: str, monitor: int, control: bool, path: str) -> None:
             client, _ = srv.accept()
         except TimeoutError:
             continue
-        threading.Thread(target=_serve_client, args=(client, run_id, monitor, control, pointer),
+        threading.Thread(target=_serve_client, args=(client, run_id, monitor, control, tablet),
                          daemon=True).start()
     end()
 

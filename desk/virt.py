@@ -217,7 +217,7 @@ def prepare_domain_xml(
     if vnc_dir and displays > 1:
         # libvirt gives a domain one VNC display, which shows the first monitor; QEMU serves the
         # others on sockets of their own (desk view --monitor N), in a directory only this user
-        # reaches and SELinux lets QEMU create sockets in ($XDG_RUNTIME_DIR).
+        # reaches and SELinux lets QEMU create sockets in (runs.monitor_sockets).
         cmdline = ET.SubElement(root, f"{{{QEMU_NS}}}commandline")
         for i in range(1, displays):
             path = str(vnc_dir / f"{i + 1}.sock").replace(",", ",,")

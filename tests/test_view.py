@@ -87,7 +87,7 @@ class Proxy(unittest.TestCase):
         quiet.start()
         self.addCleanup(quiet.stop)
 
-    def connect(self, control: bool = False, frame: bytes = b"", pointer: bool = True):
+    def connect(self, control: bool = False, frame: bytes = b"", tablet: bool = True, monitor: int = 1):
         qemu = FakeQemu()
         up_view, up_qemu = socket.socketpair()
         threading.Thread(target=qemu.serve, args=(up_qemu, frame), daemon=True).start()
@@ -97,7 +97,8 @@ class Proxy(unittest.TestCase):
         patcher = mock.patch("desk.view._upstream", return_value=up_view)
         patcher.start()
         self.addCleanup(patcher.stop)
-        t = threading.Thread(target=view._serve_client, args=(served, "r", 1, control, pointer), daemon=True)
+        t = threading.Thread(target=view._serve_client, args=(served, "r", monitor, control, tablet),
+                             daemon=True)
         t.start()
         self.addCleanup(client.close)
         return qemu, client, t
@@ -124,19 +125,29 @@ class Proxy(unittest.TestCase):
         qemu.done.wait(5)
         self.assertEqual(qemu.received, [KEY + POINTER + UPDATE_REQUEST])
 
-    def test_control_without_the_pointer_passes_the_rest(self):
-        qemu, client, t = self.connect(control=True, pointer=False)
-        client_hello(client)
-        client.sendall(KEY + POINTER + CUT_TEXT + QEMU_KEY + UPDATE_REQUEST)
-        client.shutdown(socket.SHUT_WR)
-        t.join(5)
-        qemu.done.wait(5)
+    def test_control_of_a_monitor_the_tablet_does_not_reach_moves_the_pointer_through_the_agent(self):
+        calls = []
+        with mock.patch("desk.runs.load"), mock.patch("desk.view._left_of", return_value=1280), \
+                mock.patch("desk.winagent.request", side_effect=lambda run, **req: calls.append(req)):
+            qemu, client, t = self.connect(control=True, tablet=False, monitor=2)
+            client_hello(client)
+            client.sendall(KEY + POINTER + CUT_TEXT + QEMU_KEY + UPDATE_REQUEST)
+            client.shutdown(socket.SHUT_WR)
+            t.join(5)
+            qemu.done.wait(5)
+            deadline = time.monotonic() + 5
+            while len(calls) < 3 and time.monotonic() < deadline:
+                time.sleep(0.01)
         self.assertEqual(qemu.received, [KEY + CUT_TEXT + QEMU_KEY + UPDATE_REQUEST])
+        # POINTER presses the left button at (10, 20) of monitor 2; the viewer left with it held.
+        self.assertEqual(calls, [{"timeout": 5, "cmd": "pointer", "action": "move", "x": 1290, "y": 20},
+                                 {"timeout": 5, "cmd": "pointer", "action": "down", "button": "left"},
+                                 {"timeout": 5, "cmd": "pointer", "action": "up", "button": "left"}])
 
-    def test_the_pointer_of_a_windows_guests_second_monitor_is_not_passed(self):
+    def test_the_tablet_reaches_every_monitor_but_a_windows_guests_second(self):
         windows = runs.Run(id="w", image="windows-11", domain="d", ssh_port=1, user="u", created=0, displays=2)
         linux = runs.Run(id="l", image="fedora-44-gnome", domain="d", ssh_port=1, user="u", created=0, displays=2)
-        self.assertEqual([view.pointer_reaches(r, m) for r in (windows, linux) for m in (1, 2)],
+        self.assertEqual([view.tablet_reaches(r, m) for r in (windows, linux) for m in (1, 2)],
                          [True, False, True, True])
 
     def test_a_message_the_filter_cannot_size_ends_the_connection(self):
@@ -172,6 +183,86 @@ class Proxy(unittest.TestCase):
         with self.assertRaisesRegex(DeskError, "authentication"):
             view.handshake(a)
         a.close(), b.close()
+
+
+class AgentPointerOrder(unittest.TestCase):
+    def test_moves_between_button_changes_are_merged_and_held_buttons_let_go(self):
+        calls, gate = [], threading.Event()
+
+        def request(run, timeout, **req):
+            gate.wait(5)  # the first move keeps the agent busy while the rest comes in
+            calls.append((req["action"], req.get("x", req.get("button", req.get("delta"))), req.get("y")))
+
+        with mock.patch("desk.winagent.request", side_effect=request):
+            p = view.AgentPointer(mock.Mock(), 1280)
+            p.event(0, 10, 20)
+            deadline = time.monotonic() + 5
+            while p.queue and time.monotonic() < deadline:
+                time.sleep(0.01)
+            for mask, x, y in ((0, 30, 40), (0, 35, 45), (1, 35, 45), (0, 35, 45), (8, 35, 45), (0, 35, 45),
+                               (4, 50, 60)):
+                p.event(mask, x, y)
+            p.end()
+            gate.set()
+            p.worker.join(5)
+        self.assertEqual(calls, [("move", 1290, 20), ("move", 1315, 45), ("down", "left", None),
+                                 ("move", 1315, 45), ("up", "left", None), ("move", 1315, 45), ("wheel", 1, None),
+                                 ("move", 1330, 60), ("down", "right", None), ("up", "right", None)])
+
+    def test_an_agent_that_fails_costs_the_event_not_the_viewer(self):
+        from desk.winagent import AgentGone
+
+        with mock.patch("desk.winagent.request", side_effect=AgentGone("gone")), \
+                mock.patch("sys.stderr", io.StringIO()) as err:
+            p = view.AgentPointer(mock.Mock(), 0)
+            p.event(1, 1, 1)
+            p.end()
+            p.worker.join(5)
+        self.assertFalse(p.worker.is_alive())
+        self.assertIn("pointer move through the agent: gone", err.getvalue())
+
+
+class MonitorSockets(unittest.TestCase):
+    """Where QEMU serves monitors 2 and on: the session's runtime directory, or libvirt's."""
+
+    def env(self, **env):
+        patcher = mock.patch.dict(os.environ, env)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        for name in ("XDG_RUNTIME_DIR", "XDG_CACHE_HOME"):
+            if name not in env:
+                os.environ.pop(name, None)
+
+    def test_with_a_runtime_directory(self):
+        tmp = short_dir(self)
+        self.env(XDG_RUNTIME_DIR=str(tmp))
+        d = runs.monitor_sockets("r1")
+        self.assertEqual(d, str(tmp / "desk" / "r1"))
+        self.assertEqual(Path(d).stat().st_mode & 0o777, 0o700)
+        self.assertEqual((tmp / "desk").stat().st_mode & 0o777, 0o700)
+
+    def test_without_one_libvirts_cache_directory(self):
+        tmp = short_dir(self)
+        (tmp / "libvirt" / "qemu").mkdir(parents=True)
+        self.env(XDG_CACHE_HOME=str(tmp))
+        self.assertEqual(runs.monitor_sockets("r1"), str(tmp / "libvirt" / "qemu" / "desk" / "r1"))
+
+    def test_libvirts_directories_are_not_made_by_desk(self):
+        tmp = short_dir(self)
+        self.env(XDG_CACHE_HOME=str(tmp))
+        with mock.patch("sys.stderr", io.StringIO()) as err:
+            self.assertEqual(runs.monitor_sockets("r1"), "")
+        self.assertIn("monitors 2 and on of run r1 cannot be watched", err.getvalue())
+        self.assertFalse((tmp / "libvirt").exists())
+
+    def test_a_path_too_long_for_a_socket(self):
+        tmp = short_dir(self)
+        long = tmp / ("x" * 100)
+        long.mkdir()
+        self.env(XDG_RUNTIME_DIR=str(long))
+        with mock.patch("sys.stderr", io.StringIO()) as err:
+            self.assertEqual(runs.monitor_sockets("r1"), "")
+        self.assertIn("too long for a unix socket path", err.getvalue())
 
 
 def short_dir(test) -> Path:

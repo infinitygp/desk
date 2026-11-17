@@ -158,7 +158,7 @@ class Run:
     # and pcap, and the PCIe root port the controller sits in; see desk/usbvfiod.py. Empty: none.
     usbvfiod: dict = field(default_factory=dict)
     # Where QEMU serves the VNC displays of monitors 2 and on (N.sock, desk view --monitor N);
-    # "": one monitor, or no $XDG_RUNTIME_DIR when the run started.
+    # "": one monitor, or none could be made (monitor_sockets).
     vnc_dir: str = ""
 
     @property
@@ -757,10 +757,7 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
     domain = f"desk-{run_id}" if cold else ET.fromstring(saved_xml).findtext("name")
     now = time.time()
     auto_label, holder = default_label()
-    vnc_dir = ""
-    if displays > 1 and os.environ.get("XDG_RUNTIME_DIR"):
-        vnc_dir = str(Path(os.environ["XDG_RUNTIME_DIR"]) / "desk" / run_id)
-        Path(vnc_dir).mkdir(parents=True, mode=0o700, exist_ok=True)
+    vnc_dir = monitor_sockets(run_id) if displays > 1 else ""
     run = Run(id=run_id, image=spec.name, domain=domain, ssh_port=free_port(),
               user=spec.user, created=now, last_used=now, vnc_password=secrets.token_urlsafe(6)[:8],
               agent_port=free_port() if spec.agent_port else 0, displays=displays,
@@ -856,6 +853,27 @@ def _up(spec: ImageSpec, run_id: str | None, cold: bool, displays: int = 1,
         down(run, keep=True)
         raise
     return run
+
+
+def monitor_sockets(run_id: str) -> str:
+    """A directory of this user's alone for the VNC sockets of a run's monitors 2 and on, where
+    QEMU may create them: libvirt's directory for a session's runtime files ($XDG_RUNTIME_DIR, else
+    ~/.cache/libvirt, whose qemu/ SELinux labels for VMs). desk's home is no such place: SELinux
+    keeps QEMU from creating sockets in ~/.local/share. "" with a warning when it cannot be made."""
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    base = (Path(runtime) if runtime else
+            Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "libvirt" / "qemu") / "desk"
+    d = base / run_id
+    try:
+        if len(str(d / "99.sock").encode()) > 107:
+            raise OSError(f"{d} is too long for a unix socket path")
+        # Not libvirt's levels: a directory desk made there would not have the label QEMU needs.
+        base.mkdir(mode=0o700, exist_ok=True)
+        d.mkdir(mode=0o700, exist_ok=True)
+    except OSError as e:
+        print(f"[desk] warning: monitors 2 and on of run {run_id} cannot be watched with desk view: {e}", file=sys.stderr)
+        return ""
+    return str(d)
 
 
 def down(run: Run, keep: bool = False) -> None:
