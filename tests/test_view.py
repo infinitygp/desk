@@ -209,6 +209,25 @@ class AgentPointerOrder(unittest.TestCase):
                                  ("move", 1315, 45), ("up", "left", None), ("move", 1315, 45), ("wheel", 1, None),
                                  ("move", 1330, 60), ("down", "right", None), ("up", "right", None)])
 
+    def test_the_agent_gets_a_click_held_as_long_as_the_viewer_held_it(self):
+        sent = []
+        with mock.patch("desk.winagent.request", side_effect=lambda run, timeout, **req: sent.append(
+                (req["action"], time.monotonic()))):
+            p = view.AgentPointer(mock.Mock(), 0)
+            p.event(4, 5, 5)  # moved and pressed at once
+            time.sleep(0.3)
+            p.event(0, 5, 5)
+            p.event(4, 5, 5)  # and a second click with no time between
+            p.event(0, 5, 5)
+            p.end()
+            p.worker.join(5)
+        actions = [a for a, _ in sent]
+        self.assertEqual(actions, ["move", "down", "move", "up", "move", "down", "move", "up"])
+        at = dict(enumerate(t for _, t in sent))
+        self.assertGreaterEqual(at[1] - at[0], 0.1)  # a press 100 ms after the move
+        self.assertGreaterEqual(at[3] - at[1], 0.29)  # held as long as the viewer held it
+        self.assertGreaterEqual(at[7] - at[5], 0.1)  # held long enough for Windows to take it
+
     def test_an_agent_that_fails_costs_the_event_not_the_viewer(self):
         from desk.winagent import AgentGone
 

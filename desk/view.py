@@ -308,34 +308,38 @@ class AgentPointer:
     """A viewer's pointer on a Windows guest's monitor 2 and on, through the in-session agent
     (SetCursorPos, mouse_event) in screen coordinates, as desk click moves it there. The agent
     serves one request at a time and a viewer sends motion by the hundred, so one thread sends
-    them in order and only the newest position between two button changes; a viewer that leaves
-    lets go of the buttons it held, or the agent's next move would drag."""
+    them in order and only the newest position between two button changes, no closer together
+    than the viewer sent them: Windows drops a right click held for 50 ms, as a backlog would send
+    it. A press or release waits 100 ms after what came before it, as desk click's do. A viewer
+    that leaves lets go of the buttons it held, or the agent's next move would drag."""
 
     BUTTONS = ((1, "left"), (2, "middle"), (4, "right"))
     WHEEL = ((8, 1), (16, -1))  # RFB's wheel up and down; the agent's delta is in notches
+    BUTTON_GAP = 0.1
 
     def __init__(self, run, left: int):
         self.run, self.left = run, left
         self.mask = 0
-        self.queue: list[dict] = []
+        self.queue: list[tuple[float, dict]] = []  # when the viewer sent it, what the agent gets
         self.ended = False
         self.cond = threading.Condition()
         self.worker = threading.Thread(target=self._work, daemon=True)
         self.worker.start()
 
     def event(self, mask: int, x: int, y: int) -> None:
+        now = time.monotonic()
         with self.cond:
-            move = {"action": "move", "x": self.left + x, "y": y}
-            if self.queue and self.queue[-1]["action"] == "move":
+            move = (now, {"action": "move", "x": self.left + x, "y": y})
+            if self.queue and self.queue[-1][1]["action"] == "move":
                 self.queue[-1] = move
             else:
                 self.queue.append(move)
             for bit, name in self.BUTTONS:
                 if (mask ^ self.mask) & bit:
-                    self.queue.append({"action": "down" if mask & bit else "up", "button": name})
+                    self.queue.append((now, {"action": "down" if mask & bit else "up", "button": name}))
             for bit, delta in self.WHEEL:
                 if mask & bit and not self.mask & bit:
-                    self.queue.append({"action": "wheel", "delta": delta})
+                    self.queue.append((now, {"action": "wheel", "delta": delta}))
             self.mask = mask
             self.cond.notify()
 
@@ -343,7 +347,7 @@ class AgentPointer:
         with self.cond:
             for bit, name in self.BUTTONS:
                 if self.mask & bit:
-                    self.queue.append({"action": "up", "button": name})
+                    self.queue.append((time.monotonic(), {"action": "up", "button": name}))
             self.mask = 0
             self.ended = True
             self.cond.notify()
@@ -351,13 +355,17 @@ class AgentPointer:
     def _work(self) -> None:
         from . import winagent
 
+        sent = came = 0.0  # when the last request went, and when its event had come
         while True:
             with self.cond:
                 while not self.queue and not self.ended:
                     self.cond.wait()
                 if not self.queue:
                     return
-                req = self.queue.pop(0)
+                t, req = self.queue.pop(0)
+            gap = max(t - came, self.BUTTON_GAP if req["action"] in ("down", "up") else 0)
+            time.sleep(max(0.0, sent + gap - time.monotonic()))
+            sent, came = time.monotonic(), t
             try:
                 winagent.request(self.run, timeout=5, cmd="pointer", **req)
             except DeskError as e:
