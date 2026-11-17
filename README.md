@@ -646,14 +646,14 @@ into a browser window whose focus is not in a text field is refused. Walks of th
   | Field | |
   |---|---|
   | `id`, `image` | the run and the image it started from |
-  | `state` | `running`, or `stopped` when its domain is gone (QEMU ended, destroyed outside desk) |
+  | `state` | `running`, or `stopped` when its domain is gone (QEMU ended, destroyed outside desk); also for the moment `desk up` starts it, so `stopped` alone is no reason to clean up |
   | `usbvfiod_ended` | the run's usbvfiod has ended (`desk up --usbvfiod`); `false` without one |
   | `idle_seconds` | since the last command that used the run |
   | `label` | who holds it, as `desk ls` shows it (scenario, `--label` / `$DESK_LABEL`, agent @ directory); `null`: none |
   | `owner` | `$AGENT_SESSION` at `desk up`, whatever the starting program put there to find its runs again; `null`: not set |
   | `agent_alive` | the coding agent that started the run still runs; `null`: no agent started it |
   | `monitors` | how many monitors the run has |
-  | `screens` | `[width, height]` of each monitor as the guest drives it now; `null` when stopped or when the look failed. It takes a screenshot of each monitor, about 0.1 s per run |
+  | `screens` | `[width, height]` of each monitor as the guest drives it now; `null` when stopped or when the look failed. Each is a screenshot of that monitor |
   | `dir` | the run's directory |
 
   Fields may be added later; the ones above keep their names and meaning.
