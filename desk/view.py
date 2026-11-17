@@ -294,14 +294,19 @@ def _message(client: socket.socket) -> tuple[int, bytes]:
 
 
 def _filter(client: socket.socket, up: socket.socket, passed: frozenset = SHOWN, pointer=None) -> None:
-    """Pass on the messages of the types given, drop the others; pointer events go to `pointer`
-    when there is one."""
+    """Pass on the messages of the types given, drop the others. With a `pointer` (AgentPointer),
+    pointer events go to it, and the rest of the input after them, in the order it came."""
     while True:
         t, msg = _message(client)
-        if t == 5 and pointer is not None:
+        if pointer is None:
+            if t in passed:
+                up.sendall(msg)
+        elif t == 5:
             pointer.event(msg[1], *struct.unpack(">HH", msg[2:]))
+        elif t in SHOWN:
+            pointer.send(msg)
         elif t in passed:
-            up.sendall(msg)
+            pointer.relay(msg)
 
 
 class AgentPointer:
@@ -310,25 +315,44 @@ class AgentPointer:
     serves one request at a time and a viewer sends motion by the hundred, so one thread sends
     them in order and only the newest position between two button changes, no closer together
     than the viewer sent them: Windows drops a right click held for 50 ms, as a backlog would send
-    it. A press or release waits 100 ms after what came before it, as desk click's do. A viewer
-    that leaves lets go of the buttons it held, or the agent's next move would drag."""
+    it. A press or release waits 100 ms after what came before it, as desk click's do.
+
+    Keys and the rest of the viewer's input wait in the same line, so a key typed after a click
+    reaches the window the click made active. A viewer that leaves, and a view that stops, let
+    go of the buttons it held, or the agent's next move would drag."""
 
     BUTTONS = ((1, "left"), (2, "middle"), (4, "right"))
     WHEEL = ((8, 1), (16, -1))  # RFB's wheel up and down; the agent's delta is in notches
     BUTTON_GAP = 0.1
 
-    def __init__(self, run, left: int):
-        self.run, self.left = run, left
+    def __init__(self, run, left: int, up: socket.socket):
+        self.run, self.left, self.up = run, left, up
+        self.up_lock = threading.Lock()  # two threads write to QEMU: the viewer's and this one's
         self.mask = 0
+        self.pressed: set[str] = set()  # buttons the agent was told to press and not to let go
         self.queue: list[tuple[float, dict]] = []  # when the viewer sent it, what the agent gets
         self.ended = False
         self.cond = threading.Condition()
         self.worker = threading.Thread(target=self._work, daemon=True)
+        _pointers.add(self)
         self.worker.start()
+
+    def send(self, msg: bytes) -> None:
+        with self.up_lock:
+            self.up.sendall(msg)
+
+    def relay(self, msg: bytes) -> None:
+        """Input for QEMU, sent once what the viewer did before it has been done."""
+        with self.cond:
+            if not self.ended:
+                self.queue.append((time.monotonic(), {"action": "relay", "msg": msg}))
+                self.cond.notify()
 
     def event(self, mask: int, x: int, y: int) -> None:
         now = time.monotonic()
         with self.cond:
+            if self.ended:
+                return
             move = (now, {"action": "move", "x": self.left + x, "y": y})
             if self.queue and self.queue[-1][1]["action"] == "move":
                 self.queue[-1] = move
@@ -344,10 +368,21 @@ class AgentPointer:
             self.cond.notify()
 
     def end(self) -> None:
+        """The viewer left: what it did is done, then the buttons it held are let go."""
         with self.cond:
-            for bit, name in self.BUTTONS:
-                if self.mask & bit:
-                    self.queue.append((time.monotonic(), {"action": "up", "button": name}))
+            if not self.ended:
+                for bit, name in self.BUTTONS:
+                    if self.mask & bit:
+                        self.queue.append((time.monotonic(), {"action": "up", "button": name}))
+            self.mask = 0
+            self.ended = True
+            self.cond.notify()
+
+    def let_go(self) -> None:
+        """The view stops: what is still waiting is dropped, only the buttons are let go."""
+        with self.cond:
+            held = self.pressed | {name for bit, name in self.BUTTONS if self.mask & bit}
+            self.queue = [(0.0, {"action": "up", "button": name}) for name in sorted(held)]
             self.mask = 0
             self.ended = True
             self.cond.notify()
@@ -361,15 +396,42 @@ class AgentPointer:
                 while not self.queue and not self.ended:
                     self.cond.wait()
                 if not self.queue:
+                    _pointers.discard(self)
                     return
                 t, req = self.queue.pop(0)
             gap = max(t - came, self.BUTTON_GAP if req["action"] in ("down", "up") else 0)
             time.sleep(max(0.0, sent + gap - time.monotonic()))
             sent, came = time.monotonic(), t
+            if req["action"] == "relay":
+                try:
+                    self.send(req["msg"])
+                except OSError:
+                    pass  # QEMU's connection is gone; the viewer's ends with it
+                continue
             try:
                 winagent.request(self.run, timeout=5, cmd="pointer", **req)
             except DeskError as e:
                 print(f"[desk view] pointer {req['action']} through the agent: {e}", file=sys.stderr, flush=True)
+                continue
+            with self.cond:
+                if req["action"] == "down":
+                    self.pressed.add(req["button"])
+                elif req["action"] == "up":
+                    self.pressed.discard(req["button"])
+
+
+_pointers: set[AgentPointer] = set()
+LET_GO = 3  # seconds a stopping view gives the agent to let go of buttons; desk waits 5 for it
+
+
+def _let_go(limit: float = LET_GO) -> None:
+    """Let go of every button a viewer holds through the agent, within the limit."""
+    pointers = list(_pointers)
+    for p in pointers:
+        p.let_go()
+    deadline = time.monotonic() + limit
+    for p in pointers:
+        p.worker.join(max(0.0, deadline - time.monotonic()))
 
 
 def _left_of(run, monitor: int) -> int:
@@ -426,7 +488,7 @@ def _serve_client(client: socket.socket, run_id: str, monitor: int, control: boo
             from . import runs
 
             run = runs.load(run_id)
-            agent = AgentPointer(run, _left_of(run, monitor))
+            agent = AgentPointer(run, _left_of(run, monitor), up)
             _filter(client, up, ALL_BUT_POINTER, agent)
         else:
             _filter(client, up, SHOWN)
@@ -434,7 +496,9 @@ def _serve_client(client: socket.socket, run_id: str, monitor: int, control: boo
         print(f"[desk view] client of monitor {monitor}: {e}", file=sys.stderr, flush=True)
     finally:
         if agent:
+            # What the viewer typed before it left still reaches QEMU, after its clicks.
             agent.end()
+            agent.worker.join(LET_GO)
         _close(client, *([up] if up else []))
 
 
@@ -449,13 +513,7 @@ def _serve(run_id: str, monitor: int, control: bool, path: str) -> None:
     ino = os.stat(path).st_ino
 
     def end(*_):
-        # Exits with every connection open, so each watcher sees its connection close.
-        try:
-            if os.stat(path).st_ino == ino:
-                os.unlink(path)
-        except OSError:
-            pass
-        os._exit(0)
+        _finish(path, ino)
 
     signal.signal(signal.SIGTERM, end)
     srv.listen(16)
@@ -479,6 +537,18 @@ def _serve(run_id: str, monitor: int, control: bool, path: str) -> None:
         threading.Thread(target=_serve_client, args=(client, run_id, monitor, control, tablet),
                          daemon=True).start()
     end()
+
+
+def _finish(path: str, ino: int) -> None:
+    """End the view. Buttons held through the agent are let go first, as the guest stays; then it
+    exits with every connection open, so each watcher sees its connection close."""
+    _let_go()
+    try:
+        if os.stat(path).st_ino == ino:
+            os.unlink(path)
+    except OSError:
+        pass
+    os._exit(0)
 
 
 if __name__ == "__main__":

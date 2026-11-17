@@ -37,6 +37,7 @@ class FakeQemu:
     def __init__(self):
         self.shared: list[int] = []
         self.received: list[bytes] = []
+        self.stream: list[tuple[float, bytes]] = []  # what came when, as it comes
         self.done = threading.Event()
 
     def serve(self, s: socket.socket, frame: bytes = b"") -> None:
@@ -51,6 +52,7 @@ class FakeQemu:
             got = b""
             while data := s.recv(4096):
                 got += data
+                self.stream.append((time.monotonic(), data))
             self.received.append(got)
         except (OSError, ConnectionError):
             pass
@@ -138,11 +140,37 @@ class Proxy(unittest.TestCase):
             deadline = time.monotonic() + 5
             while len(calls) < 3 and time.monotonic() < deadline:
                 time.sleep(0.01)
-        self.assertEqual(qemu.received, [KEY + CUT_TEXT + QEMU_KEY + UPDATE_REQUEST])
+        # Input waits behind the click; the picture's requests do not.
+        self.assertIn(UPDATE_REQUEST, qemu.received[0])
+        self.assertEqual(qemu.received[0].replace(UPDATE_REQUEST, b""), KEY + CUT_TEXT + QEMU_KEY)
         # POINTER presses the left button at (10, 20) of monitor 2; the viewer left with it held.
         self.assertEqual(calls, [{"timeout": 5, "cmd": "pointer", "action": "move", "x": 1290, "y": 20},
                                  {"timeout": 5, "cmd": "pointer", "action": "down", "button": "left"},
                                  {"timeout": 5, "cmd": "pointer", "action": "up", "button": "left"}])
+
+    def test_a_key_after_a_click_waits_for_the_click(self):
+        gate, calls = threading.Event(), []
+
+        def request(run, **req):
+            gate.wait(5)  # an agent that takes its time
+            calls.append((req["action"], time.monotonic()))
+
+        with mock.patch("desk.runs.load"), mock.patch("desk.view._left_of", return_value=1280), \
+                mock.patch("desk.winagent.request", side_effect=request):
+            qemu, client, t = self.connect(control=True, tablet=False, monitor=2)
+            client_hello(client)
+            client.sendall(POINTER + b"\x05\x00" + struct.pack(">HH", 10, 20) + KEY + QEMU_KEY)
+            time.sleep(0.3)
+            self.assertEqual(qemu.stream, [])  # the click is not done, so the keys wait
+            gate.set()
+            deadline = time.monotonic() + 5
+            while sum(len(d) for _, d in qemu.stream) < len(KEY + QEMU_KEY) and time.monotonic() < deadline:
+                time.sleep(0.01)
+            client.close()
+            t.join(5)
+        self.assertEqual(b"".join(d for _, d in qemu.stream), KEY + QEMU_KEY)
+        self.assertEqual([a for a, _ in calls], ["move", "down", "move", "up"])
+        self.assertGreaterEqual(qemu.stream[0][0], calls[-1][1])
 
     def test_the_tablet_reaches_every_monitor_but_a_windows_guests_second(self):
         windows = runs.Run(id="w", image="windows-11", domain="d", ssh_port=1, user="u", created=0, displays=2)
@@ -194,7 +222,7 @@ class AgentPointerOrder(unittest.TestCase):
             calls.append((req["action"], req.get("x", req.get("button", req.get("delta"))), req.get("y")))
 
         with mock.patch("desk.winagent.request", side_effect=request):
-            p = view.AgentPointer(mock.Mock(), 1280)
+            p = view.AgentPointer(mock.Mock(), 1280, mock.Mock())
             p.event(0, 10, 20)
             deadline = time.monotonic() + 5
             while p.queue and time.monotonic() < deadline:
@@ -213,7 +241,7 @@ class AgentPointerOrder(unittest.TestCase):
         sent = []
         with mock.patch("desk.winagent.request", side_effect=lambda run, timeout, **req: sent.append(
                 (req["action"], time.monotonic()))):
-            p = view.AgentPointer(mock.Mock(), 0)
+            p = view.AgentPointer(mock.Mock(), 0, mock.Mock())
             p.event(4, 5, 5)  # moved and pressed at once
             time.sleep(0.3)
             p.event(0, 5, 5)
@@ -228,12 +256,40 @@ class AgentPointerOrder(unittest.TestCase):
         self.assertGreaterEqual(at[3] - at[1], 0.29)  # held as long as the viewer held it
         self.assertGreaterEqual(at[7] - at[5], 0.1)  # held long enough for Windows to take it
 
+    def test_a_view_that_stops_lets_go_of_the_buttons_and_drops_the_rest(self):
+        calls, pressed = [], threading.Event()
+
+        def request(run, timeout, **req):
+            calls.append((req["action"], req.get("button")))
+            if req["action"] == "down":
+                pressed.set()
+
+        up = mock.Mock()
+        tmp = short_dir(self)
+        sock = tmp / "v.sock"
+        sock.write_text("")
+        with mock.patch("desk.winagent.request", side_effect=request), \
+                mock.patch("desk.view.os._exit") as exit_:
+            p = view.AgentPointer(mock.Mock(), 0, up)
+            p.event(1, 5, 5)  # pressed and held
+            self.assertTrue(pressed.wait(5))
+            time.sleep(0.05)
+            with p.cond:  # still waiting when the view is stopped: dropped
+                p.queue.append((time.monotonic() + 60, {"action": "relay", "msg": KEY}))
+            view._finish(str(sock), sock.stat().st_ino)
+        self.assertEqual(calls, [("move", None), ("down", "left"), ("up", "left")])
+        up.sendall.assert_not_called()
+        self.assertFalse(p.worker.is_alive())
+        self.assertNotIn(p, view._pointers)
+        self.assertFalse(sock.exists())
+        exit_.assert_called_once_with(0)
+
     def test_an_agent_that_fails_costs_the_event_not_the_viewer(self):
         from desk.winagent import AgentGone
 
         with mock.patch("desk.winagent.request", side_effect=AgentGone("gone")), \
                 mock.patch("sys.stderr", io.StringIO()) as err:
-            p = view.AgentPointer(mock.Mock(), 0)
+            p = view.AgentPointer(mock.Mock(), 0, mock.Mock())
             p.event(1, 1, 1)
             p.end()
             p.worker.join(5)

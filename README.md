@@ -657,7 +657,10 @@ into a browser window whose focus is not in a text field is refused. Walks of th
 - `--control` on a Windows guest's monitor 2 and on moves the pointer through the in-session agent,
   as `desk click` does there: QEMU's absolute tablet, which Windows maps onto the primary monitor,
   would put it on monitor 1. One thread sends the events in order and only the newest position
-  between button changes, and a viewer that leaves lets go of the buttons it held.
+  between button changes, no closer together than the viewer sent them. Keys and the viewer's
+  other input wait in the same line, so a key typed after a click reaches the window the click
+  made active. A viewer that leaves lets go of the buttons it held, and so does `desk view --stop`
+  (within 3 s) before the process ends.
 - Programs that show runs (a dashboard, a session viewer) read `desk ls --json` and take
   screenshots with `desk shot --peek -o FILE`. Neither counts as activity: the idle clock that
   `desk gc` and `DESK_TTL` go by, the run's timeline and its report stay as they were, so a run
