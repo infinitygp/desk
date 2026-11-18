@@ -571,7 +571,7 @@ def _copy_artifacts(run, spec, files: list[Path]) -> None:
         )
         if r.returncode:
             raise NotDone(
-                f"copying {f.name}: could not create {dest} (exit {r.returncode}); {runs.host_state(run)}"
+                f"copying {f.name}: could not create {dest} (exit {r.returncode}): {tail(r.stderr.decode(errors='replace'))}"
             )
         for f in files:
             rc = guest.scp(
@@ -579,7 +579,7 @@ def _copy_artifacts(run, spec, files: list[Path]) -> None:
             )
             if rc:
                 raise NotDone(
-                    f"copying {f.name} to {dest} failed (scp exit {rc}); {runs.host_state(run)}"
+                    f"copying {f.name} to {dest} failed (scp exit {rc})"
                 )
     except (OSError, subprocess.TimeoutExpired) as e:
         raise NotDone(f"copying {f.name} to {dest} failed: {e}") from e
