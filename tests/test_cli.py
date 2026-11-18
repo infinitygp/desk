@@ -251,14 +251,16 @@ class Observer(unittest.TestCase):
         self.assertEqual(self.ls(), [])
 
     def test_each_run_with_what_a_watcher_needs(self):
-        self.make_run("a", owner="session-1", label="claude @ work", holder=1, displays=1)
-        self.make_run("b", running=False)
+        active = self.make_run("a", owner="session-1", label="claude @ work", holder=1, displays=1)
+        stopped = self.make_run("b", running=False)
         with mock.patch("desk.runs.holder_alive", return_value=False):
             a, b = self.ls()
-        self.assertEqual(a, {"id": "a", "image": "fedora-44-gnome", "state": "running", "usbvfiod_ended": False,
+        self.assertEqual(a, {"id": "a", "created": active.created, "image": "fedora-44-gnome",
+                             "state": "running", "usbvfiod_ended": False,
                              "idle_seconds": 0, "label": "claude @ work", "owner": "session-1", "agent_alive": False,
                              "monitors": 1, "screens": [[1024, 768]], "dir": str(self.home / "runs" / "a")})
         # Its domain gone: listed, not looked at.
+        self.assertEqual(b["created"], stopped.created)
         self.assertEqual((b["state"], b["screens"], b["owner"], b["label"], b["agent_alive"]),
                          ("stopped", None, None, None, None))
 

@@ -142,7 +142,8 @@ def start(run, path: str, monitor: int = 1, control: bool = False) -> tuple[int,
         except DeskError:
             _stop(run, None, pid=p.pid)
             raise
-    run.log_event(view=str(sock), monitor=monitor, control=control)
+    if control:
+        run.log_event(view=str(sock), monitor=monitor, control=control)
     return size
 
 

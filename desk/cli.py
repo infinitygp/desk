@@ -402,7 +402,7 @@ def cmd_ls(args) -> None:
         state = "running" if dom is not None else "stopped"
         ended = bool(r.usbvfiod) and not usbvfiod.alive(r)
         if args.json:
-            listed.append({"id": r.id, "image": r.image, "state": state, "usbvfiod_ended": ended,
+            listed.append({"id": r.id, "image": r.image, "created": r.created, "state": state, "usbvfiod_ended": ended,
                            "idle_seconds": round(r.idle()), "label": r.label or None, "owner": r.owner,
                            "agent_alive": runs.holder_alive(r) if r.holder else None,
                            "monitors": r.displays, "screens": _screens(dom), "dir": str(r.dir)})
@@ -788,7 +788,7 @@ def cmd_view(args) -> None:
     from . import view
     from .virt import vnc_port
 
-    run = runs.resolve(args.run)
+    run = runs.resolve(args.run, activity=args.stop is None and (not args.socket or args.control))
     if args.stop is not None:
         stopped = view.stop(run, None if args.stop == "all" else args.stop)
         print("stopped " + (", ".join(stopped) if stopped else "nothing"))

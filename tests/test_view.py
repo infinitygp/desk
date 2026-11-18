@@ -11,7 +11,7 @@ import warnings
 from pathlib import Path
 from unittest import mock
 
-from desk import runs, view
+from desk import cli, runs, view
 from desk.config import DeskError
 
 PIXEL_FORMAT = bytes([32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0])
@@ -417,6 +417,22 @@ class Process(unittest.TestCase):
         os.unlink(self.tmp / "2.sock")
         with self.assertRaisesRegex(DeskError, "no picture of monitor 2"):
             view.start(self.run_, str(self.tmp / "s"), monitor=2)
+
+    def test_only_opening_a_control_socket_counts_as_activity(self):
+        run = self.run_
+        path = str(self.tmp / "screen.sock")
+        argv = ["-r", run.id, "view"]
+        timeline = run.dir / "log.jsonl"
+        with mock.patch.object(runs.Run, "dom"), mock.patch("sys.stdout"):
+            cli.main([*argv, "--socket", path, "--monitor", "2"])
+            self.assertFalse(run.in_use())
+            cli.main([*argv, "--stop", path])
+            self.assertEqual(runs.load(run.id).last_used, run.last_used)
+            self.assertFalse(timeline.exists())
+            with mock.patch.object(runs.Run, "hold"):
+                cli.main([*argv, "--socket", path, "--monitor", "2", "--control"])
+            self.assertGreater(runs.load(run.id).last_used, run.last_used)
+            self.assertTrue(timeline.exists())
 
     def test_a_run_that_goes_away_takes_its_view_along(self):
         path = self.tmp / "screen.sock"

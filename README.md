@@ -667,16 +667,18 @@ into a browser window whose focus is not in a text field is refused. Walks of th
   other input wait in the same line, so a key typed after a click reaches the window the click
   made active. A viewer that leaves lets go of the buttons it held, and so does `desk view --stop`
   (within 3 s) before the process ends.
-- Programs that show runs (a dashboard, a session viewer) read `desk ls --json` and take
-  screenshots with `desk shot --peek -o FILE`. Neither counts as activity: the idle clock that
-  `desk gc` and `DESK_TTL` go by, the run's timeline and its report stay as they were, so a run
-  that only somebody watching keeps open is still taken down. `--peek` writes only the file `-o`
-  names, never into the run's `shots/`.
+- Programs that show runs (a dashboard, a session viewer) can list them with `desk ls --json`,
+  take screenshots with `desk shot --peek -o FILE`, open a view-only socket or stop a view with
+  `desk view --stop`. None of these commands resets the idle clock or adds to the run's timeline,
+  so `desk gc` still takes the run down after `DESK_TTL` even with a viewer connected.
+  `--peek` writes only the file `-o` names, never into the run's `shots/` or report.
+  Opening a socket with `--control` counts as activity.
 - `desk ls --json` prints a JSON array, `[]` without runs, one object per run:
 
   | Field | |
   |---|---|
   | `id`, `image` | the run and the image it started from |
+  | `created` | when the run was created, in Unix seconds; distinguishes runs that reuse the same `id` |
   | `state` | `running`, or `stopped` when its domain is gone (QEMU ended, destroyed outside desk); also for the moment `desk up` starts it, so `stopped` alone is no reason to clean up |
   | `usbvfiod_ended` | the run's usbvfiod has ended (`desk up --usbvfiod`); `false` without one |
   | `idle_seconds` | since the last command that used the run |
