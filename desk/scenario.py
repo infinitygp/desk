@@ -14,6 +14,7 @@ import tempfile
 import time
 import tomllib
 from datetime import UTC
+from functools import partial
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from . import a11y, browser, clock, disks, display, evidence, guest, hubs, record, runs, usb, usbvfiod, winagent
@@ -1203,6 +1204,14 @@ def _run_steps(run, spec, data: dict, first: int = 1, observed: dict | None = No
     if machine is not None:
         on_browser = (machine, runs.spec_for(machine._run))
         on_browser += (Steps(on_browser[1], machine),)
+    def capture(index, files, result):
+        try:
+            path = _save_output(run, index, result)
+        except OSError as e:
+            raise NotDone(f"could not save output of step {index}: {e}") from e
+        if path:
+            files["output_file"] = path
+
     try:
         for i, step in enumerate(data.get("step", []), 1):
             if i < first:
@@ -1220,20 +1229,12 @@ def _run_steps(run, spec, data: dict, first: int = 1, observed: dict | None = No
             lost = None
             files = {}
 
-            def capture(result):
-                try:
-                    path = _save_output(run, i, result)
-                except OSError as e:
-                    raise NotDone(f"could not save output of step {i}: {e}") from e
-                if path:
-                    files["output_file"] = path
-
             target, tspec, tsteps = on_browser if on_browser and action not in GUEST_ACTIONS else (run, spec, steps)
             try:
                 step = _substituted(step, steps.saved)
                 if action == "open":
                     step = {**step, "open": _guest_url(step["open"], run, machine)}
-                detail = _step(target, tspec, tsteps, step, capture)
+                detail = _step(target, tspec, tsteps, step, partial(capture, i, files))
                 passed = True
             except (StepFailed, DeskError, subprocess.TimeoutExpired) as e:
                 detail, passed = str(e), False
