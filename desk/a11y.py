@@ -491,6 +491,25 @@ def focused_field(run) -> dict:
     return _helper(run, "focused", "{}")
 
 
+def check_typed_text(run, text: str) -> str:
+    try:
+        field = _helper(run, "focused", '{"read": true}')
+    except guest.NoConnection:
+        raise
+    except (DeskError, json.JSONDecodeError) as e:
+        raise Unread(f"could not check the focused field after typing: {e}") from e
+    if field.get("role") == "password text":
+        return "text not checked: the focused field is a password field"
+    shown = field.get("text")
+    if shown is None:
+        return "text not checked: no readable focused field"
+    if text not in shown:
+        raise DeskError(
+            f"{field['role']} {field['name']!r} did not take {text!r}: the field shows {shown!r}"
+        )
+    return ""
+
+
 def page_url(run) -> dict:
     """The address of the page in the focused browser window (Linux guests)."""
     return _helper(run, "page", "{}")

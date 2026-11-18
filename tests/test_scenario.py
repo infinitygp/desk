@@ -18,6 +18,63 @@ def write(text: str) -> Path:
     return Path(f.name)
 
 
+class TypePostcheck(unittest.TestCase):
+    def type_step(self, field, family="linux", anywhere=False, desktop="gnome"):
+        steps = mock.Mock()
+        with (
+            mock.patch("desk.scenario.time.sleep") as settle,
+            mock.patch("desk.a11y._helper") as helper,
+        ):
+            calls = mock.Mock()
+            calls.attach_mock(steps.type, "type")
+            calls.attach_mock(settle, "settle")
+            calls.attach_mock(helper, "read")
+            if isinstance(field, Exception):
+                helper.side_effect = field
+            else:
+                helper.return_value = field
+            detail = scenario._step(
+                None,
+                SimpleNamespace(family=family, desktop=desktop),
+                steps,
+                {"type": "a  b", "anywhere": anywhere},
+            )
+            expected = [mock.call.type("a  b", anywhere=anywhere)]
+            if family == "linux" and not anywhere and desktop:
+                expected += [
+                    mock.call.settle(mock.ANY),
+                    mock.call.read(None, "focused", '{"read": true}'),
+                ]
+            self.assertEqual(calls.mock_calls, expected)
+            return detail
+
+    def test_literal_substring_anywhere_in_the_field(self):
+        self.assertEqual(self.type_step({"text": "x" * 410 + "a  b!"}), "")
+
+    def test_mismatch_shows_field_and_actual_contents_including_empty(self):
+        for actual in ["a b", ""]:
+            with self.subTest(actual=actual), self.assertRaises(DeskError) as cm:
+                self.type_step({"role": "entry", "name": "Query", "text": actual})
+            self.assertIn("entry 'Query'", str(cm.exception))
+            self.assertIn(f"field shows {actual!r}", str(cm.exception))
+            self.assertNotIsInstance(cm.exception, scenario.NotDone)
+
+    def test_unchecked_pass_has_a_reason(self):
+        self.assertIn("password", self.type_step({"role": "password text"}))
+        self.assertIn("no readable focused field", self.type_step({"window": None}))
+        self.assertIn("text console", self.type_step({}, desktop=""))
+
+    def test_anywhere_and_windows_do_not_wait_or_read(self):
+        self.assertEqual(self.type_step(None, anywhere=True), "")
+        self.assertEqual(self.type_step(None, family="windows"), "")
+
+    def test_transport_and_helper_errors_are_not_a_product_result(self):
+        with self.assertRaises(guest.NoConnection):
+            self.type_step(guest.NoConnection("SSH connection lost"))
+        with self.assertRaisesRegex(scenario.NotDone, "tree timed out"):
+            self.type_step(DeskError("tree timed out"))
+
+
 class Load(unittest.TestCase):
     def test_valid_file(self):
         data = scenario.load(write('''

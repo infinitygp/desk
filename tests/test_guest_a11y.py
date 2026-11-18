@@ -25,6 +25,47 @@ class StackedBase(unittest.TestCase):
         self.assertEqual(stacked_base([472, 476, 336, 236], None, self.base), self.base)
 
 
+@unittest.skipIf(guest_a11y is None, "AT-SPI GObject introspection not installed")
+class FocusedText(unittest.TestCase):
+    def test_reads_raw_text_only_for_a_readable_nonpassword_field_and_only_on_request(
+        self,
+    ):
+        field = mock.Mock()
+        field.get_name.return_value = "Field"
+        for role, interfaces, read, expected in [
+            ("entry", ["Text"], True, "a  b"),
+            ("entry", ["Text"], False, None),
+            ("password text", ["Text"], True, None),
+            ("entry", ["EditableText"], True, None),
+        ]:
+            field.get_role_name.return_value = role
+            field.get_interfaces.return_value = interfaces
+            with (
+                self.subTest(role=role, interfaces=interfaces, read=read),
+                mock.patch.object(
+                    guest_a11y,
+                    "front_toplevel",
+                    return_value=({"title": "W"}, mock.Mock(), field),
+                ),
+                mock.patch.object(
+                    guest_a11y,
+                    "showing_walk",
+                    side_effect=lambda _, visit, deadline: visit(field),
+                ),
+                mock.patch.object(
+                    guest_a11y, "states", return_value={"focused", "editable"}
+                ),
+                mock.patch.object(Atspi.Text, "get_text", return_value="a  b") as get,
+            ):
+                self.assertEqual(
+                    guest_a11y.focused({"read": read}).get("text"), expected
+                )
+                if expected is None:
+                    get.assert_not_called()
+                else:
+                    get.assert_called_once_with(field, 0, -1)
+
+
 class Node:
     def __init__(self, parent=None, labels=()):
         self.parent, self.labels = parent, list(labels)

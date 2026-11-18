@@ -848,7 +848,13 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
     elif action == "set_text":
         return steps.set_text(value, step["text"], role, step.get("exact", True), timeout or 60, step.get("window"))
     elif action == "type":
-        steps.type(value, anywhere=step.get("anywhere", False))
+        anywhere = step.get("anywhere", False)
+        steps.type(value, anywhere=anywhere)
+        if not anywhere and spec.family == "linux":
+            if not spec.desktop:
+                return "text not checked: a text console has no readable focused field"
+            time.sleep(0.25)
+            return a11y.check_typed_text(run, value)
     elif action == "key":
         steps.key(*([value] if isinstance(value, str) else value))
     elif action == "expect":

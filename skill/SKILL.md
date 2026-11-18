@@ -398,7 +398,11 @@ count as passed or failed. Exit 1 when any counted run failed a step, else 2 whe
 checked, 0 only when all N runs passed. `scenario check` and `run` warn about fixed waits
 (`wait = 2`, `sleep` in a command): they fail on a busy host and waste time on an idle one, so
 `expect` what should appear, or repeat a check with `until = true`. A `type` step refuses, like `desk type`,
-when a browser's focus is not in a text field; `anywhere = true` types anyway (page shortcuts).
+when a browser's focus is not in a text field. On Linux the step then reads the focused field
+back: it may already contain other text, but if the typed text is missing the step fails and
+says what the field contains. For a password field, or when no focused field can be read, the
+step reports why it could not check. `anywhere = true` skips both checks (page shortcuts);
+Windows does not check the field.
 If the run itself cannot start, `desk` exits 2 and names a screenshot of what the screen showed
 then (`runs/<id>/failed-start.png`).
 

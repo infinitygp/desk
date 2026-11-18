@@ -958,7 +958,7 @@ def showing_walk(acc, visit, deadline, depth=0) -> None:
     return None
 
 
-def focused(_opts) -> dict:
+def focused(opts) -> dict:
     """The element with the keyboard focus in the focused window."""
     front, app, top = front_toplevel()
     if top is None:
@@ -976,6 +976,13 @@ def focused(_opts) -> dict:
         a, st = found[-1]
         out.update(role=a.get_role_name(), name=(a.get_name() or "").strip(),
                    editable="editable" in st and takes_text(a, st))
+        if opts.get("read") and out["role"] != "password text" and out["editable"]:
+            try:
+                if "Text" in a.get_interfaces():
+                    # Unlike a listing preview, compare the full text with whitespace intact.
+                    out["text"] = Atspi.Text.get_text(a, 0, -1)
+            except GLib.Error:
+                pass  # A field can disappear between finding it and asking for its text.
     return out
 
 
