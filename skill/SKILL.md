@@ -283,10 +283,16 @@ key = "f5"                   # one combo or a list
 click = "Foo"                # by accessible name in the focused window; role, exact (default true), button
 role = "link"
 [[step]]
-expect = "Nothing here yet"  # waits until shown (name, value or text); role, exact, timeout, window, state
+expect = "Nothing here yet"  # waits for a matching name, value or text; role, exact, timeout, window, state
+visible = true               # scroll it into view before the shot, without clicking
 [[step]]
 shot = "empty-state"
 ```
+
+`visible = true` is only for `expect`. If the matched element stays outside the visible area
+or covered after scrolling, the step fails and names it. If the desktop cannot tell what is
+at the element’s location, desk reports that it could not check (exit 2). With `visible = false` or no `visible`
+option, `expect` only checks the accessibility tree and does not scroll.
 
 On Linux and OpenWrt, `/tmp/desk` may disappear when the guest restarts. After `reboot = true`
 or `reboot = "<command>"`, desk copies the selected build artifacts from the host again. A file

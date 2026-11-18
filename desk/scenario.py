@@ -25,7 +25,7 @@ ACTIONS = {"root", "exec", "gui", "focus", "click", "type", "key", "expect", "ex
            "observe_start", "observe_stop", "mark", "set_text", "move", "drag", "scroll", "press", "release", "win",
            "pull", "offline", "usb_add", "usb_rm", "host"}
 OPTIONS = {"role", "exact", "timeout", "output", "rc", "name", "soft", "env", "step", "until", "anywhere", "browser",
-           "button", "window", "state", "text", "double", "to", "save", "at", "hubs", "only"}
+           "button", "window", "state", "visible", "text", "double", "to", "save", "at", "hubs", "only"}
 # What every step takes besides its action: a name, soft, and only (the images it is for).
 COMMON = {"name", "soft", "only"}
 # The options each action reads, besides COMMON; any other would be ignored without a word.
@@ -37,7 +37,8 @@ READS = {
     # By name; a point [x, y] takes none of these (load says so), press takes button either way.
     "move": {"role", "exact", "timeout", "window"}, "drag": {"role", "exact", "timeout", "window"},
     "press": {"role", "exact", "timeout", "window", "button"}, "release": {"role", "exact", "timeout", "window"},
-    "expect": {"role", "exact", "timeout", "window", "state"}, "expect_absent": {"role", "exact", "timeout", "window"},
+    "expect": {"role", "exact", "timeout", "window", "state", "visible"},
+    "expect_absent": {"role", "exact", "timeout", "window"},
     "reboot": {"timeout"}, "wait": {"timeout"}, "clock": {"step", "timeout"}, "disk_rm": {"timeout"},
     "open": {"timeout", "browser"}, "viewport": {"browser"}, "usb_add": {"timeout", "at", "hubs"},
     "host": {"timeout", "rc", "output", "env", "until", "save"},
@@ -118,7 +119,8 @@ VALUES = {
     "browser": (lambda v: isinstance(v, str) and v in browser.NAMES, " or ".join(sorted(browser.NAMES))),
     "timeout": (lambda v: _number(v) and v > 0, "seconds"),
     "rc": (lambda v: isinstance(v, int) and not isinstance(v, bool), "an exit code"),
-    **{o: (lambda v: isinstance(v, bool), "true or false") for o in ("exact", "soft", "until", "anywhere", "double")},
+    **{o: (lambda v: isinstance(v, bool), "true or false")
+       for o in ("exact", "soft", "until", "anywhere", "double", "visible")},
     "env": (lambda v: isinstance(v, dict) and all(isinstance(x, (str, int, float)) for x in v.values()),
             "a table like {NAME = \"value\"}"),
     "host": (lambda v: isinstance(v, list) and bool(v) and all(_text(x) for x in v),
@@ -861,6 +863,10 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
         states = step.get("state")
         node = steps.wait_for(value, role, step.get("exact", False), timeout or 30, step.get("window"),
                               [states] if isinstance(states, str) else states)
+        if step.get("visible"):
+            target = a11y.ref_spec(node)
+            x, y = a11y.ensure_visible(run, target)
+            return f"{a11y.called(target)} visible at ({x},{y})"
         return a11y.format_node(node, indent=False)
     elif action == "expect_absent":
         # Absent while the page is still loading proves nothing; at least let the screen settle.

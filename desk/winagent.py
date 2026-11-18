@@ -4,6 +4,7 @@ SSH sessions on Windows cannot see the interactive desktop, so UI Automation que
 `exec --gui` go to an agent started at logon inside that session, over a forwarded port.
 """
 
+import base64
 import json
 import secrets
 import socket
@@ -24,6 +25,108 @@ class AgentGone(DeskError):
 
 class AgentBusy(DeskError):
     """No answer within the time given: the agent is busy, or the answer was lost on the way."""
+
+
+# Reuse the resolver that made this guest's listing. Run in a separate, windowless desktop
+# process: even an existing warm image can do the check, and a hung provider can be killed.
+_VISIBLE_POINT = r"""
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+try {
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+. C:\desk\uia.ps1
+Add-Type -Namespace Desk -Name Dpi -MemberDefinition @'
+[DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr value);
+'@
+if ([Desk.Dpi]::SetThreadDpiAwarenessContext([IntPtr](-4)) -eq [IntPtr]::Zero) { throw 'could not set DPI awareness' }
+$q = $env:DESK_VISIBLE | ConvertFrom-Json
+if ($q.spec.path[-1] -ge 100000) { throw 'cannot identify this MSAA-only item in a UI Automation hit test' }
+$el = Find-Node $q.spec
+$r = $el.Current.BoundingRectangle
+function Test-Point {
+    if ($el.Current.IsOffscreen -or $r.IsEmpty) { return @{point=$null} }
+    $x0 = [Math]::Max(0, [Math]::Ceiling($r.Left)); $x1 = [Math]::Min($q.width, [Math]::Ceiling($r.Right))
+    $y0 = [Math]::Max(0, [Math]::Ceiling($r.Top)); $y1 = [Math]::Min($q.height, [Math]::Ceiling($r.Bottom))
+    if ($x0 -ge $x1 -or $y0 -ge $y1) { return @{point=$null} }
+    $ancestors = @()
+    for ($a = $RawWalker.GetParent($el); $null -ne $a; $a = $RawWalker.GetParent($a)) { $ancestors += $a }
+    function Samples($lo, $hi) {
+        @(0.5, 0.1, 0.9, 0, 1) | ForEach-Object { $lo + [Math]::Floor(($hi-$lo-1)*$_) } | Select-Object -Unique
+    }
+    foreach ($y in (Samples $y0 $y1)) {
+        foreach ($x in (Samples $x0 $x1)) {
+            $hit = $AE::FromPoint([Windows.Point]::new($x, $y))
+            if ($null -eq $hit) { throw 'UI Automation returned no hit' }
+            # The taskbar can return only its container. That proves neither that its child
+            # was visible nor that another element covered it.
+            if ($ancestors -contains $hit) { $inconclusive = $true; continue }
+            if (-not $cover) { $cover = "$($hit.Current.ControlType.ProgrammaticName) $($hit.Current.Name)".Trim() }
+            while ($null -ne $hit) {
+                if ([Windows.Automation.Automation]::Compare($hit, $el)) { return @{point=@([int]$x, [int]$y)} }
+                $hit = $RawWalker.GetParent($hit)
+            }
+        }
+    }
+    if ($inconclusive) { throw 'UI Automation could not distinguish the element from its container' }
+    return @{point=$null; covered=$cover}
+}
+Test-Point | ConvertTo-Json -Compress
+} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }
+"""
+
+
+def visible_point(
+    run, spec: dict, size: tuple[int, int]
+) -> tuple[tuple[int, int] | None, str | None, bool]:
+    """A point verified by a desktop hit test, never inferred from an element's rectangle."""
+    encoded = base64.b64encode(_VISIBLE_POINT.encode("utf-16-le")).decode()
+    reply = request(
+        run,
+        cmd="run",
+        file="powershell.exe",
+        wait=True,
+        timeout_s=20,
+        timeout=30,
+        args=[
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-OutputFormat",
+            "Text",
+            "-EncodedCommand",
+            encoded,
+        ],
+        env={
+            "DESK_VISIBLE": json.dumps(
+                {"spec": spec, "width": size[0], "height": size[1]}
+            )
+        },
+    )
+    if reply.get("timeout") or reply.get("code") != 0:
+        why = (
+            "timed out"
+            if reply.get("timeout")
+            else (reply.get("stderr") or "no result").strip()[:300]
+        )
+        raise DeskError(f"Windows visibility hit test failed: {why}")
+    try:
+        result = json.loads(reply.get("stdout") or "")
+        point = result["point"]
+        if point is None:
+            return None, result.get("covered"), False
+        if (
+            isinstance(point, list)
+            and len(point) == 2
+            and all(
+                type(v) is int and 0 <= v < n for v, n in zip(point, size, strict=True)
+            )
+        ):
+            return (point[0], point[1]), None, False
+    except (ValueError, KeyError, TypeError):
+        pass
+    raise DeskError("Windows visibility hit test returned no usable result")
 
 
 def _query(req: dict) -> bool:

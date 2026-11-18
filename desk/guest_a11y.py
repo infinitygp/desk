@@ -70,7 +70,7 @@ const focus = workspace.activeWindow;
 reply(JSON.stringify(workspace.stackingOrder.map(w => ({
     title: w.caption, wm_class: w.resourceClass, pid: w.pid, x11: String(w).startsWith("KWin::X11Window"),
     minimized: w.minimized,
-    focus: w === focus, frame: box(w.clientGeometry), buffer: box(w.bufferGeometry)}))));
+    focus: w === focus, frame: box(w.clientGeometry), buffer: box(w.bufferGeometry), outer: box(w.frameGeometry)}))));
 """
 KWIN_ACTIVATE = """
 const q = QUERY.toLowerCase();
@@ -194,7 +194,8 @@ def x11_windows() -> list[dict]:
         left, right, top, bottom = shadows.get(w.get_xid(), (0, 0, 0, 0))
         listed.append({"title": w.get_name(), "wm_class": w.get_class_group_name(), "pid": w.get_pid(), "x11": False,
                        "minimized": w.is_minimized(), "focus": w == active, "buffer": [x, y, width, height],
-                       "frame": [x + left, y + top, width - left - right, height - top - bottom], "wnck": w})
+                       "frame": [x + left, y + top, width - left - right, height - top - bottom],
+                       "outer": list(w.get_geometry()), "wnck": w})
     return listed
 
 
@@ -302,7 +303,7 @@ def extents(acc, coord):
         r = acc.get_extents(coord)
     except (GLib.Error, AttributeError, TypeError):
         return None
-    if r.width <= 0 or r.height <= 0:
+    if r is None or r.width <= 0 or r.height <= 0:
         return None
     return [r.x, r.y, r.width, r.height]
 
@@ -343,16 +344,27 @@ class Mapper:
     def __init__(self, windows: list[dict]):
         self.windows = windows
 
-    def for_toplevel(self, app_name: str, pid: int, top, app=None) -> tuple[str, int, int] | None:
-        if app_name == "gnome-shell":
-            return ("screen", 0, 0)
+    def window_for(self, pid, top, verify=False):
         name = top.get_name() or ""
+        if verify and any(w["minimized"] and w["pid"] == pid and w["title"] == name for w in self.windows):
+            raise LookupError("cannot verify the stacking position of a minimized window")
         cands = [w for w in self.windows if w["pid"] == pid and not w["minimized"]]
         if not cands:
             # Sandboxed (Flatpak) apps reach the a11y bus through a proxy with another pid.
             cands = [w for w in self.windows if w["title"] == name and not w["minimized"]]
         named = [w for w in cands if w["title"] == name]
-        win = named[-1] if named else (cands[-1] if len(cands) == 1 else None)
+        if verify and len(named) > 1:
+            raise LookupError("cannot distinguish windows with the same title")
+        return named[-1] if named else (cands[-1] if len(cands) == 1 else None)
+
+    def for_toplevel(self, app_name: str, pid: int, top, app=None) -> tuple[str, int, int] | None:
+        win = None if app_name == "gnome-shell" else self.window_for(pid, top)
+        return self.base_for(app_name, win, app)
+
+    @staticmethod
+    def base_for(app_name, win, app):
+        if app_name == "gnome-shell":
+            return ("screen", 0, 0)
         if win is None:
             return None
         if win["x11"]:
@@ -439,7 +451,7 @@ def center(box) -> tuple[int, int]:
     return x + w // 2, y + h // 2
 
 
-def hit_at(root, base, point):
+def hit_at(root, base, point, *, verify=False):
     """The deepest element the application itself says is at a screen point: what a click there
     reaches. `root` is the top of the process's tree, `base` its coordinate base. None when the
     toolkit cannot tell."""
@@ -456,6 +468,8 @@ def hit_at(root, base, point):
             if ch is None or ch == acc or process_of(ch) != proc or "showing" not in states(ch):
                 break
         except (GLib.Error, AttributeError, TypeError):
+            if verify:
+                return None
             break
         acc = hit = ch
     return hit
@@ -538,25 +552,39 @@ def visible_point(bbox, chain) -> tuple[int, int] | None:
     return next((p for p in grid(bbox) if within(chain, p)), None)
 
 
-def clickable_point(acc, bbox, chain, root, showing: bool):
+def clickable_point(acc, bbox, chain, root, showing: bool, *, verify=False, above=()):
     """A point of `bbox` where a click reaches `acc` (the middle if possible, one inside every
     ancestor first), or None and what covers it; and whether that point lies outside an
     ancestor's box. When the toolkit cannot hit-test, the middle of what it reports as showing."""
     racc, rbase, rbox = root
-    cover, tested = None, False
+    cover, tested, unknown = None, False, None
     for p in sorted(grid(bbox), key=lambda p: not within(chain, p)):
         if rbox is not None and not contains(rbox, p):
             continue
+        if verify and not within(chain, p):
+            continue
         tested = True
-        hit = hit_at(racc, rbase, p)
+        blocker = next((w for w in above if contains(w.get("outer") or w["frame"], p)), None)
+        if blocker is not None:
+            if DESKTOP == "hyprland":
+                unknown = "Hyprland does not report the stacking order of overlapping windows"
+            else:
+                cover = cover or blocker["title"] or "another window"
+            continue
+        hit = hit_at(racc, rbase, p, verify=verify)
         where = placement(acc, hit, chain, p)
         if where is None:
+            if verify:
+                unknown = "the toolkit could not hit-test the element"
+                continue
             break
         if where != "other":
             return p, None, not within(chain, p)
         cover = cover or label_of(hit)
     else:
-        if tested:
+        if unknown:
+            raise LookupError(unknown)
+        if tested or verify:
             return None, cover, False
     # Outside its window's box (a menu hanging below a small window), or the toolkit cannot tell.
     point = (visible_point(bbox, chain) or center(bbox)) if showing else None
@@ -781,13 +809,9 @@ def find_node(spec: dict):
     return app, hits[0][0], hits[0][1]
 
 
-def along(app, path):
+def along(app, path, acc, base):
     """Coordinate base for the node at `path`, following embedded processes on the way down; its
     ancestors with their boxes; and the top of its process's tree for hit tests."""
-    acc = app.get_child_at_index(path[0])
-    base = Mapper(shell_windows()).for_toplevel(app.get_name() or "", app.get_process_id(), acc, app)
-    if base is None:
-        return None, [], None
     proc = process_of(acc)
     gtk4 = toolkit_major(app) == ("gtk", 4)
     box = Mapper.place(acc, base)
@@ -815,14 +839,28 @@ def resolve(spec: dict) -> dict:
     """Where the element is now and a point where a click reaches it (None: scrolled away or
     covered, with what covers it)."""
     app, path, acc = find_node(spec)
-    base, chain, root = along(app, path)
+    verify = spec.get("verify", False)
+    mapper = Mapper(shell_windows())
+    top, name = app.get_child_at_index(path[0]), app.get_name() or ""
+    win = None if name == "gnome-shell" else mapper.window_for(app.get_process_id(), top, verify)
+    base = mapper.base_for(name, win, app)
     if base is None:
         raise LookupError("window position unknown")
+    base, chain, root = along(app, path, top, base)
     bbox = Mapper.place(acc, base)
     if bbox is None:
+        if verify:
+            return {"bbox": None, "showing": False, "point": None, "covered": None, "clipped": False}
         raise LookupError("element has no on-screen extents")
+    above = []
+    if verify:
+        if win is None:
+            raise LookupError("window stacking position unknown")
+        # Hyprland reports focus history, not stacking order. Only an unshared point is certain.
+        others = mapper.windows if DESKTOP == "hyprland" else mapper.windows[mapper.windows.index(win) + 1:]
+        above = [w for w in reversed(others) if w is not win and not w["minimized"]]
     showing = "showing" in states(acc)
-    point, cover, clipped = clickable_point(acc, bbox, chain, root, showing)
+    point, cover, clipped = clickable_point(acc, bbox, chain, root, showing, verify=verify, above=above)
     return {"bbox": bbox, "showing": showing, "point": list(point) if point else None, "covered": cover,
             "clipped": clipped}
 

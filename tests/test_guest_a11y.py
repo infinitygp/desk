@@ -229,6 +229,55 @@ class Tree:
 
 
 @unittest.skipIf(guest_a11y is None, "AT-SPI GObject introspection not installed")
+class VerifiedResolve(unittest.TestCase):
+    frame = [0, 0, 100, 80]
+
+    def window(self, title, frame=None, minimized=False):
+        return {"pid": 7, "title": title, "minimized": minimized, "x11": False,
+                "frame": frame or self.frame, "buffer": frame or self.frame}
+
+    def resolve(self, windows, bbox, *, verify=True, hit=True, desktop="gnome"):
+        target = Tree("label", "Ready")
+        top = Tree("frame", "Target", children=[target])
+        app = Tree("application", "App", children=[top])
+        app.get_process_id = lambda: 7
+        with mock.patch.object(guest_a11y, "shell_windows", return_value=windows), \
+                mock.patch.object(guest_a11y, "find_node", return_value=(app, [0, 0], target)), \
+                mock.patch.object(guest_a11y, "process_of", return_value=7), \
+                mock.patch.object(guest_a11y.Mapper, "place", side_effect=lambda a, _: self.frame if a == top else bbox), \
+                mock.patch.object(guest_a11y, "DESKTOP", desktop), \
+                mock.patch.object(guest_a11y, "states", return_value={"showing"}), \
+                mock.patch.object(guest_a11y, "hit_at", return_value=target if hit else None):
+            return guest_a11y.resolve({"verify": True} if verify else {})
+
+    def test_a_missing_hit_is_unknown_not_offscreen(self):
+        windows = [self.window("Target")]
+        with self.assertRaisesRegex(LookupError, "hit-test"):
+            self.resolve(windows, self.frame, hit=False)
+        self.assertEqual(self.resolve(windows, self.frame, hit=False, verify=False)["point"], [50, 40])
+        for box in (None, [0, 100, 20, 20]):
+            res = self.resolve(windows, box, hit=False)
+            self.assertIsNone(res["point"])
+            self.assertIsNone(res["covered"])
+
+    def test_only_a_higher_nonminimized_window_blocks_a_point(self):
+        windows = [self.window("Behind"), self.window("Target"), self.window("Dialog"), self.window("Hidden", minimized=True)]
+        res = self.resolve(windows, self.frame)
+        self.assertEqual((res["point"], res["covered"]), (None, "Dialog"))
+        windows[2]["frame"] = [40, 0, 60, 80]
+        self.assertEqual(self.resolve(windows, self.frame)["point"], [25, 40])
+        self.assertEqual(self.resolve(windows, self.frame, verify=False)["point"], [50, 40])
+
+    def test_unknown_window_or_stacking_order_is_not_a_pass(self):
+        with self.assertRaisesRegex(LookupError, "distinguish windows"):
+            self.resolve([self.window("Target"), self.window("Target")], self.frame)
+        with self.assertRaisesRegex(LookupError, "minimized window"):
+            self.resolve([self.window("Target", minimized=True), self.window("Other")], self.frame)
+        with self.assertRaisesRegex(LookupError, "stacking order"):
+            self.resolve([self.window("Other"), self.window("Target")], self.frame, desktop="hyprland")
+
+
+@unittest.skipIf(guest_a11y is None, "AT-SPI GObject introspection not installed")
 class FindAgain(unittest.TestCase):
     """A node from a listing whose path no longer leads to it (the page re-rendered)."""
 

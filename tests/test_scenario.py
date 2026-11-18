@@ -169,6 +169,9 @@ reboot = true
             'image = "a"\n[[step]]\nclick = "URL"\ntext = "x"',
             'image = "a"\n[[step]]\ngui = "app"\nuntil = true',
             'image = "a"\n[[step]]\nclick = "x"\nuntil = true',
+            'image = "a"\n[[step]]\nexpect = "x"\nvisible = 1',
+            'image = "a"\n[[step]]\nclick = "x"\nvisible = true',
+            'image = "a"\n[[step]]\nexpect_absent = "x"\nvisible = false',
             'image = "a"\n[[step]]\nexpect = "x"\nstate = "visible"',        # no listing gives it
             'image = "a"\n[[step]]\nexpect = "x"\nstate = []',
             'image = "a"\n[[step]]\nexpect_absent = "x"\nstate = "focused"',  # absent has no state
@@ -649,6 +652,32 @@ class ExpectState(unittest.TestCase):
 
         target = SimpleNamespace(agent_port=0, dom=lambda: "dom")
         return steps.Steps(SimpleNamespace(family="linux", need_desktop=lambda what: None), target)
+
+    def test_visible_checks_the_state_match_and_reports_the_new_position(self):
+        s = self.steps()
+        step = scenario.load(write('image = "a"\n[[step]]\nexpect = "Device"\nstate = "focused"\n'
+                                   'visible = true'))["step"][0]
+        with mock.patch("desk.a11y.snapshot", return_value=self.SNAP), \
+                mock.patch("desk.a11y._visible_point", return_value=(30, 70)) as point:
+            detail = scenario._step(s.target, s.spec, s, step)
+        self.assertEqual(point.call_args.args[1]["path"], [0, 2])
+        self.assertEqual(detail, "combo box 'Device' visible at (30,70)")
+
+    def test_plain_expect_accepts_offscreen_elements_without_scrolling(self):
+        s = self.steps()
+        node = {**self.SNAP["nodes"][0], "ref": "e1", "offscreen": True}
+        with mock.patch("desk.a11y.snapshot", return_value={**self.SNAP, "nodes": [node]}), \
+                mock.patch("desk.a11y._visible_point") as point:
+            for opt in ({}, {"visible": False}):
+                self.assertIn("[offscreen]", scenario._step(s.target, s.spec, s, {"expect": "Devices", **opt}))
+            point.assert_not_called()
+
+    def test_unreadable_visibility_is_not_a_product_failure(self):
+        s = self.steps()
+        with mock.patch("desk.a11y.snapshot", return_value=self.SNAP), \
+                mock.patch("desk.a11y._visible_point", side_effect=DeskError("helper timed out")), \
+                self.assertRaisesRegex(scenario.NotDone, "visibility of push button 'Devices'.*helper timed out"):
+            scenario._step(s.target, s.spec, s, {"expect": "Devices", "visible": True})
 
     def test_the_element_that_has_the_state(self):
         with mock.patch("desk.a11y.snapshot", return_value=self.SNAP):

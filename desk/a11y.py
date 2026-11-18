@@ -168,31 +168,49 @@ def _point(run, spec: dict, size: tuple[int, int]) -> tuple[tuple[int, int] | No
     return (tuple(point) if point else None), res.get("covered"), bool(res.get("clipped"))
 
 
-def _visible_point(run, spec: dict) -> tuple[int, int]:
+class NotVisible(DeskError):
+    """The guest resolved the element but could not show it."""
+
+
+def _visible_point(run, spec: dict, *, verify: bool = False) -> tuple[int, int]:
     """Fresh screen position (layouts move) where a click reaches the element itself, not a sticky
     bar or toast over it; scrolls it into view first if needed."""
     # A page still building moves what it has already drawn; wait for it, briefly.
     png, _ = display.wait_stable(run.dom(), timeout=2, frames=2)
     size = display.png_size(png)
-    point, covered, clipped = _point(run, spec, size)
+    windows_verify = verify and run.agent_port
+    resolve = winagent.visible_point if windows_verify else _point
+    if verify and not windows_verify:
+        spec = {**spec, "verify": True}
+    point, covered, clipped = resolve(run, spec, size)
     # Scrolled away, or cut off by a scrolling container: the toolkit scrolls it into view.
     # Covered by a sticky bar: to the top, then the bottom edge of the view, away from it.
-    for how in ("anywhere", "top", "bottom"):
+    for how in (("anywhere",) if windows_verify else ("anywhere", "top", "bottom")):
         if (point and not clipped) or (how != "anywhere" and not covered):
             break
         _helper(run, "scroll", json.dumps(spec), *([] if how == "anywhere" else [how]))
         display.wait_stable(run.dom(), timeout=3)
-        point, covered, clipped = _point(run, spec, size)
+        point, covered, clipped = resolve(run, spec, size)
         # Still outside what holds it after scrolling: a menu hanging out of its container's box
         # is there all the same, as the hit test said.
         clipped = False
     if point:
         return point
     if covered:
-        raise DeskError(f"{called(spec)} is covered by {covered}, also after scrolling; "
-                        "close or move what is in the way, or click by pixels from a screenshot")
-    raise DeskError(f"{called(spec)} is outside the visible area and could not be "
-                    "scrolled into view; scroll with `desk scroll` and look again")
+        raise NotVisible(f"{called(spec)} is covered by {covered}, also after scrolling; "
+                         "close or move what is in the way, or click by pixels from a screenshot")
+    raise NotVisible(f"{called(spec)} is outside the visible area and could not be "
+                     "scrolled into view; scroll with `desk scroll` and look again")
+
+
+def ensure_visible(run, spec: dict) -> tuple[int, int]:
+    """Scroll the matched node into view without clicking it."""
+    try:
+        return _visible_point(run, spec, verify=True)
+    except (NotVisible, guest.NoConnection, winagent.AgentGone, NotDone):
+        raise
+    except DeskError as e:
+        raise NotDone(f"could not check visibility of {called(spec)}: {e}") from e
 
 
 def locate_ref(run, ref: str) -> tuple[int, int]:

@@ -102,6 +102,13 @@ class VisiblePoint(unittest.TestCase):
         self.assertEqual(self.point({"point": [329, 788], "clipped": True}, {"point": [329, 788], "clipped": True}),
                          ((329, 788), ["resolve", "scroll", "resolve"]))
 
+    def test_unscrollable_element_and_persistent_cover_name_the_target(self):
+        from desk.a11y import NotVisible
+
+        for cover, count, message in ((None, 2, "outside the visible area"), ("toolbar", 4, "covered by toolbar")):
+            with self.subTest(cover=cover), self.assertRaisesRegex(NotVisible, f"link 'abrtd' is {message}"):
+                self.point(*[{"point": None, "covered": cover}] * count)
+
     def test_shown_whole_is_clicked_at_once(self):
         self.assertEqual(self.point({"point": [329, 500], "clipped": False}), ((329, 500), ["resolve"]))
         self.assertEqual(self.point({"bbox": [300, 490, 40, 20], "showing": True}), ((320, 500), ["resolve"]))
