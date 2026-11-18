@@ -505,7 +505,11 @@ journalctl --user -u desk-maintain  # output of the last runs
 - Screens are put side by side into one screenshot; pointer events go to the console of the monitor
   under the point, on Windows through the agent for all but the primary one, which is all its
   absolute tablet reaches.
-- Windows scales by DPI after signing in again; GNOME scales through `gdctl` in the logical layout,
+- Windows changes DPI in the desktop session, using the per-source relative scale steps of
+  `DisplayConfigSetDeviceInfo` ([packet definitions](https://github.com/lihas/windows-DPI-scaling-sample/blob/738ac18b7a7ce2d8fdc157eb825de9cb5eee0448/DPIHelper/DpiHelper.h)).
+  The helper verifies the effective DPI of each monitor; the registry and a new sign-in are
+  a fallback for a desktop-wide change when live scaling is unavailable.
+- GNOME scales through `gdctl` in the logical layout,
   and desk turns the logical positions toolkits report into screen pixels.
 - Several monitors are refused on GNOME guests: mutter never updates a second GPU's monitor
   without 3D acceleration.

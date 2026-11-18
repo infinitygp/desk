@@ -76,6 +76,24 @@ class TypePostcheck(unittest.TestCase):
 
 
 class Load(unittest.TestCase):
+    def test_display_settings_checked_and_delivered_to_one_monitor(self):
+        for options, valid in [('resolution = "1280x1024", scale = 125, monitor = 2', True),
+                               ('monitor = 3, scale = 125', False), ('scale = 120', False),
+                               ('monitor = false, scale = 125', False), ('monitor = 1', False),
+                               ('resolution = "bad"', False), ('scales = 125', False)]:
+            path = write('image = "windows-11"\ndisplays = 2\n[[step]]\ndisplay = {' + options + '}')
+            self.addCleanup(path.unlink)
+            with self.subTest(options=options):
+                if valid:
+                    step, = scenario.load(path)["step"]
+                    with mock.patch("desk.monitors.apply") as apply:
+                        scenario._step("run", "spec", None, step)
+                    apply.assert_called_once_with(
+                        "run", "spec", resolution=(1280, 1024), scale=125, monitor=2)
+                else:
+                    with self.assertRaises(DeskError):
+                        scenario.load(path)
+
     def test_display_count_checked_before_scenario_listing(self):
         for image, others, value, valid in [
             ("windows-11", [], "2", True), ("arch-gnome", [], "1", True),

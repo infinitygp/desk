@@ -62,7 +62,7 @@ the tree is empty or doubtful. Pixel coordinates are those of the screenshot, or
 | `desk type TEXT [--anywhere]` | Type with real key presses: ASCII, and Polish letters where the guest's layout is pl (`desk doctor` names the one new guests get); text starting with a dash works. In a browser it refuses when no text field has the focus (the page would take the keys as shortcuts); `--anywhere` types anyway |
 | `desk key COMBO...` | `super`, `enter`, `esc`, `tab`, `ctrl+alt+t`, `shift+f10`, `alt+f4`, `f5`, letters |
 | `desk snapshot save NAME`, `desk snapshot restore NAME`, `desk snapshot list`, `desk snapshot delete NAME` | Save the running guest (~3-5 s) and go back to it (~1-3 s) |
-| `desk up IMAGE --resolution WxH --scale N --displays N`, `desk display [--resolution WxH] [--scale N]` | Monitors: mode, scaling in percent, several displays ([system.md](system.md)) |
+| `desk up IMAGE --resolution WxH --scale N --displays N`, `desk display [--monitor N] [--resolution WxH] [--scale N]` | Monitors: mode, scaling in percent, several displays ([system.md](system.md)) |
 | `desk up IMAGE --memory 8G --cpus N` | Memory and vCPUs of this run instead of the image's (4 GB and 4 on the desktop images, 6 GB on Windows); other than its warm state's, the run boots cold (~25 s; Windows: until the guest is calm, at most 5 minutes more) |
 | `desk focus NAME` | Bring a window to the front by application or title (keys go to the focused window); on Windows it fails when Windows keeps the window behind the one in front |
 | `desk scenario run FILE [--keep] [--no-build] [--all] [--repeat N]`, `desk scenario check FILE` | Run a repeatable test from a TOML file (see below) |
@@ -269,7 +269,8 @@ browser machine again.
 
 For two monitors side by side, set `displays = 2` at the top of the scenario. Counts above one
 require Windows for `image` and every entry in `images`, and force a cold boot (~5 min) on each
-run, including repeats. Omit `displays` or set it to `1` for the usual single-monitor start.
+run, including repeats. Omit `displays` or set it to `1` for the usual single-monitor start. A `display = {monitor = 2, scale = 125}` step changes the
+second monitor in the running desktop; see [system.md](system.md) for modes and sign-in fallback.
 
 ```toml
 image = "fedora-44-gnome-cockpit"

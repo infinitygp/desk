@@ -258,7 +258,9 @@ def cmd_up(args) -> None:
                   displays=args.displays, resolution=resolution, shared_memory=args.shared_memory,
                   usbvfiod=args.usbvfiod)
     try:
-        if args.displays != 1 or resolution or args.scale:
+        if args.displays > 1:
+            monitors.arrange(run)
+        if resolution or args.scale:
             monitors.apply(run, spec, resolution=resolution, scale=args.scale)
         run.log_event(argv=sys.argv[1:])
         for size, name in extra_disks:
@@ -1097,11 +1099,7 @@ def cmd_display(args) -> None:
 
     run = runs.resolve(args.run)
     resolution = _resolution(args.resolution)
-    if resolution or args.scale:
-        monitors.apply(run, runs.spec_for(run), resolution=resolution, scale=args.scale)
-    sizes = display.screen_sizes(run.dom())
-    print(f"{len(sizes)} display(s): " + ", ".join(f"{w}x{h}" for w, h in sizes)
-          + f"; scale {run.scale or 100} %")
+    print(monitors.apply(run, runs.spec_for(run), resolution, args.scale, args.monitor))
 
 
 def cmd_win(args) -> None:
@@ -1373,7 +1371,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--record", action="store_true", help="record a video from the start (desk record)")
     p.add_argument("--displays", type=int, default=1, help="monitors (boots cold when not 1)")
     p.add_argument("--resolution", help="mode the monitors start in, e.g. 1920x1080 (boots cold)")
-    p.add_argument("--scale", type=int, help="scaling in percent, e.g. 150 (Windows: signs in again)")
+    p.add_argument("--scale", type=int, help="scaling in percent, e.g. 150")
     p.add_argument("--memory", type=_memory_arg, metavar="SIZE",
                    help="memory of this run, e.g. 8G (default: the image's; other than its warm state's: boots cold)")
     p.add_argument("--cpus", type=_cpus_arg, metavar="N",
@@ -1590,8 +1588,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_scenario)
 
     p = sub.add_parser("display", help="show or change the run's monitors: resolution, scaling")
-    p.add_argument("--resolution", help="mode for every monitor, e.g. 1920x1080 (one the monitors offer)")
-    p.add_argument("--scale", type=int, help="scaling in percent, e.g. 150 (Windows: signs in again)")
+    p.add_argument("--resolution", help="monitor mode, e.g. 1920x1080 (one the monitors offer)")
+    p.add_argument("--scale", type=int, help="scaling in percent, e.g. 150")
+    p.add_argument("--monitor", type=int, help="one monitor, counted from the left starting at 1 (default: all)")
     p.set_defaults(func=cmd_display)
 
     from . import winsettings

@@ -4,86 +4,132 @@ top-aligned, in the order of the virtio GPUs, which is how desk puts their pictu
 (display.screenshot)."""
 
 import json
+import sys
 import time
 
 from . import guest
 from .config import DeskError, ImageSpec
 
 # Windows takes these (percent); GNOME also fractional ones in between, as its settings offer.
-WINDOWS_SCALES = (100, 125, 150, 175, 200, 225, 250, 300)
+WINDOWS_SCALES = (100, 125, 150, 175, 200, 225, 250, 300, 350, 400, 450, 500)
 
 
-def check(spec: ImageSpec, displays: int = 1, resolution: tuple[int, int] | None = None,
-          scale: int | None = None) -> None:
+def check(
+    spec: ImageSpec,
+    displays: int = 1,
+    resolution: tuple[int, int] | None = None,
+    scale: int | None = None,
+    monitor: int | None = None,
+) -> None:
     """What can be refused without asking the guest, so `desk up` says it before it starts a VM."""
     if displays < 1:
         raise DeskError("--displays is 1 or more")
+    if monitor is not None and not 1 <= monitor <= displays:
+        raise DeskError(
+            f"--monitor takes a number from 1 to {displays} (got {monitor})"
+        )
+    if resolution and min(resolution) <= 0:
+        raise DeskError("--resolution takes a positive width and height")
     if scale is not None and spec.family == "windows" and scale not in WINDOWS_SCALES:
-        raise DeskError(f"Windows scales: {', '.join(map(str, WINDOWS_SCALES))} (percent)")
+        raise DeskError(
+            f"Windows scales: {', '.join(map(str, WINDOWS_SCALES))} (percent)"
+        )
     if scale is not None and scale <= 0:
         raise DeskError("--scale is a percentage, e.g. 150")
     if (resolution or scale) and spec.family != "windows":
         spec.need_desktop("desk display")
 
 
-def apply(run, spec: ImageSpec, resolution: tuple[int, int] | None = None, scale: int | None = None) -> None:
-    if spec.family == "windows":
-        _windows(run, spec, resolution, scale)
-    else:
-        spec.need_desktop("desk display")
-        {"kde": _kde, "xfce": _xrandr, "cinnamon": _xrandr, "hyprland": _hyprland}.get(spec.desktop, _gnome)(
-            run, resolution, scale)
-    with run.edit() as r:
-        if scale is not None:
-            r.scale = scale
-        if resolution is not None:
-            r.resolution = list(resolution)
-
-
-def _windows(run, spec: ImageSpec, resolution, scale) -> None:
+def arrange(run):
+    """Enable the other GPUs and give them positions before addressing monitors by number."""
     from . import winagent
 
-    def arrange():
-        if resolution or run.displays > 1:
-            width, height = resolution or (0, 0)
-            winagent.request(run, cmd="display", width=width, height=height)
+    winagent.request(run, cmd="display", width=0, height=0)
 
-    arrange()
-    if scale is not None and scale != (run.scale or 100):
-        check(spec, scale=scale)
-        # One DPI for every monitor, which Windows applies when the user signs in again; desk signs
-        # in again on Windows by rebooting.
+
+def apply(
+    run,
+    spec: ImageSpec,
+    resolution: tuple[int, int] | None = None,
+    scale: int | None = None,
+    monitor: int | None = None,
+) -> str:
+    check(spec, run.displays, resolution, scale, monitor)
+    if spec.family == "windows":
+        screens = _windows(run, spec, resolution, scale, monitor)
+        return "; ".join(
+            f"monitor {i}: {s['width']}x{s['height']}, scale {s['scale']} %"
+            for i, s in enumerate(screens, 1)
+            if monitor in (None, i)
+        )
+    else:
+        from . import display
+
+        if resolution or scale is not None:
+            {
+                "kde": _kde,
+                "xfce": _xrandr,
+                "cinnamon": _xrandr,
+                "hyprland": _hyprland,
+            }.get(spec.desktop, _gnome)(run, resolution, scale)
+            with run.edit() as r:
+                if scale is not None:
+                    r.scale = scale
+                if resolution is not None:
+                    r.resolution = list(resolution)
+        sizes = display.screen_sizes(run.dom())
+        return (
+            f"{len(sizes)} display(s): "
+            + ", ".join(f"{w}x{h}" for w, h in sizes)
+            + f"; scale {run.scale or 100} %"
+        )
+
+
+def _windows(run, spec: ImageSpec, resolution, scale, monitor):
+    from . import win_display
+
+    try:
+        screens = win_display.change(run, resolution, scale, monitor)
+    except win_display.LiveUnavailable as e:
+        if scale is None or (monitor is not None and run.displays > 1):
+            raise
+        # The sign-in setting is desktop-wide; never use it for one of several monitors.
         dpi = round(96 * scale / 100)
-        r = guest.ssh_run(run.ssh_port, spec.root_user, spec.cmd(
-            "$d = 'HKCU:\\Control Panel\\Desktop'; "
-            f"Set-ItemProperty $d -Name LogPixels -Value {dpi} -Type DWord; "
-            f"Set-ItemProperty $d -Name Win8DpiScaling -Value {0 if scale == 100 else 1} -Type DWord"),
-            capture=True, timeout=60)
+        r = guest.ssh_run(
+            run.ssh_port,
+            spec.root_user,
+            spec.cmd(
+                "$ErrorActionPreference = 'Stop'; $d = 'HKCU:\\Control Panel\\Desktop'; "
+                f"Set-ItemProperty $d -Name LogPixels -Value {dpi} -Type DWord; "
+                f"Set-ItemProperty $d -Name Win8DpiScaling -Value {0 if scale == 100 else 1} -Type DWord"
+            ),
+            capture=True,
+            timeout=60,
+        )
         if r.returncode != 0:
             # Not worth the reboot: the scale would stay as it is.
-            raise DeskError(f"Windows did not take scale {scale} %: {r.stderr.decode(errors='replace').strip()[-300:]}")
+            why = " ".join(r.stderr.decode(errors="replace").split())
+            raise DeskError(f"Windows did not take scale {scale} %: {why[-300:]}")
+        print(
+            f"[desk] {e}; rebooting Windows to sign in again at {scale} %",
+            file=sys.stderr,
+        )
         guest.reboot(run.ssh_port, spec)
-        arrange()
-        got = windows_dpi(run)
-        if got != dpi:
-            raise DeskError(f"Windows signed in again at {round(got * 100 / 96)} % instead of {scale} %")
-
-
-def windows_dpi(run) -> int:
-    """The DPI the desktop session runs at, asked of a program in it (not the registry, which
-    only holds what applies at the next sign-in)."""
-    from . import winagent
-
-    script = ("Add-Type -Namespace Desk -Name Dpi -MemberDefinition '[DllImport(\"user32.dll\")] public static "
-              "extern uint GetDpiForSystem(); [DllImport(\"user32.dll\")] public static extern bool "
-              "SetProcessDpiAwarenessContext(IntPtr v);'; [void][Desk.Dpi]::SetProcessDpiAwarenessContext([IntPtr]-4); "
-              "[Desk.Dpi]::GetDpiForSystem()")
-    reply = winagent.request(run, timeout=90, cmd="run", file="powershell.exe", args=["-NoProfile", "-Command", script],
-                             wait=True, timeout_s=60)
-    try:
-        return int((reply.get("stdout") or "").strip())
-    except ValueError:
-        raise DeskError(f"could not read the session's DPI: {(reply.get('stderr') or reply.get('stdout') or '').strip()[-200:]}") from None
+        if run.displays > 1:
+            arrange(run)
+        screens = win_display.change(run, resolution, None, monitor)
+    if len(screens) != run.displays:
+        raise DeskError(
+            f"Windows reports {len(screens)} monitors instead of {run.displays}"
+        )
+    for i, s in enumerate(screens, 1):
+        if monitor in (None, i) and scale is not None and s["scale"] != scale:
+            raise DeskError(f"monitor {i} runs at {s['scale']} % instead of {scale} %")
+    if resolution or scale is not None:
+        with run.edit() as r:
+            r.scale = screens[0]["scale"]
+            r.resolution = [screens[0]["width"], screens[0]["height"]]
+    return screens
 
 
 def _gnome_output(run, what: str) -> str:

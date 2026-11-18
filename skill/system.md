@@ -8,8 +8,21 @@ Runs start at 1280x800, 100 %, one monitor. To test layouts and DPI handling:
 
 - `desk up IMAGE --resolution 1920x1080` (boots cold: the monitor offers that mode),
   `desk display --resolution WxH` switches among the modes it offers.
-- `--scale 150` on `desk up` or `desk display`: Windows applies it by signing in again (a reboot,
-  ~70 s; desk checks the session's DPI afterwards); GNOME at once, fractional scales too. Coordinates from `desk a11y` stay screen pixels.
+- `desk display --scale 150` changes the scale in the running Windows or GNOME session.
+  On Windows, open DPI-aware windows resize without restarting. `desk display` reads each
+  monitor's effective scale from Windows. Windows offers different scales at different modes:
+  at 1280x800 the guest offers up to 125 %; use 1920x1080 to test 150 %. A refused setting
+  reports the actual percentage and exits 2. Only if the live interface is unavailable and
+  the request covers the whole desktop does desk announce a reboot and sign in again (open
+  programs close). GNOME also supports fractional scales. Coordinates stay in screen pixels.
+- `desk display --monitor 2 --scale 125` changes only the second monitor, counted from the
+  left starting at 1. `--resolution` can select a mode on the same monitor, alone or together
+  with `--scale`. Omit `--monitor` to change all monitors. In a scenario use, for example:
+
+  ```toml
+  [[step]]
+  display = { monitor = 2, resolution = "1280x1024", scale = 125 }
+  ```
 - `desk up windows-11 --displays 2` (Windows only; boots cold, ~5 min): monitors side by side,
   left to right, top-aligned. Screenshots show them as one picture, and `desk a11y`, `desk click X Y`
   and `desk drag` use the same coordinates, across monitors too. On the primary monitor input

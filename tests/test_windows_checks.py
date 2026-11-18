@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from desk import a11y, forward, monitors
+from desk import a11y, forward, monitors, win_display
 from desk.config import DeskError, load_image
 
 RUN = SimpleNamespace(id="t", agent_port=1, ssh_port=1, scale=None, displays=1, image="windows-11")
@@ -133,25 +133,32 @@ class WinSettings(unittest.TestCase):
 
 class Scale(unittest.TestCase):
     def test_a_registry_that_refuses_costs_no_reboot(self):
-        refused = subprocess.CompletedProcess([], 1, b"", b"Set-ItemProperty : Requested registry access is not allowed.")
-        with mock.patch("desk.monitors.guest.ssh_run", return_value=refused), \
-                mock.patch("desk.monitors.guest.reboot") as reboot, mock.patch("desk.winagent.request"), \
+        refused = subprocess.CompletedProcess([], 1, b"", b"Requested registry access is not allowed.")
+        with mock.patch.object(win_display, "change", side_effect=win_display.LiveUnavailable("unsupported")), \
+                mock.patch("desk.monitors.guest.ssh_run", return_value=refused), \
+                mock.patch("desk.monitors.guest.reboot") as reboot, \
                 self.assertRaisesRegex(DeskError, "did not take scale 150 %.*registry access"):
-            monitors._windows(RUN, load_image("windows-11"), None, 150)
+            monitors.apply(RUN, load_image("windows-11"), scale=150)
         reboot.assert_not_called()
 
-    def test_a_scale_that_did_not_stick(self):
+    def test_fallback_checks_the_effective_scale_after_sign_in(self):
         done = subprocess.CompletedProcess([], 0, b"", b"")
-        with mock.patch("desk.monitors.guest.ssh_run", return_value=done), mock.patch("desk.monitors.guest.reboot"), \
-                mock.patch("desk.winagent.request", return_value={"stdout": "96\r\n", "code": 0}), \
-                self.assertRaisesRegex(DeskError, "at 100 % instead of 150 %"):
-            monitors._windows(RUN, load_image("windows-11"), None, 150)
+        with mock.patch.object(win_display, "change", side_effect=[win_display.LiveUnavailable("unsupported"),
+                [{"width": 1920, "height": 1080, "scale": 100}]]), \
+                mock.patch("desk.monitors.guest.ssh_run", return_value=done), mock.patch("sys.stderr"), \
+                mock.patch("desk.monitors.guest.reboot") as reboot, self.assertRaisesRegex(DeskError, "100 % instead of 150 %"):
+            monitors.apply(RUN, load_image("windows-11"), scale=150)
+        reboot.assert_called_once()
 
-    def test_a_scale_that_stuck(self):
-        done = subprocess.CompletedProcess([], 0, b"", b"")
-        with mock.patch("desk.monitors.guest.ssh_run", return_value=done), mock.patch("desk.monitors.guest.reboot"), \
-                mock.patch("desk.winagent.request", return_value={"stdout": "144\r\n", "code": 0}):
-            monitors._windows(RUN, load_image("windows-11"), None, 150)
+    def test_readback_is_required_and_a_targeted_change_never_reboots(self):
+        run = SimpleNamespace(**{**vars(RUN), "displays": 2})
+        for reply, message in [({"code": 0, "stdout": "[]"}, "no usable"),
+                               ({"code": 3, "stdout": "unsupported"}, "unsupported"),
+                               ({"code": 1, "stdout": "currently 125 %"}, "currently 125 %")]:
+            with self.subTest(reply=reply), mock.patch("desk.winagent.request", return_value=reply), \
+                    mock.patch("desk.monitors.guest.ssh_run") as ssh, self.assertRaisesRegex(DeskError, message):
+                monitors.apply(run, load_image("windows-11"), monitor=2, scale=150)
+            ssh.assert_not_called()
 
 
 class Taskbar(unittest.TestCase):

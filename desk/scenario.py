@@ -17,7 +17,7 @@ from datetime import UTC
 from functools import partial
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
-from . import a11y, browser, clock, disks, display, evidence, guest, hubs, record, runs, usb, usbvfiod, winagent
+from . import a11y, browser, clock, disks, display, evidence, guest, hubs, monitors, record, runs, usb, usbvfiod, winagent
 from .config import DeskError, NotDone, blocks, derived_from, load_image, parse_name
 from .steps import Steps
 
@@ -25,7 +25,7 @@ from .steps import Steps
 ACTIONS = {"root", "exec", "gui", "focus", "click", "type", "key", "expect", "expect_absent", "shot",
            "reboot", "wait", "clock", "disk_add", "disk_rm", "console_errors", "prepare", "open", "viewport",
            "observe_start", "observe_stop", "mark", "set_text", "move", "drag", "scroll", "press", "release", "win",
-           "pull", "offline", "usb_add", "usb_rm", "host"}
+           "pull", "offline", "usb_add", "usb_rm", "host", "display"}
 OPTIONS = {"role", "exact", "timeout", "output", "rc", "name", "soft", "env", "step", "until", "anywhere", "browser",
            "button", "window", "state", "visible", "text", "double", "to", "save", "at", "hubs", "only"}
 # What every step takes besides its action: a name, soft, and only (the images it is for).
@@ -74,11 +74,33 @@ def _texts(v) -> bool:
     return _text(v) or (isinstance(v, list) and bool(v) and all(_text(x) for x in v))
 
 
+def _display_options(v) -> dict:
+    if (
+        not isinstance(v, dict)
+        or set(v) - {"resolution", "scale", "monitor"}
+        or not set(v) & {"resolution", "scale"}
+    ):
+        raise DeskError(
+            'display takes {resolution = "1280x800", scale = 150, monitor = 1}; give a resolution or scale'
+        )
+    args = dict(v)
+    if "resolution" in args:
+        mode = args["resolution"]
+        if not isinstance(mode, str) or not re.fullmatch(r"[1-9]\d*x[1-9]\d*", mode):
+            raise DeskError("display resolution takes WIDTHxHEIGHT")
+        args["resolution"] = tuple(map(int, mode.split("x")))
+    for key in ("scale", "monitor"):
+        if key in args and (type(args[key]) is not int or args[key] < 1):
+            raise DeskError(f"display {key} takes a positive integer")
+    return args
+
+
 # What each action and option takes, as (check, description).
 VALUES = {
     **{a: (_text, "a text") for a in ("root", "exec", "focus", "type", "expect", "expect_absent", "shot",
                                       "clock", "disk_add", "disk_rm", "mark", "set_text")},
     "click": (lambda v: _text(v) or _pixels(v, 2), "a name, or [x, y] in screen pixels"),
+    "display": (lambda v: isinstance(v, dict), "a table of monitor settings"),
     "win": (_text, "what follows desk win, e.g. \"taskbar --align left\""),
     "pull": (_text, "a file in the guest"),
     "usb_add": (lambda v: _text(v) and usb.is_query(v), f"a USB device, {usb.QUERY}"),
@@ -200,9 +222,6 @@ def load(path: Path) -> dict:
     displays = data.get("displays", 1)
     if type(displays) is not int or displays < 1:
         raise DeskError(f"{path}: displays must be a positive integer")
-    if displays > 1:
-        for name in [data["image"], *others]:
-            check_displays(data, load_image(name))
     if "browser" in data and not _text(data["browser"]):
         raise DeskError(f"{path}: browser is the image of the machine whose browser opens the guest's pages")
     if not isinstance(data.get("record", False), bool):
@@ -291,6 +310,8 @@ def load(path: Path) -> dict:
                 and not data.get("usbvfiod"):
             raise DeskError(f"{path}: step {i}: port paths are the USB controller of usbvfiod's, which needs "
                             "usbvfiod = true at the top of the scenario")
+        if action == "display":
+            _checked(path, f"step {i}", _display_options, step[action])
         if action == "disk_add":
             _checked(path, f"step {i}", disks.parse, step[action])
         if action == "clock" and step[action] != "reset":
@@ -298,6 +319,9 @@ def load(path: Path) -> dict:
         if "step" in step:
             _checked(path, f"step {i}", clock.duration, step["step"])
     _check_only(path, data)
+    if displays > 1 or any("display" in st for st in data.get("step", [])):
+        for name in [data["image"], *others]:
+            check_displays(data, load_image(name))
     observations(path, data)
     return data
 
@@ -434,6 +458,13 @@ def observations(path: Path, data: dict) -> dict[str, dict]:
 def check_displays(data: dict, spec) -> None:
     if data.get("displays", 1) > 1 and spec.family != "windows":
         raise DeskError(f"displays > 1 requires Windows; {spec.name} is not a Windows image")
+    for i, step in enumerate(data.get("step", []), 1):
+        if "display" in step and is_for(step, spec.name):
+            target = browser_machine(data) or spec
+            try:
+                monitors.check(target, 1 if data.get("browser") else data.get("displays", 1), **_display_options(step["display"]))
+            except DeskError as e:
+                raise DeskError(f"step {i}: {e}") from None
 
 
 def check_observations(data: dict, spec) -> None:
@@ -523,6 +554,8 @@ def fixed_waits(data: dict) -> list[str]:
 def describe(step: dict) -> tuple[str, str]:
     action = next(k for k in step if k in ACTIONS)
     value = step[action]
+    if action == "display":
+        return action, ", ".join(f"{k}={v}" for k, v in value.items())
     return action, value if isinstance(value, str) else " ".join(map(str, value)) if isinstance(value, list) else ""
 
 
@@ -937,6 +970,11 @@ def _step(run, spec, steps: Steps, step: dict, capture=None) -> str:
         # A page that did not load fails the step; one the site sent elsewhere (a login) says so.
         shown, asked = browser.open_url(run, value, timeout=timeout or 30, browser=step.get("browser"))
         return shown if browser.under(shown, asked) else f"{shown} (opened {asked})"
+    elif action == "display":
+        try:
+            return monitors.apply(run, spec, **_display_options(value))
+        except DeskError as e:
+            raise NotDone(str(e)) from e
     elif action == "viewport":
         return browser.viewport(run, value, browser=step.get("browser"))
     elif action == "disk_add":
@@ -1016,6 +1054,8 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None, no_bu
     result.update(run=run.id, cold=run.domain == f"desk-{run.id}", steps=[])
     ok, brun = True, None
     try:
+        if data.get("displays", 1) > 1:
+            monitors.arrange(run)
         if bspec:
             brun = runs.up(bspec, label=f"scenario {base.name}/{path.name}: browser for {run.id}")
             run.log_event(browser_run=brun.id)
