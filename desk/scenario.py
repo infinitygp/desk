@@ -187,7 +187,7 @@ def load(path: Path) -> dict:
     except tomllib.TOMLDecodeError as e:
         raise DeskError(f"{path}: not valid TOML: {e}") from None
     unknown = set(data) - {"image", "images", "record", "build", "disks", "usb", "step", "observe", "browser",
-                           "usbvfiod"}
+                           "usbvfiod", "displays"}
     if unknown:
         raise DeskError(f"{path}: unknown keys {sorted(unknown)}")
     if not _text(data.get("image")):
@@ -197,6 +197,12 @@ def load(path: Path) -> dict:
             or data["image"] in others:
         raise DeskError(f"{path}: images is a list of the other images the scenario is for (desk scenario run "
                         f"--all), each once and without image itself, {data['image']!r}")
+    displays = data.get("displays", 1)
+    if type(displays) is not int or displays < 1:
+        raise DeskError(f"{path}: displays must be a positive integer")
+    if displays > 1:
+        for name in [data["image"], *others]:
+            check_displays(data, load_image(name))
     if "browser" in data and not _text(data["browser"]):
         raise DeskError(f"{path}: browser is the image of the machine whose browser opens the guest's pages")
     if not isinstance(data.get("record", False), bool):
@@ -423,6 +429,11 @@ def observations(path: Path, data: dict) -> dict[str, dict]:
         if t.get("start") == "step" and label not in started:
             raise DeskError(f"{path}: [[observe]] {label!r} starts at a step, and no observe_start step names it")
     return out
+
+
+def check_displays(data: dict, spec) -> None:
+    if data.get("displays", 1) > 1 and spec.family != "windows":
+        raise DeskError(f"displays > 1 requires Windows; {spec.name} is not a Windows image")
 
 
 def check_observations(data: dict, spec) -> None:
@@ -986,6 +997,7 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None, no_bu
     result = {} if result is None else result
     data = load(path)
     spec = load_image(image or data["image"])
+    check_displays(data, spec)
     data = for_image(data, spec.name)
     _some_step_for(data, spec.name)
     check_observations(data, spec)
@@ -999,7 +1011,7 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None, no_bu
     result["built"] = True
     agent, _ = runs.agent_process()
     run = runs.up(spec, label=f"scenario {base.name}/{path.name}" + (f" ({agent})" if agent else ""),
-                  usbvfiod=bool(data.get("usbvfiod")))
+                  displays=data.get("displays", 1), usbvfiod=bool(data.get("usbvfiod")))
     print(f"run {run.id} ({spec.name})", flush=True)
     result.update(run=run.id, cold=run.domain == f"desk-{run.id}", steps=[])
     ok, brun = True, None

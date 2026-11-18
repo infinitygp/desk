@@ -267,6 +267,10 @@ it (a tunnel through the host; without a browser machine, `localhost:80`). One r
 steps and the screenshots of both; `--keep` leaves both machines running and `--from N` finds the
 browser machine again.
 
+For two monitors side by side, set `displays = 2` at the top of the scenario. Counts above one
+require Windows for `image` and every entry in `images`, and force a cold boot (~5 min) on each
+run, including repeats. Omit `displays` or set it to `1` for the usual single-monitor start.
+
 ```toml
 image = "fedora-44-gnome-cockpit"
 record = true

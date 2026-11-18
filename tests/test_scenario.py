@@ -76,6 +76,23 @@ class TypePostcheck(unittest.TestCase):
 
 
 class Load(unittest.TestCase):
+    def test_display_count_checked_before_scenario_listing(self):
+        for image, others, value, valid in [
+            ("windows-11", [], "2", True), ("arch-gnome", [], "1", True),
+            ("arch-gnome", [], "2", False), ("windows-11", ["arch-gnome"], "2", False),
+            *(("windows-11", [], v, False) for v in ("0", "-1", "2.0", '"2"', "true")),
+        ]:
+            with self.subTest(image=image, others=others, value=value):
+                path = write(f'image = "{image}"\nimages = {others}\ndisplays = {value}\n[[step]]\nshot = "screen"')
+                self.addCleanup(path.unlink)
+                result = subprocess.run([Path(__file__).resolve().parents[1] / "bin/desk", "scenario", "check", path],
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0 if valid else 2, result.stderr)
+                if not valid:
+                    self.assertEqual(result.stdout, "")
+                    self.assertEqual(len(result.stderr.splitlines()), 1)
+                    self.assertIn("displays", result.stderr)
+
     def test_valid_file(self):
         data = scenario.load(write('''
 image = "fedora-44-gnome-cockpit"

@@ -15,7 +15,8 @@ Runs start at 1280x800, 100 %, one monitor. To test layouts and DPI handling:
   and `desk drag` use the same coordinates, across monitors too. On the primary monitor input
   comes from outside the guest as usual; on the others the in-session agent moves the pointer
   (Windows maps QEMU's tablet onto the primary monitor only), so elevated windows there do not
-  get clicks. `desk display` prints the monitors.
+  get clicks. `desk display` prints the monitors. In a scenario, set `displays = 2` at the top
+  for the same layout and cold boot; the default of one monitor allows a warm start.
 
 ## Extra disks
 

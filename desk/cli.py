@@ -840,14 +840,16 @@ def cmd_scenario(args) -> None:
     path = Path(args.file)
     if args.action == "check":
         data = scenario.load(path)
-        image = load_image(args.image or data["image"]).name
+        spec = load_image(args.image or data["image"])
+        scenario.check_displays(data, spec)
+        image = spec.name
         build = scenario.for_image(data, image)["build"]
         print(f"{path}: image {image}, {len(data.get('step', []))} steps"
               + (f"; build: {build['run']}" if build.get("run") else ""))
         for i, step in enumerate(data.get("step", []), 1):
             print(f"  {i:>2}. {scenario.step_label(step)}"
                   + (f"  [only {', '.join(step['only'])}]" if "only" in step else ""))
-        scenario.check_observations(data, load_image(image))
+        scenario.check_observations(data, spec)
         if not args.image:
             for other in data.get("images", []):
                 try:
