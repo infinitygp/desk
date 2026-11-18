@@ -20,7 +20,7 @@ MESSAGE = re.compile(r"(console\.[a-z]+|JavaScript (?:error|warning)): .*")
 # a page's console.log("text") is printed quoted, objects and numbers as values), and their
 # exceptions come from its internal URLs, or name its actors (after a restart with the devtools
 # open, e.g. desk browser viewport's responsive design mode).
-FIREFOX_OWN = re.compile(r"console\.[a-z]+: [A-Za-z][\w.-]*: |JavaScript (error|warning): (resource|chrome)://|"
+FIREFOX_OWN = re.compile(r"console\.[a-z]+: [A-Za-z][\w.-]*:(?: |$)|JavaScript (error|warning): (resource|chrome)://|"
                          r"JavaScript error: , line 0: NotFoundError: No such JS(Process|Window)Actor ")
 ERROR = re.compile(r"(console\.(error|assert)|JavaScript error): ")
 # Chromium (--enable-logging=stderr) logs every console call of a page at one level, so

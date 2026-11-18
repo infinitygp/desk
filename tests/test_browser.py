@@ -27,6 +27,23 @@ class Parse(unittest.TestCase):
     def test_everything(self):
         self.assertEqual(len(browser.parse(JOURNAL, everything=True)), 6)
 
+    def test_multiline_firefox_component_only_with_everything(self):
+        line = "2026-10-06T09:58:02+02:00 desk-fedora firefox[4612]: console.error: services.settings:"
+        self.assertEqual(browser.parse(line), [])
+        self.assertEqual(
+            browser.parse(line, everything=True),
+            ["09:58:02 console.error: services.settings:"],
+        )
+
+    def test_quoted_component_names_are_page_errors(self):
+        for text in ("services.settings:", "a:"):
+            with self.subTest(text=text):
+                message = f'console.error: "{text}"'
+                line = f"2026-10-06T09:58:02+02:00 desk-fedora firefox[4612]: {message}"
+                self.assertEqual(
+                    browser.errors(browser.parse(line)), [f"09:58:02 {message}"]
+                )
+
 
 DETAILED = """\
 2026-10-06T09:58:01+02:00 desk-fedora firefox[4612]: JavaScript error: , line 0: uncaught exception: Object
