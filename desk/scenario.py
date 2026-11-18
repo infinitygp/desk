@@ -555,6 +555,36 @@ def _build(data: dict, repo: Path, skip: bool = False) -> tuple[list[Path], str]
     return files, said
 
 
+def _copy_artifacts(run, spec, files: list[Path]) -> None:
+    if not files:
+        return
+    dest = GUEST_IN[spec.family]
+    mkdir = (
+        f"mkdir -p {dest}"
+        if spec.family != "windows"
+        else f"New-Item -ItemType Directory -Force {dest} | Out-Null"
+    )
+    f = files[0]
+    try:
+        r = guest.ssh_run(
+            run.ssh_port, run.user, spec.cmd(mkdir), capture=True, timeout=60
+        )
+        if r.returncode:
+            raise NotDone(
+                f"copying {f.name}: could not create {dest} (exit {r.returncode}); {runs.host_state(run)}"
+            )
+        for f in files:
+            rc = guest.scp(
+                run.ssh_port, str(f), f"{run.user}@127.0.0.1:{dest}/{f.name}"
+            )
+            if rc:
+                raise NotDone(
+                    f"copying {f.name} to {dest} failed (scp exit {rc}); {runs.host_state(run)}"
+                )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise NotDone(f"copying {f.name} to {dest} failed: {e}") from e
+
+
 def tail(text: str, lines: int = 15, chars: int = 1500) -> str:
     """The end of a command's output, where the cause of a failure usually is."""
     return "\n".join(text.strip().splitlines()[-lines:])[-chars:]
@@ -842,6 +872,8 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
                                command=value if isinstance(value, str) else None)
         if run.clock_offset:
             clock.apply(run)
+        if spec.family != "windows":
+            _copy_artifacts(run, spec, steps.artifacts)
         return f"back in {took:.0f}s"
     elif action == "prepare":
         from .steps import run_prepare
@@ -939,13 +971,10 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None, no_bu
             record.start(run)
         run.log_event(scenario=str(path.resolve()), steps=len(data.get("step", [])),
                       start="cold" if result["cold"] else "warm", **({"build": built} if built else {}))
-        if artifacts:
-            dest = GUEST_IN[spec.family]
-            guest.ssh_run(run.ssh_port, run.user, spec.cmd(f"mkdir -p {dest}" if spec.family != "windows"
-                          else f"New-Item -ItemType Directory -Force {dest} | Out-Null"), capture=True)
-            for f in artifacts:
-                if guest.scp(run.ssh_port, str(f), f"{run.user}@127.0.0.1:{dest}/{f.name}") != 0:
-                    raise DeskError(f"copying {f.name} to the guest failed; {runs.host_state(run)}")
+        _copy_artifacts(run, spec, artifacts)
+        if artifacts and spec.family != "windows":
+            # --from must restore the same files even if a newer one now matches a glob.
+            (run.dir / "artifacts.json").write_text(json.dumps([str(f.absolute()) for f in artifacts]))
         for d in data.get("disks", []):
             disks.add(run, *disks.parse(d))
         for device in data.get("usb", []):
@@ -953,7 +982,7 @@ def run_scenario(path: Path, keep: bool = False, image: str | None = None, no_bu
         # The run's end (evidence.finish) stops and collects whatever is still open, failure or not.
         _observe_before(run, path, data)
         ok = _run_steps(run, runs.spec_for(run), data, observed=observations(path, data), base=base,
-                        machine=_Browser(brun, run) if brun else None, outcomes=result["steps"])
+                        machine=_Browser(brun, run) if brun else None, outcomes=result["steps"], artifacts=artifacts)
     finally:
         if brun:
             # Its screenshots and steps are in the scenario's report.
@@ -1092,8 +1121,10 @@ def continue_scenario(path: Path, run, first: int, image: str | None = None) -> 
     run.log_event(scenario=str(path.resolve()), steps=total, first=first)
     if first == 1:
         _observe_before(run, path, data)
+    manifest = run.dir / "artifacts.json"
+    artifacts = [Path(p) for p in json.loads(manifest.read_text())] if manifest.is_file() else []
     ok = _run_steps(run, runs.spec_for(run), data, first, observed=observations(path, data),
-                    base=_base(path, for_image(data, spec.name)), machine=machine)
+                    base=_base(path, for_image(data, spec.name)), machine=machine, artifacts=artifacts)
     print(f"steps {first}-{total} passed" if ok else "scenario FAILED")
     print(f"run {run.id} still running: desk down {run.id} writes the report")
     return ok
@@ -1114,7 +1145,7 @@ def _warn(data: dict) -> None:
 
 def _run_steps(run, spec, data: dict, first: int = 1, observed: dict | None = None,
                base: Path | None = None, machine: _Browser | None = None,
-               outcomes: list | None = None) -> bool:
+               outcomes: list | None = None, artifacts: list[Path] | None = None) -> bool:
     """Steps `first`.. in order, stopping at the first failure that is not soft; whether all passed.
     With a browser machine, the steps that are not GUEST_ACTIONS go to it. Each step is appended to
     `outcomes` as (index, label, passed, detail, seconds); a skipped one has passed None and its
@@ -1126,6 +1157,7 @@ def _run_steps(run, spec, data: dict, first: int = 1, observed: dict | None = No
     steps = Steps(spec, run)
     steps.observations = observed or {}
     steps.base = base or Path.cwd()  # where pull's `to` is, as [build]'s artifacts are
+    steps.artifacts = artifacts or []
     steps.saved = {}  # what host steps kept with save
     on_browser = None
     if machine is not None:

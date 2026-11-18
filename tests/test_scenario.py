@@ -1177,6 +1177,52 @@ class RepeatedRuns(unittest.TestCase):
         self.assertRegex(said, r"3\. last +passed 2 of 2")
 
 
+class RebootArtifacts(unittest.TestCase):
+    def test_failed_restore_names_the_file_and_stops_at_reboot(self):
+        run = mock.Mock(clock_offset=0)
+        spec = mock.Mock(family="openwrt")
+        outcomes = []
+        with (
+            mock.patch.object(guest, "reboot", return_value=(2, None)),
+            mock.patch.object(
+                guest, "ssh_run", return_value=SimpleNamespace(returncode=0)
+            ),
+            mock.patch.object(guest, "scp", side_effect=[0, 1]),
+            mock.patch("desk.scenario.runs.host_state", return_value="VM running"),
+            mock.patch("desk.scenario.display.screenshot", return_value=b""),
+            mock.patch("sys.stdout"),
+        ):
+            with self.assertRaisesRegex(scenario.NotDone, "second.txt"):
+                scenario._run_steps(
+                    run,
+                    spec,
+                    {"step": [{"reboot": True}, {"exec": "true"}]},
+                    artifacts=[Path("first.txt"), Path("second.txt")],
+                    outcomes=outcomes,
+                )
+        self.assertEqual(len(outcomes), 1)
+        self.assertFalse(outcomes[0][2])
+        self.assertIn("second.txt", outcomes[0][3])
+
+    def test_no_copy_on_windows_or_without_artifacts(self):
+        for family, files in (("windows", [Path("artifact")]), ("linux", [])):
+            with (
+                self.subTest(family=family),
+                mock.patch.object(guest, "reboot", return_value=(2, None)),
+                mock.patch.object(guest, "ssh_run") as ssh,
+                mock.patch.object(guest, "scp") as scp,
+            ):
+                detail = scenario._step(
+                    mock.Mock(clock_offset=0),
+                    mock.Mock(family=family),
+                    SimpleNamespace(artifacts=files),
+                    {"reboot": True},
+                )
+                self.assertEqual(detail, "back in 2s")
+                ssh.assert_not_called()
+                scp.assert_not_called()
+
+
 class StepLog(unittest.TestCase):
     def test_each_step_is_logged_with_its_kind_and_handed_to_the_collector(self):
         run = mock.Mock()

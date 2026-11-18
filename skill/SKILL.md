@@ -288,6 +288,13 @@ expect = "Nothing here yet"  # waits until shown (name, value or text); role, ex
 shot = "empty-state"
 ```
 
+On Linux and OpenWrt, `/tmp/desk` may disappear when the guest restarts. After `reboot = true`
+or `reboot = "<command>"`, desk copies the selected build artifacts from the host again. A file
+changed or removed in the guest comes back in its host version. If a copy fails, the `reboot`
+step fails and names the file. A `root` or `exec` step that reboots the guest does not restore
+artifacts: upload them again or use a `reboot` step instead. On Windows the artifacts stay in
+`C:/Users/tester/desk` across reboots and are not copied again.
+
 Other steps: `type`, the machine's mouse at screen pixels read from a screenshot (`click = [x, y]`
 with `button` and `double = true`, which a click by name takes too; `move = [x, y]` to hover;
 `drag = [x1, y1, x2, y2]` with the left button, moved as a hand would; `scroll = [x, y, notches]`,
