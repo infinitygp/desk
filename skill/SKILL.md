@@ -376,6 +376,14 @@ noise. `[[observe]]` tables start
 captures before the first step, `observe_start`, `observe_stop` and `mark` steps drive them
 ([observe.md](observe.md)). Every step takes `name` for the
 report, and `soft = true` for an independent check whose failure should not stop the steps after it.
+
+For `root`, `exec`, `host`, and `gui` with `rc` or `output`, follow the step's **output**
+link in `report.md` to read stdout and stderr. The `output_file` in `log.jsonl` names the same
+file under `step-output/`, relative to the report directory. It holds the last attempt for
+`until`, whether it passed or failed. Each stream keeps its last 1 MiB; a marker gives the
+number of leading bytes omitted. If both streams are empty, there is no file or link.
+A `gui` step without `rc` or `output` launches the program without waiting for its output.
+
 `desk scenario check FILE` validates a file without starting anything: the image, every value's
 type, and options a step would not read (`rc` on a `click`). When a scenario fails,
 look at the failure screenshot and the report before changing the scenario: a failing step is

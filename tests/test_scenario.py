@@ -1014,7 +1014,7 @@ class BrowserMachine(unittest.TestCase):
         run = mock.Mock()
         machine = scenario._Browser(mock.Mock(), run)
         went = []
-        with mock.patch("desk.scenario._step", side_effect=lambda target, spec, steps, step: went.append(
+        with mock.patch("desk.scenario._step", side_effect=lambda target, spec, steps, step, capture: went.append(
                 (scenario.describe(step)[0], target is machine)) or ""), \
                 mock.patch("desk.scenario.runs.spec_for"), mock.patch("desk.scenario.Steps"), \
                 mock.patch("desk.scenario._guest_url", side_effect=lambda value, run, machine: value):

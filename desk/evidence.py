@@ -384,8 +384,9 @@ def collect(run, diff: bool = False) -> Path:
     if out.exists():
         out = REPORTS / f"{run.id}-{int(time.time())}"
     out.mkdir(parents=True)
-    if (run.dir / "shots").is_dir():
-        shutil.copytree(run.dir / "shots", out / "shots")
+    for name in ("shots", "step-output"):
+        if (run.dir / name).is_dir():
+            shutil.copytree(run.dir / name, out / name)
     for name in ("console.log", "log.jsonl"):
         if (run.dir / name).exists():
             shutil.copy(run.dir / name, out / name)
@@ -538,6 +539,8 @@ def collect(run, diff: bool = False) -> Path:
             detail = ev["detail"].split("\n", 1)[0]
             md.append(f"- {stamp} step {ev['step']} {mark}: {one_line(ev['action'])} ({ev['seconds']} s)"
                       + (f" → {detail}" if detail else ""))
+            if "output_file" in ev:
+                md[-1] += f" [output]({ev['output_file']})"
         elif "step" in ev and "skipped" in ev:
             md.append(f"- {stamp} step {ev['step']} skipped: {one_line(ev['action'])} → {ev['skipped']}")
         elif "clock" in ev:

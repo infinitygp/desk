@@ -10,6 +10,7 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
 import time
 import tomllib
 from datetime import UTC
@@ -592,7 +593,32 @@ def tail(text: str, lines: int = 15, chars: int = 1500) -> str:
     return "\n".join(text.strip().splitlines()[-lines:])[-chars:]
 
 
-def _shell(run, spec, step: dict, as_root: bool) -> str:
+STEP_STREAM_LIMIT = 1 << 20
+
+
+def _save_output(run, index: int, result) -> str | None:
+    if not (result.stdout or result.stderr):
+        return None
+    folder = run.dir / "step-output"
+    folder.mkdir(exist_ok=True)
+    # A resumed step gets a new file: older timeline entries still point to their own output.
+    with tempfile.NamedTemporaryFile(
+        dir=folder, prefix=f"{index}-", suffix=".log", delete=False
+    ) as f:
+        for label, data in ((b"stdout", result.stdout), (b"stderr", result.stderr)):
+            if data:
+                f.write(label + b":\n")
+                if len(data) > STEP_STREAM_LIMIT:
+                    f.write(
+                        f"[truncated {len(data) - STEP_STREAM_LIMIT} leading bytes]\n".encode()
+                    )
+                f.write(data[-STEP_STREAM_LIMIT:])
+                if not data.endswith(b"\n"):
+                    f.write(b"\n")
+    return str(Path(f.name).relative_to(run.dir))
+
+
+def _shell(run, spec, step: dict, as_root: bool, capture=None) -> str:
     command = step["root" if as_root else "exec"]
     user = spec.root_user if as_root else run.user
 
@@ -605,10 +631,10 @@ def _shell(run, spec, step: dict, as_root: bool) -> str:
         except subprocess.TimeoutExpired as e:
             return subprocess.CompletedProcess([], 124, e.stdout or b"", e.stderr or b""), True
 
-    return _checked_command(step, once, lambda r: guest.lost(r, run.ssh_port, user, f"step {command[:60]!r}"))
+    return _checked_command(step, once, lambda r: guest.lost(r, run.ssh_port, user, f"step {command[:60]!r}"), capture)
 
 
-def _host(run, step: dict, saved: dict[str, str], base: Path) -> str:
+def _host(run, step: dict, saved: dict[str, str], base: Path, capture=None) -> str:
     """A program on the host, as desk's user and without a shell, checked like an exec step; its
     environment names the run, so a host tool (a device emulator, a power switch) can aim at it."""
     argv = step["host"]
@@ -627,7 +653,7 @@ def _host(run, step: dict, saved: dict[str, str], base: Path) -> str:
         last["r"] = r
         return r, stopped
 
-    shown = _checked_command(step, once, None)
+    shown = _checked_command(step, once, None, capture)
     out = last["r"].stdout.decode(errors="replace").strip()
     if "save" in step:
         saved[step["save"]] = out[:4096]
@@ -647,7 +673,7 @@ def _substituted(step: dict, saved: dict[str, str]) -> dict:
     return {k: one(v) for k, v in step.items()}
 
 
-def _gui_waited(run, spec, step: dict, argv: list[str], env: dict[str, str]) -> str:
+def _gui_waited(run, spec, step: dict, argv: list[str], env: dict[str, str], capture=None) -> str:
     """A program in the desktop session, waited for and checked like an exec step (exec --gui --wait):
     what it sees there (the display, UI Automation, the session's environment) SSH does not."""
     spec.need_desktop("a program in the session (gui)")
@@ -669,10 +695,10 @@ def _gui_waited(run, spec, step: dict, argv: list[str], env: dict[str, str]) -> 
             return subprocess.CompletedProcess([], 124, e.stdout or b"", e.stderr or b""), True
 
     return _checked_command(step, once, None if run.agent_port else
-                            lambda r: guest.lost(r, run.ssh_port, run.user, f"step {argv[0][:60]!r}"))
+                            lambda r: guest.lost(r, run.ssh_port, run.user, f"step {argv[0][:60]!r}"), capture)
 
 
-def _checked_command(step: dict, once, lost) -> str:
+def _checked_command(step: dict, once, lost, capture=None) -> str:
     """Runs a command (`once`, given the seconds it may take; it says whether it was stopped) until it
     gives the step's rc and output, once or (until) every 2 s for the step's time; `lost` tells ssh's
     255 from the command's."""
@@ -692,13 +718,15 @@ def _checked_command(step: dict, once, lost) -> str:
             problem = f"exit {r.returncode}"
         elif "output" in step and step["output"] not in out:
             problem = f"output lacks {step['output']!r}"
-        if problem is None:
-            return out.strip().splitlines()[-1][:120] if out.strip() else ""
-        if not step.get("until") or time.monotonic() + 2 > deadline:
-            if step.get("rc", 0) != 255 and lost:
-                lost(r)
+        if problem is None or not step.get("until") or time.monotonic() + 2 > deadline:
             break
         time.sleep(2)
+    if capture:
+        capture(r)
+    if problem is None:
+        return out.strip().splitlines()[-1][:120] if out.strip() else ""
+    if step.get("rc", 0) != 255 and lost:
+        lost(r)
     if step.get("until"):
         problem += f" (still, after {limit:.0f}s)"
     shown = [problem]
@@ -806,13 +834,13 @@ def _find(step: dict) -> dict:
             "window": step.get("window")}
 
 
-def _step(run, spec, steps: Steps, step: dict) -> str:
+def _step(run, spec, steps: Steps, step: dict, capture=None) -> str:
     action, _ = describe(step)
     value, role, timeout = step[action], step.get("role"), step.get("timeout")
     if action == "host":
-        return _host(run, step, steps.saved, steps.base)
+        return _host(run, step, steps.saved, steps.base, capture)
     if action in ("root", "exec"):
-        return _shell(run, spec, step, action == "root")
+        return _shell(run, spec, step, action == "root", capture)
     if action in ("observe_start", "observe_stop", "mark"):
         return _observe_step(run, steps, action, value)
     if action == "gui":
@@ -822,7 +850,7 @@ def _step(run, spec, steps: Steps, step: dict) -> str:
             argv = split_windows(value) if spec.family == "windows" else shlex.split(value)
         env = {k: str(v) for k, v in step.get("env", {}).items()}
         if {"rc", "output"} & set(step):
-            return _gui_waited(run, spec, step, argv, env)
+            return _gui_waited(run, spec, step, argv, env, capture)
         steps.gui(*argv, env=env)
     elif action == "focus":
         return steps.focus(value)
@@ -1190,12 +1218,22 @@ def _run_steps(run, spec, data: dict, first: int = 1, observed: dict | None = No
                 continue
             t0 = time.monotonic()
             lost = None
+            files = {}
+
+            def capture(result):
+                try:
+                    path = _save_output(run, i, result)
+                except OSError as e:
+                    raise NotDone(f"could not save output of step {i}: {e}") from e
+                if path:
+                    files["output_file"] = path
+
             target, tspec, tsteps = on_browser if on_browser and action not in GUEST_ACTIONS else (run, spec, steps)
             try:
                 step = _substituted(step, steps.saved)
                 if action == "open":
                     step = {**step, "open": _guest_url(step["open"], run, machine)}
-                detail = _step(target, tspec, tsteps, step)
+                detail = _step(target, tspec, tsteps, step, capture)
                 passed = True
             except (StepFailed, DeskError, subprocess.TimeoutExpired) as e:
                 detail, passed = str(e), False
@@ -1206,7 +1244,7 @@ def _run_steps(run, spec, data: dict, first: int = 1, observed: dict | None = No
                 elif isinstance(e, (browser.Unchecked, ObserveError, winagent.AgentGone, NotDone)):
                     lost = e  # a check desk could not make (or ask the session) says nothing about the product either
             seconds = round(time.monotonic() - t0, 1)
-            run.log_event(step=i, action=label, kind=action, ok=passed, detail=detail, seconds=seconds)
+            run.log_event(step=i, action=label, kind=action, ok=passed, detail=detail, seconds=seconds, **files)
             outcomes.append((i, label, passed, detail, seconds))
             head, *rest = detail.splitlines() or [""]
             print(f"{'PASS' if passed else 'FAIL'}  {i:>2}. {label[:60]:<60} {time.monotonic() - t0:5.1f}s  "
