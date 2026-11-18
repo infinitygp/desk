@@ -75,6 +75,16 @@ def _texts(v) -> bool:
 
 
 def _display_options(v) -> dict:
+    if isinstance(v, dict) and "connected" in v:
+        if (
+            set(v) != {"connected", "monitor"}
+            or type(v["connected"]) is not bool
+            or type(v["monitor"]) is not int
+        ):
+            raise DeskError(
+                "display connection takes {monitor = N, connected = true or false}"
+            )
+        return dict(v)
     if (
         not isinstance(v, dict)
         or set(v) - {"resolution", "scale", "monitor"}

@@ -39,11 +39,24 @@ public static class WinDisplay {
     [DllImport("user32", CharSet = CharSet.Unicode)] static extern bool EnumDisplaySettings(string device, int which, ref Mode mode);
     [DllImport("user32", CharSet = CharSet.Unicode)] static extern int ChangeDisplaySettingsEx(string device, ref Mode mode, IntPtr hwnd, int flags, IntPtr data);
     [DllImport("user32", CharSet = CharSet.Unicode)] static extern int ChangeDisplaySettingsEx(string device, IntPtr mode, IntPtr hwnd, int flags, IntPtr data);
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode, Size = 840)]
+    struct DisplayDevice {
+        public int size;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string name;
+    }
+    [DllImport("user32", CharSet = CharSet.Unicode)] static extern bool EnumDisplayDevices(string name, int index, ref DisplayDevice device, int flags);
 
     struct Adapter { public uint low; public int high; }
     // DISPLAYCONFIG_PATH_INFO starts with its source adapter and source id.
-    [StructLayout(LayoutKind.Sequential, Size = 72)]
-    struct PathInfo { public Adapter adapter; public uint source; }
+    [StructLayout(LayoutKind.Explicit, Size = 72)]
+    struct PathInfo {
+        [FieldOffset(0)] public Adapter adapter;
+        [FieldOffset(8)] public uint source;
+        [FieldOffset(12)] public uint sourceMode;
+        [FieldOffset(32)] public uint targetMode;
+        [FieldOffset(60)] public int available;
+        [FieldOffset(68)] public uint flags;
+    }
     [StructLayout(LayoutKind.Sequential, Size = 64)]
     struct ModeInfo { public uint type; }
     struct Header {
@@ -61,6 +74,8 @@ public static class WinDisplay {
     [DllImport("user32")] static extern int GetDisplayConfigBufferSizes(uint flags, out uint paths, out uint modes);
     [DllImport("user32")] static extern int QueryDisplayConfig(uint flags, ref uint pathCount, [Out] PathInfo[] paths,
         ref uint modeCount, [Out] ModeInfo[] modes, IntPtr topology);
+    [DllImport("user32")] static extern int SetDisplayConfig(uint pathCount, PathInfo[] paths,
+        uint modeCount, IntPtr modes, uint flags);
     [DllImport("user32")] static extern int DisplayConfigGetDeviceInfo(ref SourceName name);
     [DllImport("user32")] static extern int DisplayConfigGetDeviceInfo(ref DpiRange range);
     [DllImport("user32")] static extern int DisplayConfigSetDeviceInfo(ref DpiSet scale);
@@ -98,15 +113,84 @@ public static class WinDisplay {
             if (!EnumDisplaySettings(s.info.device, -1, ref mode)) throw new Exception("Could not read " + s.info.device);
             if (monitor == 0 || monitor == i+1) { mode.width = width; mode.height = height; }
             mode.x = x; mode.y = 0;
-            mode.fields = 0x20 | 0x80000 | 0x100000; // POSITION | PELSWIDTH | PELSHEIGHT
             x = checked(x + mode.width);
-            // Store the whole arrangement before applying it; changing one at a time lets
-            // Windows move other monitors to keep them touching.
-            int err = ChangeDisplaySettingsEx(s.info.device, ref mode, IntPtr.Zero, 0x10000001, IntPtr.Zero);
-            if (err != 0) throw new Exception(s.info.device + ": refused " + mode.width + "x" + mode.height + " (" + err + ")");
+            Stage(s.info.device, mode);
         }
+        Apply();
+    }
+    static void Stage(string device, Mode mode) {
+        mode.fields = 0x20 | 0x80000 | 0x100000; // POSITION | PELSWIDTH | PELSHEIGHT
+        // Stage all devices before applying so Windows doesn't reposition their neighbours.
+        int err = ChangeDisplaySettingsEx(device, ref mode, IntPtr.Zero, 0x10000001, IntPtr.Zero);
+        if (err != 0) throw new Exception(device + ": refused " + mode.width + "x" + mode.height + " (" + err + ")");
+    }
+    static void Apply() {
         int apply = ChangeDisplaySettingsEx(null, IntPtr.Zero, IntPtr.Zero, 0, IntPtr.Zero);
         if (apply != 0) throw new Exception("Windows refused the display arrangement (" + apply + ")");
+    }
+
+    public static int[] Connection(int count, int[] active, int monitor, bool connected, int width, int height) {
+        var old = SetThreadDpiAwarenessContext(new IntPtr(-4));
+        if (old.Equals(IntPtr.Zero)) throw new Exception("Could not enable per-monitor DPI awareness");
+        try {
+            var before = Screens(active.Length);
+            var wanted = new List<Screen>();
+            var changes = new List<KeyValuePair<string, Mode>>();
+            int x = 0;
+            // Enumerate adapters, including detached ones, in the order Arrange used at boot.
+            for (int i = 1; i <= count; ++i) {
+                var d = new DisplayDevice { size = Marshal.SizeOf(typeof(DisplayDevice)) };
+                if (!EnumDisplayDevices(null, i-1, ref d, 0)) throw new Exception("Missing adapter " + i);
+                int index = Array.IndexOf(active, i);
+                if (index >= 0 && before[index].info.device != d.name)
+                    throw new Exception("Unexpected active device for monitor " + i + ": " + before[index].info.device);
+                if (index < 0 && i != monitor) continue;
+                var mode = new Mode { size = (short)Marshal.SizeOf(typeof(Mode)) };
+                mode.x = x;
+                mode.y = 0;
+                if (i == monitor && !connected) {
+                    width = before[index].reading.width;
+                    height = before[index].reading.height;
+                    mode.x = 0; // zero-sized DEVMODE detaches this device
+                } else {
+                    mode.width = index < 0 ? width : before[index].reading.width;
+                    mode.height = index < 0 ? height : before[index].reading.height;
+                    wanted.Add(new Screen { info = new MonitorInfo { device = d.name },
+                        reading = new Reading { width = mode.width, height = mode.height } });
+                    x = checked(x + mode.width);
+                }
+                changes.Add(new KeyValuePair<string, Mode>(d.name, mode));
+            }
+            if (connected) Enable(wanted);
+            foreach (var c in changes) Stage(c.Key, c.Value);
+            Apply();
+            // -1 for scale: Windows chooses the effective DPI on reconnection.
+            Verify(wanted, 0, 0, -1, 0);
+            return new int[] { width, height };
+        } finally { SetThreadDpiAwarenessContext(old); }
+    }
+    // DEVMODE can detach virtio outputs, but cannot reliably reactivate a detached source.
+    // Supply exactly the desired paths (not SDC_TOPOLOGY_EXTEND, which enables all outputs).
+    static void Enable(List<Screen> wanted) {
+        uint np, nm;
+        ConfigError("Get all path counts", GetDisplayConfigBufferSizes(1, out np, out nm), false);
+        var paths = new PathInfo[np];
+        var modes = new ModeInfo[nm];
+        ConfigError("Get all paths", QueryDisplayConfig(1, ref np, paths, ref nm, modes, IntPtr.Zero), false);
+        var available = new Dictionary<string, PathInfo>();
+        for (int i = 0; i < np; i++) {
+            var p = paths[i];
+            if (p.available == 0) continue;
+            var name = new SourceName { header = new Header { adapter = p.adapter, source = p.source,
+                type = 1, size = Marshal.SizeOf(typeof(SourceName)) } };
+            ConfigError("Get source name", DisplayConfigGetDeviceInfo(ref name), false);
+            p.sourceMode = p.targetMode = UInt32.MaxValue;
+            p.flags = 1;
+            available.Add(name.name, p);
+        }
+        var enabled = wanted.ConvertAll(s => available[s.info.device]).ToArray();
+        ConfigError("Enable requested displays", SetDisplayConfig((uint)enabled.Length, enabled, 0,
+            IntPtr.Zero, 0x80 | 0x10 | 0x2000), false); // APPLY | TOPOLOGY_SUPPLIED | ALLOW_PATH_ORDER_CHANGES
     }
 
     static void ConfigError(string what, int err, bool privateQuery) {

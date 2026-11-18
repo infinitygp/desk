@@ -168,6 +168,8 @@ def _record(run_id: str, fps: int, limit: float) -> None:
             time.sleep(wait)
             continue
         try:
+            if run.displays > 1:
+                run.disconnected = runs.load(run_id).disconnected
             png = display.screenshot(dom)
             gone_since = None
         except Exception:  # noqa: BLE001 - the domain is gone, maybe only for a while

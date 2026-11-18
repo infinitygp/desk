@@ -67,11 +67,19 @@ def lock(run):
 def check_monitor(run, monitor: int) -> None:
     """Refuse a monitor the run does not have or whose picture QEMU does not serve."""
     if not 1 <= monitor <= run.displays:
-        raise DeskError(f"run {run.id} has {run.displays} monitor{'s' if run.displays > 1 else ''}; "
-                        f"--monitor is 1 to {run.displays}")
-    if monitor > 1 and not (run.vnc_dir and (Path(run.vnc_dir) / f"{monitor}.sock").is_socket()):
-        raise DeskError(f"run {run.id} has no picture of monitor {monitor}: QEMU serves monitors 2 and on only for "
-                        "runs started by a desk that has them (desk up said why not, if it could not; desk up again)")
+        raise DeskError(
+            f"run {run.id} has {run.displays} monitor{'s' if run.displays > 1 else ''}; "
+            f"--monitor is 1 to {run.displays}"
+        )
+    if str(monitor) in getattr(run, "disconnected", {}):
+        raise DeskError(f"monitor {monitor} is disconnected")
+    if monitor > 1 and not (
+        run.vnc_dir and (Path(run.vnc_dir) / f"{monitor}.sock").is_socket()
+    ):
+        raise DeskError(
+            f"run {run.id} has no picture of monitor {monitor}: QEMU serves monitors 2 and on only for "
+            "runs started by a desk that has them (desk up said why not, if it could not; desk up again)"
+        )
 
 
 def tablet_reaches(run, monitor: int) -> bool:
@@ -87,9 +95,11 @@ def start(run, path: str, monitor: int = 1, control: bool = False) -> tuple[int,
 
     sock = Path(path).absolute()
     if len(str(sock).encode()) > UNIX_PATH_MAX:
-        raise DeskError(f"{sock} is longer than a unix socket path may be ({UNIX_PATH_MAX} bytes); take a shorter one")
-    check_monitor(run, monitor)
+        raise DeskError(
+            f"{sock} is longer than a unix socket path may be ({UNIX_PATH_MAX} bytes); take a shorter one"
+        )
     with lock(run):
+        check_monitor(runs.load(run.id), monitor)
         for r in runs.all_runs():
             for v in listing(r):
                 if v["socket"] != str(sock):
@@ -438,7 +448,8 @@ def _left_of(run, monitor: int) -> int:
     """Where the monitor starts in screen coordinates: the monitors sit side by side from the left."""
     from .display import screen_sizes
 
-    return sum(w for w, _ in screen_sizes(run.dom())[:monitor - 1])
+    before = sum(str(i) not in run.disconnected for i in range(1, monitor))
+    return sum(w for w, _ in screen_sizes(run.dom())[:before])
 
 
 def _pump(src: socket.socket, dst: socket.socket) -> None:

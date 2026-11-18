@@ -20,10 +20,22 @@ def check(
     resolution: tuple[int, int] | None = None,
     scale: int | None = None,
     monitor: int | None = None,
+    connected: bool | None = None,
 ) -> None:
     """What can be refused without asking the guest, so `desk up` says it before it starts a VM."""
     if displays < 1:
         raise DeskError("--displays is 1 or more")
+    if connected is not None:
+        if spec.family != "windows" or displays == 1:
+            raise DeskError(
+                "connecting or disconnecting a monitor requires Windows with displays > 1"
+            )
+        if monitor is None or monitor < 2:
+            raise DeskError("select monitor 2 or higher to connect or disconnect")
+        if resolution or scale is not None:
+            raise DeskError(
+                "change resolution or scale separately from connecting or disconnecting"
+            )
     if monitor is not None and not 1 <= monitor <= displays:
         raise DeskError(
             f"--monitor takes a number from 1 to {displays} (got {monitor})"
@@ -53,13 +65,43 @@ def apply(
     resolution: tuple[int, int] | None = None,
     scale: int | None = None,
     monitor: int | None = None,
+    connected: bool | None = None,
 ) -> str:
-    check(spec, run.displays, resolution, scale, monitor)
+    check(spec, run.displays, resolution, scale, monitor, connected)
+    if connected is not None:
+        from . import view, win_display
+
+        with view.lock(run), run.edit() as r:
+            for v in view.listing(r):
+                if v["alive"] and v["control"] and v["monitor"] >= monitor:
+                    raise DeskError(
+                        f"stop the control view of monitor {v['monitor']} first (desk view --stop {v['socket']})"
+                    )
+            key = str(monitor)
+            if connected != (key in r.disconnected):
+                raise DeskError(
+                    f"monitor {monitor} is already {'connected' if connected else 'disconnected'}"
+                )
+            size = win_display.change_connection(r, monitor, connected)
+            if connected:
+                del r.disconnected[key]
+            else:
+                r.disconnected[key] = size
+        return f"monitor {monitor} {'connected' if connected else 'disconnected'}"
     if spec.family == "windows":
-        screens = _windows(run, spec, resolution, scale, monitor)
+        active = [
+            i
+            for i in range(1, run.displays + 1)
+            if str(i) not in getattr(run, "disconnected", {})
+        ]
+        if monitor is not None and monitor not in active:
+            raise DeskError(f"monitor {monitor} is disconnected")
+        screens = _windows(
+            run, spec, resolution, scale, active.index(monitor) + 1 if monitor else None
+        )
         return "; ".join(
             f"monitor {i}: {s['width']}x{s['height']}, scale {s['scale']} %"
-            for i, s in enumerate(screens, 1)
+            for i, s in zip(active, screens, strict=True)
             if monitor in (None, i)
         )
     else:
@@ -115,12 +157,13 @@ def _windows(run, spec: ImageSpec, resolution, scale, monitor):
             file=sys.stderr,
         )
         guest.reboot(run.ssh_port, spec)
-        if run.displays > 1:
+        if run.displays > 1 and not getattr(run, "disconnected", {}):
             arrange(run)
         screens = win_display.change(run, resolution, None, monitor)
-    if len(screens) != run.displays:
+    expected = run.displays - len(getattr(run, "disconnected", {}))
+    if len(screens) != expected:
         raise DeskError(
-            f"Windows reports {len(screens)} monitors instead of {run.displays}"
+            f"Windows reports {len(screens)} monitors instead of {expected}"
         )
     for i, s in enumerate(screens, 1):
         if monitor in (None, i) and scale is not None and s["scale"] != scale:

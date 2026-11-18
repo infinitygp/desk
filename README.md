@@ -505,6 +505,8 @@ journalctl --user -u desk-maintain  # output of the last runs
 - Screens are put side by side into one screenshot; pointer events go to the console of the monitor
   under the point, on Windows through the agent for all but the primary one, which is all its
   absolute tablet reaches.
+- Windows can disconnect and restore secondary monitors in its display settings. The GPUs
+  stay attached; desk saves the previous mode and only includes active outputs in screenshots.
 - Windows changes DPI in the desktop session, using the per-source relative scale steps of
   `DisplayConfigSetDeviceInfo` ([packet definitions](https://github.com/lihas/windows-DPI-scaling-sample/blob/738ac18b7a7ce2d8fdc157eb825de9cb5eee0448/DPIHelper/DpiHelper.h)).
   The helper verifies the effective DPI of each monitor; the registry and a new sign-in are

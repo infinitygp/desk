@@ -10,7 +10,15 @@ from unittest import mock
 from desk import a11y, forward, monitors, win_display
 from desk.config import DeskError, load_image
 
-RUN = SimpleNamespace(id="t", agent_port=1, ssh_port=1, scale=None, displays=1, image="windows-11")
+RUN = SimpleNamespace(
+    id="t",
+    agent_port=1,
+    ssh_port=1,
+    scale=None,
+    displays=1,
+    disconnected={},
+    image="windows-11",
+)
 
 
 class Focus(unittest.TestCase):
@@ -132,6 +140,19 @@ class WinSettings(unittest.TestCase):
 
 
 class Scale(unittest.TestCase):
+    def test_connection_requires_guest_confirmation(self):
+        run = SimpleNamespace(displays=2, disconnected={})
+        refused = {"code": 1, "stdout": "Expected 1 active monitors,\nfound 2"}
+        with (
+            mock.patch("desk.winagent.request", return_value=refused),
+            self.assertRaisesRegex(
+                DeskError,
+                "^Windows display configuration failed: Expected 1 active monitors, found 2$",
+            ),
+        ):
+            win_display.change_connection(run, 2, False)
+        self.assertEqual(run.disconnected, {})
+
     def test_a_registry_that_refuses_costs_no_reboot(self):
         refused = subprocess.CompletedProcess([], 1, b"", b"Requested registry access is not allowed.")
         with mock.patch.object(win_display, "change", side_effect=win_display.LiveUnavailable("unsupported")), \

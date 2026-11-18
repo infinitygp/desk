@@ -270,7 +270,8 @@ browser machine again.
 For two monitors side by side, set `displays = 2` at the top of the scenario. Counts above one
 require Windows for `image` and every entry in `images`, and force a cold boot (~5 min) on each
 run, including repeats. Omit `displays` or set it to `1` for the usual single-monitor start. A `display = {monitor = 2, scale = 125}` step changes the
-second monitor in the running desktop; see [system.md](system.md) for modes and sign-in fallback.
+second monitor in the running desktop. `display = {monitor = 2, connected = false}` disconnects
+it in Windows display settings; `connected = true` restores it. See [system.md](system.md).
 
 ```toml
 image = "fedora-44-gnome-cockpit"

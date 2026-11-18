@@ -30,6 +30,22 @@ Runs start at 1280x800, 100 %, one monitor. To test layouts and DPI handling:
   (Windows maps QEMU's tablet onto the primary monitor only), so elevated windows there do not
   get clicks. `desk display` prints the monitors. In a scenario, set `displays = 2` at the top
   for the same layout and cold boot; the default of one monitor allows a warm start.
+- `desk display --monitor 2 --disconnect` disables that monitor in Windows display settings.
+  Windows moves windows off the removed screen; `desk display`, screenshots and pointer
+  coordinates cover only the active monitors. `desk display --monitor 2 --connect` restores
+  its resolution and place in the row. Monitor numbers keep their original identities.
+  The primary monitor (1) cannot be disconnected. This simulates a desktop topology change;
+  the virtual GPU stays plugged in. A change Windows does not confirm exits 2.
+  The same round trip in a scenario:
+
+  ```toml
+  image = "windows-11"
+  displays = 2
+  [[step]]
+  display = { monitor = 2, connected = false }
+  [[step]]
+  display = { monitor = 2, connected = true }
+  ```
 
 ## Extra disks
 

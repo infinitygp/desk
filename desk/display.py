@@ -39,28 +39,34 @@ _SHIFTED = {
 _ALTGR = {"ą": "a", "ć": "c", "ę": "e", "ł": "l", "ń": "n", "ó": "o", "ś": "s", "ź": "x", "ż": "z"}
 
 
-def _heads(dom: libvirt.virDomain) -> int:
+def _heads(dom: libvirt.virDomain) -> list[int]:
     """Monitors: one virtio GPU each (see virt.prepare_domain_xml)."""
-    return max(1, len(ET.fromstring(dom.XMLDesc(0)).findall("devices/video")))
+    count = max(1, len(ET.fromstring(dom.XMLDesc(0)).findall("devices/video")))
+    run = vars(dom).get("_desk_run")
+    return [i for i in range(count) if not run or str(i + 1) not in run.disconnected]
 
 
 def screen_sizes(dom: libvirt.virDomain) -> list[tuple[int, int]]:
-    return [png_size(_head_png(dom, i)) for i in range(_heads(dom))]
+    return [png_size(_head_png(dom, i)) for i in _heads(dom)]
 
 
 def screenshot(dom: libvirt.virDomain) -> bytes:
     """The screen as PNG; several monitors side by side, left to right, top-aligned, which is
     how desk arranges them in the guest (monitors.apply), so guest coordinates match."""
     heads = _heads(dom)
-    if heads == 1:
+    if len(heads) == 1:
         return _head_png(dom, 0)
     try:
         from PIL import Image
     except ImportError:
-        raise DeskError("several monitors need Pillow on the host to put the pictures together "
-                        "(dnf install python3-pillow)") from None
-    images = [Image.open(io.BytesIO(_head_png(dom, i))).convert("RGB") for i in range(heads)]
-    canvas = Image.new("RGB", (sum(i.width for i in images), max(i.height for i in images)))
+        raise DeskError(
+            "several monitors need Pillow on the host to put the pictures together "
+            "(dnf install python3-pillow)"
+        ) from None
+    images = [Image.open(io.BytesIO(_head_png(dom, i))).convert("RGB") for i in heads]
+    canvas = Image.new(
+        "RGB", (sum(i.width for i in images), max(i.height for i in images))
+    )
     x = 0
     for image in images:
         canvas.paste(image, (x, 0))

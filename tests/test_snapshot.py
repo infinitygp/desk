@@ -12,6 +12,7 @@ class Run:
     """A run whose guest is a file: saving it writes the memory image, and nothing restores."""
     clock_offset = 0.0
     usbvfiod = {}
+    disconnected = {}
 
     def __init__(self, d, save_fails: bool = False):
         self.dir, self.save_fails, self.destroyed = Path(d), save_fails, False
@@ -111,10 +112,13 @@ class SaveRestore(unittest.TestCase):
     def test_restore(self):
         with tempfile.TemporaryDirectory() as tmp:
             run = Run(tmp)
+            run.disconnected = {"2": [1280, 800]}
             snapshot.save(run, "clean")
+            run.disconnected = {}
             (run.dir / "disk.qcow2").write_text("later")
             snapshot.restore(run, "clean")
             self.assertTrue(run.destroyed)
+            self.assertEqual(run.disconnected, {"2": [1280, 800]})
             self.assertEqual((run.dir / "disk.qcow2").read_text(), "disk")
 
 

@@ -160,6 +160,8 @@ class Run:
     # Where QEMU serves the VNC displays of monitors 2 and on (N.sock, desk view --monitor N);
     # "": one monitor, or none could be made (monitor_sockets).
     vnc_dir: str = ""
+    # Physical monitor number -> resolution before disconnecting it in Windows.
+    disconnected: dict[str, list[int]] = field(default_factory=dict)
 
     @property
     def since(self) -> float:
@@ -228,6 +230,9 @@ class Run:
                 return None
         except libvirt.libvirtError:
             return None  # destroyed meanwhile by another command (desk down, gc)
+        # Screen readers also operate on bare domains (e.g. during image setup).
+        # On a run, Windows can disable an output while its GPU remains in the XML.
+        d._desk_run = self
         return d
 
     def dom(self) -> libvirt.virDomain:

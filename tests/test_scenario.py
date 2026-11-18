@@ -76,6 +76,33 @@ class TypePostcheck(unittest.TestCase):
 
 
 class Load(unittest.TestCase):
+    def test_display_connection_needs_a_secondary_windows_monitor(self):
+        for image, count, monitor, state, valid in [
+            ("windows-11", 2, 2, "false", True),
+            ("windows-11", 3, 3, "true", True),
+            ("windows-11", 1, 2, "true", False),
+            ("windows-11", 3, 1, "false", False),
+            ("windows-11", 2, 3, "false", False),
+            ("windows-11", 2, 2, "1", False),
+            ("arch-gnome", 2, 2, "false", False),
+        ]:
+            path = write(
+                f'image = "{image}"\ndisplays = {count}\n[[step]]\n'
+                f"display = {{monitor = {monitor}, connected = {state}}}"
+            )
+            self.addCleanup(path.unlink)
+            with self.subTest(image=image, count=count, monitor=monitor, state=state):
+                if not valid:
+                    with self.assertRaises(DeskError):
+                        scenario.load(path)
+                else:
+                    (step,) = scenario.load(path)["step"]
+                    with mock.patch("desk.monitors.apply") as apply:
+                        scenario._step("run", "spec", None, step)
+                    apply.assert_called_once_with(
+                        "run", "spec", monitor=monitor, connected=state == "true"
+                    )
+
     def test_display_settings_checked_and_delivered_to_one_monitor(self):
         for options, valid in [('resolution = "1280x1024", scale = 125, monitor = 2', True),
                                ('monitor = 3, scale = 125', False), ('scale = 120', False),

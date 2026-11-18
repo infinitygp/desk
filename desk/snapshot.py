@@ -79,8 +79,16 @@ def save(run, name: str, force: bool = False) -> float:
 
         observe.snapshot_saved(run, new)
         # Written last: a snapshot without it is not one (listing, restore).
-        (new / "meta.json").write_text(json.dumps({"created": time.time(), "seconds": round(took, 1),
-                                                   "clock_offset": run.clock_offset}))
+        (new / "meta.json").write_text(
+            json.dumps(
+                {
+                    "created": time.time(),
+                    "seconds": round(took, 1),
+                    "clock_offset": run.clock_offset,
+                    "disconnected": run.disconnected,
+                }
+            )
+        )
         if d.exists():
             d.rename(old)
         new.rename(d)
@@ -123,6 +131,7 @@ def restore(run, name: str) -> float:
     # The clock as it was then too: whether the guest syncs its time is part of its disk.
     with run.edit() as r:
         r.clock_offset = meta.get("clock_offset", 0.0)
+        r.disconnected = meta.get("disconnected", {})
     # Extra disks as they were then: the saved guest has exactly those plugged in.
     shutil.rmtree(disks.directory(run), ignore_errors=True)
     if (d / "disks").exists():
